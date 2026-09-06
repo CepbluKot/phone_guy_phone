@@ -96,7 +96,9 @@ SHA256 исходного ZIP: `1ff846db9b9ab508b15dff3891da113d004047a378662e2a
 
 `rvc_service/requirements.lock` — экспорт точных версий проверенного runtime,
 без хешей; это НЕ корневой hash-locked файл DSP. Для PyTorch нужен cu118 index,
-указанный в заголовке. Не переустанавливать уже рабочее окружение без причины.
+указанный в заголовке. Venv принадлежит `ubuntu:ubuntu`, mode775; scoped deploy
+проверяет pins read-only и fail-closed, но не пишет marker/chown/pip install.
+Не переустанавливать уже рабочее окружение без отдельного плана и rollback.
 Не отключать `TORCH_FORCE_WEIGHTS_ONLY_LOAD=1`, не заменять модель случайным архивом.
 
 ## 6. Как устроен аудиопоток
@@ -166,7 +168,7 @@ git log -8 --oneline
 node --test tests/*.test.cjs
 ```
 
-Последняя локальная проверка Task4:66 Python +19 Node проходят; две известные
+Последняя локальная проверка Task4:73 Python +19 Node проходят; две известные
 deprecation warnings из Starlette/AnyIO. `.venv` — ссылка на окружение основного
 checkout, использовать только unit-тесты. Не запускать здесь Engine/GPU inference.
 
@@ -213,6 +215,8 @@ RVC-health ожидается `status:ready, active:false, running:false, queued
     запуск, смена задержки, DSP-тон. Не записывать микрофон пользователя.
 11. Проверить откат по сохранённым конкретным targets. При провале live-гейтов
     вернуть старые image/UI/Caddy; оставить диагностические логи без аудио.
+    Ручная команда: `./deploy/deploy-rvc.sh rollback <UTC-stamp>`; успех требует
+    финальной проверки image/tree/Caddy/service-state/health, exit70 — failure.
 12. Обновить acceptance фактическими числами, провести финальный review всей ветки,
     повторить тесты и зафиксировать только scoped changes. Merge/push отдельно
     согласовать; не удалять worktree/исследования автоматически.

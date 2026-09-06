@@ -52,8 +52,8 @@ cd /home/oleg/Documents/voice-changer/.worktrees/rvc-streaming
 ```
 
 Скрипт сначала выполняет Python/Node unit-тесты. Затем он сохраняет конкретный
-`voice-changer:rollback-<UTC stamp>`, только небольшой source/UI архив, Caddy,
-unit, прежнюю release-ссылку и enabled-state в
+`voice-changer:rollback-<UTC stamp>`, точный архив дерева `web`, изменяемые
+source-файлы, Caddy, unit, прежнюю release-ссылку, active/enabled-state в
 `/opt/voice-rvc/backups/<UTC stamp>`. Каталог `experiments` не копируется.
 RVC release запускается и проходит paced loopback speech gate до смены UI.
 Caddy валидируется до reload; добавляется только `/ws/rvc` на
@@ -77,10 +77,24 @@ send drift, лаг, очередь, RAM/GPU и рестарты. WAV-артеф�
 утверждённые synthetic fixtures и нужны для отдельного прослушивания швов.
 Тест не использует микрофон и не доказывает акустическую end-to-end задержку.
 
-Для ручного отката использовать stamp, напечатанный доставкой. Команды уже
-реализованы в failure trap `deploy-rvc.sh`; перед ручным повтором сначала
-проверить наличие `/opt/voice-rvc/backups/<stamp>` и соответствующего
-`voice-changer:rollback-<stamp>`. Не выбирать «последний» тег вслепую.
+Существующий `/opt/voice-rvc/venv` используется только если все установленные
+версии точно совпадают с `rvc_service/requirements.lock` и `pip check` чист.
+Скрипт не меняет owner/mode, не пишет marker и не переустанавливает этот venv.
+При несовпадении pins доставка останавливается до переключения UI; исправлять
+окружение следует отдельно с новым явным планом, сохранив старое для отката.
+
+Для ручного отката использовать только stamp, напечатанный доставкой:
+
+```bash
+./deploy/deploy-rvc.sh rollback <YYYYMMDDTHHMMSSZ>
+```
+
+Эта команда вызывает ту же реализацию, что failure trap, и завершается успешно
+только после проверки image identity, точного web/source/Caddy, release-ссылки,
+active/enabled-state, Caddy config и health. `ROLLBACK_FAILED` или exit70 означает
+незавершённый откат и требует ручного разбора. Перед запуском проверить наличие
+`/opt/voice-rvc/backups/<stamp>` и `voice-changer:rollback-<stamp>`; не выбирать
+«последний» тег вслепую.
 
 ### Старый DSP deploy
 
