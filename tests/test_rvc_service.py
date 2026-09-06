@@ -240,7 +240,8 @@ def test_inference_deadline_retains_worker_ownership(monkeypatch):
                 engine.release.set()
 
 
-def test_asgi_task_cancellation_cannot_release_running_worker():
+@pytest.mark.parametrize("repeat_interval", [0, 0.02])
+def test_asgi_task_cancellation_cannot_release_running_worker(repeat_interval):
     import json
 
     async def scenario():
@@ -268,7 +269,7 @@ def test_asgi_task_cancellation_cannot_release_running_worker():
                     await incoming.put({"type": "websocket.receive", "bytes": FRAME})
                 assert await asyncio.to_thread(engine.entered.wait, 2)
                 task.cancel()
-                await asyncio.sleep(0.02)
+                await asyncio.sleep(repeat_interval)
                 assert not task.done()
                 assert app.state.active
                 # A second cancellation must also be unable to skip the drain.
@@ -282,5 +283,73 @@ def test_asgi_task_cancellation_cannot_release_running_worker():
                     await task
             assert not app.state.active
             assert outgoing.qsize() == 1  # close only, no stale metrics or PCM
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("held_type", ["metrics", "binary"])
+@pytest.mark.parametrize("disconnect", [False, True])
+def test_stop_or_disconnect_invalidates_backpressured_output(held_type, disconnect):
+    import json
+
+    async def scenario():
+        app = create_app(Converter)
+        incoming = asyncio.Queue()
+        outgoing = asyncio.Queue()
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        events = []
+        scope = {"type": "websocket", "asgi": {"version": "3.0"},
+                 "scheme": "ws", "path": "/ws/rvc", "raw_path": b"/ws/rvc",
+                 "query_string": b"", "root_path": "",
+                 "headers": [(b"origin", ORIGIN["origin"].encode())],
+                 "client": ("127.0.0.1", 1234), "server": ("127.0.0.1", 8090),
+                 "subprotocols": []}
+
+        async def receive():
+            message = await incoming.get()
+            if (message["type"] == "websocket.disconnect"
+                    or message.get("text") == '{"type":"stop"}'):
+                events.append("observed_stop")
+            return message
+
+        async def send(message):
+            if message["type"] == "websocket.send":
+                kind = json.loads(message["text"])["type"] if "text" in message else "binary"
+                if kind == held_type:
+                    entered.set()
+                    await release.wait()
+                events.append(kind)
+            await outgoing.put(message)
+
+        async with app.router.lifespan_context(app):
+            task = asyncio.create_task(app(scope, receive, send))
+            try:
+                await incoming.put({"type": "websocket.connect"})
+                assert (await outgoing.get())["type"] == "websocket.accept"
+                await incoming.put({"type": "websocket.receive", "text": json.dumps(START)})
+                while json.loads((await outgoing.get())["text"])["type"] != "ready":
+                    pass
+                for _ in range(105):
+                    await incoming.put({"type": "websocket.receive", "bytes": FRAME})
+                await asyncio.wait_for(entered.wait(), 2)
+                if disconnect:
+                    await incoming.put({"type": "websocket.disconnect", "code": 1000})
+                else:
+                    await incoming.put({"type": "websocket.receive", "text": '{"type":"stop"}'})
+                # Receiver and held sender become runnable in the same loop turn.
+                release.set()
+                await asyncio.wait_for(task, 2)
+                after_stop = events[events.index("observed_stop") + 1:]
+                assert "metrics" not in after_stop
+                assert "binary" not in after_stop
+                if not disconnect:
+                    assert after_stop == ["stopped"]
+                assert not app.state.active
+            finally:
+                release.set()
+                if not task.done():
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
 
     asyncio.run(scenario())

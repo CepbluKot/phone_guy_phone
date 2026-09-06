@@ -48,6 +48,21 @@ async def _drain(future):
         future.result()
 
 
+async def _complete_cleanup(cleanup):
+    """Keep all cleanup steps alive through repeated outer task cancellation."""
+    with anyio.CancelScope(shield=True):
+        task = asyncio.create_task(cleanup)
+        cancelled = False
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                cancelled = True
+        task.result()
+        if cancelled:
+            raise asyncio.CancelledError
+
+
 class Session:
     def __init__(self, socket, state):
         self.socket = socket
@@ -55,35 +70,45 @@ class Session:
         self.chunks = Chunker()
         self.queue = asyncio.Queue(maxsize=1)
         self.inflight = None
+        self.sender = None
         self.accept_audio = False
         self.progress = time.monotonic()
         self.output_start = 0
         self.consumed = 0
 
     async def receive(self):
-        while True:
-            message = await self.socket.receive()
-            if message["type"] == "websocket.disconnect":
-                return "disconnected"
-            if message.get("text") is not None:
-                try:
-                    control = json.loads(message["text"])
-                except (ValueError, TypeError):
-                    raise SessionError("invalid_frame") from None
-                if isinstance(control, dict) and control.get("type") == "stop":
-                    return "stopped"
-                raise SessionError("invalid_frame")
-            frame = message.get("bytes")
-            if not self.accept_audio or frame is None or len(frame) != FRAME_BYTES:
-                raise SessionError("invalid_frame")
-            window = self.chunks.push(frame)
-            self.progress = time.monotonic()
-            if window is not None:
-                self.consumed += HOP_SAMPLES
-                try:
-                    self.queue.put_nowait((window, self.consumed))
-                except asyncio.QueueFull:
-                    raise SessionError("overloaded") from None
+        try:
+            while True:
+                message = await self.socket.receive()
+                if message["type"] == "websocket.disconnect":
+                    return "disconnected"
+                if message.get("text") is not None:
+                    try:
+                        control = json.loads(message["text"])
+                    except (ValueError, TypeError):
+                        raise SessionError("invalid_frame") from None
+                    if isinstance(control, dict) and control.get("type") == "stop":
+                        return "stopped"
+                    raise SessionError("invalid_frame")
+                frame = message.get("bytes")
+                if not self.accept_audio or frame is None or len(frame) != FRAME_BYTES:
+                    raise SessionError("invalid_frame")
+                window = self.chunks.push(frame)
+                self.progress = time.monotonic()
+                if window is not None:
+                    self.consumed += HOP_SAMPLES
+                    try:
+                        self.queue.put_nowait((window, self.consumed))
+                    except asyncio.QueueFull:
+                        raise SessionError("overloaded") from None
+        finally:
+            # Invalidate in the receiver's turn, before the supervisor wakes up.
+            self.invalidate()
+
+    def invalidate(self):
+        self.accept_audio = False
+        if self.sender is not None:
+            self.sender.cancel()
 
     async def convert(self):
         while True:
@@ -103,8 +128,16 @@ class Session:
             metadata = {"type": "metrics", "outputStart": self.output_start,
                         "outputSamples": HOP_SAMPLES, "consumedSamples": consumed,
                         "processingMs": round((time.perf_counter() - begun) * 1000, 3)}
-            await asyncio.wait_for(self.socket.send_json(metadata), STALL_SECONDS)
-            await asyncio.wait_for(self.socket.send_bytes(pcm), STALL_SECONDS)
+            # timeout keeps the send in this task. wait_for would create a child
+            # send task that could resume before cancellation reaches that child.
+            if not self.accept_audio:
+                return
+            async with asyncio.timeout(STALL_SECONDS):
+                await self.socket.send_json(metadata)
+            if not self.accept_audio:
+                return
+            async with asyncio.timeout(STALL_SECONDS):
+                await self.socket.send_bytes(pcm)
             self.output_start += HOP_SAMPLES
             self.progress = time.monotonic()
             del converted, pcm, window
@@ -219,7 +252,8 @@ def create_app(engine_factory=_default_engine):
                                     "outputSamples": HOP_SAMPLES})
             session.accept_audio = True
             session.progress = time.monotonic()
-            tasks.extend([asyncio.create_task(session.convert()),
+            session.sender = asyncio.create_task(session.convert())
+            tasks.extend([session.sender,
                           asyncio.create_task(session.watchdog())])
             done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
             # Stop/disconnect takes precedence over a coincident conversion result.
@@ -241,9 +275,9 @@ def create_app(engine_factory=_default_engine):
         except (WebSocketDisconnect, RuntimeError):
             pass
         finally:
-            # Shield cleanup from ASGI disconnect cancellation. The concurrent
-            # future, unlike a cancelled asyncio wrapper, proves worker completion.
-            with anyio.CancelScope(shield=True):
+            session.invalidate()
+
+            async def cleanup():
                 for task in tasks:
                     task.cancel()
                 await asyncio.gather(*tasks, return_exceptions=True)
@@ -257,6 +291,10 @@ def create_app(engine_factory=_default_engine):
                 app.state.active = False
                 with suppress(RuntimeError, WebSocketDisconnect):
                     await socket.close()
+
+            # The whole sequence, including gather, belongs to a separate task.
+            # Repeated cancellation can only interrupt its shielded waiter.
+            await _complete_cleanup(cleanup())
 
     return app
 
