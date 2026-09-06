@@ -7,6 +7,9 @@
   attached exclusively as PCI `03:00.0`.
 - Private UI: `https://voice.lan.awesomeio.ru`; the name resolves only in the
   `lan.awesomeio.ru` private zone and Caddy listens on the VPN address.
+- Guest firewall: inbound traffic is denied by default. SSH is allowed from
+  the LAN and VPN; port `8080` is accepted only from the LAN and the VPN Caddy
+  host `10.19.87.1`.
 - Runtime source is copied from this laptop to `/opt/voice-changer` on the VM.
   The Git source of truth remains this local project.
 
