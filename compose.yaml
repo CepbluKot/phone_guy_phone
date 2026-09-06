@@ -1,8 +1,17 @@
 services:
   voice:
     build: .
+    image: voice-changer:current
     restart: unless-stopped
-    ports: ["8080:8080"]
+    ports: ["192.168.20.70:8080:8080"]
+    mem_limit: 512m
+    cpus: 2.0
+    pids_limit: 128
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
     read_only: true
     tmpfs: [/tmp]
     cap_drop: [ALL]

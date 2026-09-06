@@ -1,0 +1,8 @@
+[Unit]
+Description=Refresh private voice TLS certificate from homelab certificate authority host
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh /opt/voice-changer/deploy/sync-cert.sh

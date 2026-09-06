@@ -1,5 +1,14 @@
-# Private Voice Changer
+# Phone Line
 
-Source of truth lives on this laptop. The service is deployed to a dedicated
-homelab VM and is available only at `https://voice.lan.awesomeio.ru` over VPN.
-It processes microphone frames in memory and never stores audio.
+Приватная демка изменения голоса: https://voice.lan.awesomeio.ru через VPN.
+
+Наденьте наушники → «Проверить звук» → «Начать» → разрешите микрофон.
+Ползунки применяются на ходу. Код и документы хранятся на ноутбуке,
+приложение работает в выделенной VM 209 на сервере.
+
+- [Эксплуатация и диагностика](docs/OPERATIONS.md)
+- [Аудит и проверка](docs/AUDIT_2026-09-06.md)
+- [Исходная спецификация](docs/superpowers/specs/2026-09-06-phone-guy-voice-demo-design.md)
+
+Это телефонный DSP-эффект с изменением высоты; RVC-модель и виртуальный
+микрофон для сторонних приложений в текущую демку не входят.

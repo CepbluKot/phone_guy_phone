@@ -1,0 +1,8 @@
+**/__pycache__
+.venv
+.git
+.pytest_cache
+infra
+docs
+tests
+deploy
