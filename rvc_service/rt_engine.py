@@ -1,0 +1,143 @@
+"""Experimental persistent adapter for infer/rtrvc.py (the streaming engine
+realtime_gui.py uses), as an alternative to rvc_service/engine.py's use of
+the offline infer/vc/pipeline.py. See docs/LATENCY_RESEARCH_SONNET_2026-09-07.md
+for why. Not wired into rvc_service/server.py -- this is a research prototype.
+"""
+from __future__ import annotations
+
+from collections.abc import Iterator
+from contextlib import contextmanager
+import os
+from pathlib import Path
+import sys
+
+import numpy as np
+
+from .rt_chunks import resample_to
+
+DEFAULT_ASSETS_ROOT = Path("/opt/voice-changer/experiments/phoneguy")
+MODEL_NAME = "PhoneGuyfnaf1V1.pth"
+INDEX_NAME = "added_IVF359_Flat_nprobe_1_PhoneGuyfnaf1V1_v2.index"
+MODEL_INPUT_RATE = 16_000
+SAMPLE_RATE = 48_000
+
+
+@contextmanager
+def _working_directory(path: Path) -> Iterator[None]:
+    previous = Path.cwd()
+    os.chdir(path)
+    try:
+        yield
+    finally:
+        os.chdir(previous)
+
+
+class RtEngine:
+    """Load Phone Guy once via infer/rtrvc.py and convert 16kHz rolling
+    windows block-by-block, keeping the pitch cache alive across calls."""
+
+    def __init__(
+        self,
+        assets_root: str | Path | None = None,
+        f0method: str = "rmvpe",
+        index_rate: float = 0.6,
+    ) -> None:
+        root = Path(
+            assets_root if assets_root is not None else os.environ.get("RVC_ASSETS_ROOT", DEFAULT_ASSETS_ROOT)
+        ).resolve()
+        self.f0method = f0method
+        self._load(root, index_rate)
+
+    def _load(self, root: Path, index_rate: float) -> None:
+        upstream = root / "upstream"
+        model = root / "models" / MODEL_NAME
+        index = root / "models" / INDEX_NAME
+        for path, description in (
+            (upstream, "pinned RVC source"),
+            (model, "RVC model"),
+            (index, "RVC index"),
+        ):
+            if not path.exists():
+                raise FileNotFoundError(f"{description} not found: {path}")
+
+        os.environ.update(
+            TORCH_FORCE_WEIGHTS_ONLY_LOAD="1",
+            OMP_NUM_THREADS="2",
+            OPENBLAS_NUM_THREADS="1",
+            HF_HUB_OFFLINE="1",
+            rmvpe_root=str(upstream / "assets" / "rmvpe"),
+        )
+        upstream_text = str(upstream)
+        if upstream_text in sys.path:
+            sys.path.remove(upstream_text)
+        sys.path.insert(0, upstream_text)
+
+        with _working_directory(upstream):
+            import torch
+            from configs.config import Config
+            from infer.rtrvc import RVC
+
+            torch.set_num_threads(2)
+            original_argv = sys.argv[:]
+            sys.argv = [sys.argv[0]]
+            try:
+                config = Config()
+            finally:
+                sys.argv = original_argv
+            if not str(config.device).startswith("cuda"):
+                raise RuntimeError("RtEngine requires a supported CUDA GPU")
+            config.is_half = False
+            config.n_cpu = 2
+
+            self._torch = torch
+            self._rvc = RVC(0, 0, str(model), str(index), index_rate, config)
+            self.tgt_sr = self._rvc.tgt_sr
+            self._device = config.device
+        # infer/rtrvc.py's get_f0_rmvpe/get_f0_fcpe lazy-load their model on
+        # the *first inference call* (not during RVC.__init__ above) using a
+        # path relative to cwd, not the rmvpe_root env var pipeline.py reads
+        # -- so cwd must still be `upstream` for every convert_block() call,
+        # not just while loading. os.chdir is process-global: fine here and
+        # in rvc_service/server.py's single-GPU-worker-thread model (only one
+        # inference call is ever in flight), but would race with any other
+        # thread doing relative-path I/O in the same process -- flagged for
+        # whoever does the real server integration, not fixed further here.
+        self._upstream = upstream
+
+    def warmup(self, block_16k: int, skip_head_frames: int, return_length_frames: int) -> None:
+        zeros = self._torch.zeros(
+            skip_head_frames * 160 + return_length_frames * 160 // 2 + block_16k,
+            device=self._device,
+            dtype=self._torch.float32,
+        )
+        self.convert_block(zeros.cpu().numpy(), block_16k, skip_head_frames, return_length_frames)
+
+    def convert_block(
+        self,
+        window_16k: np.ndarray,
+        block_16k: int,
+        skip_head_frames: int,
+        return_length_frames: int,
+    ) -> np.ndarray:
+        """Run one rtrvc.py inference call; returns target-sample-rate audio
+        covering the new crossfade+search+block portion (see RtStitcher)."""
+        audio = np.asarray(window_16k, dtype=np.float32)
+        if not np.isfinite(audio).all():
+            raise ValueError("RtEngine input window must contain only finite samples")
+        chunk = self._torch.from_numpy(audio).to(self._device)
+        with _working_directory(self._upstream), self._torch.no_grad():
+            out = self._rvc.infer(chunk, block_16k, skip_head_frames, return_length_frames, self.f0method)
+        result = out.detach().cpu().numpy().astype(np.float32)
+        if not np.isfinite(result).all():
+            raise RuntimeError("rtrvc.py returned non-finite audio")
+        return result
+
+    def convert_block_48k(
+        self,
+        window_16k: np.ndarray,
+        block_16k: int,
+        skip_head_frames: int,
+        return_length_frames: int,
+    ) -> np.ndarray:
+        out = self.convert_block(window_16k, block_16k, skip_head_frames, return_length_frames)
+        return resample_to(out, self.tgt_sr, SAMPLE_RATE)

@@ -4,6 +4,14 @@ and partial vocoder decode via skip_head/return_length) at a small block_time,
 reconstructed with a SOLA-style crossfade generalizing the search/blend
 already used by rvc_service/chunks.py. Read-only against the shared VM;
 loads its own model instance and exits.
+
+SUPERSEDED: the crossfade stitching here double-counts the overlap region
+(emits crossfade_n+block_n samples every call instead of exactly block_n),
+which is why 6s of input rendered as 7.2s of output. Kept for the debugging
+trail; the fixed, unit-tested version is rvc_service/rt_chunks.py's
+RtStitcher (a direct port of chunks.Chunker.render), exercised end-to-end by
+rt_stream_demo.py, which reconstructs exact-duration audio -- see
+docs/LATENCY_RESEARCH_SONNET_2026-09-07.md section 9.
 """
 from __future__ import annotations
 
