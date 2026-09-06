@@ -1,0 +1,13 @@
+{
+  "engine": "infer/rtrvc.py (the streaming engine realtime_gui.py ships with, NOT used by rvc_service today)",
+  "host": "VM209 (ubuntu@192.168.20.70), GTX 1050 Ti 4GiB, is_half=False",
+  "sample": "experiments/phoneguy/samples/input/ru.wav, looped to 8s",
+  "method": "torch.cuda.synchronize() around RVC.infer(), same RVC object reused across configs (last_rvc=), 9 sequential blocks per config with the first 2 dropped (cache fill-in / first-call model loads)",
+  "results": [
+    {"config": "official default block=.25 extra=2.5", "block_s": 0.25, "extra_s": 2.5, "p50_ms": 116.0, "p95_ms": 117.0, "min_ms": 115.2, "rtf_p50": 0.464, "rtf_p95": 0.468},
+    {"config": "block=.4 extra=1.5", "block_s": 0.4, "extra_s": 1.5, "p50_ms": 111.4, "p95_ms": 112.0, "min_ms": 110.8, "rtf_p50": 0.278, "rtf_p95": 0.28},
+    {"config": "block=.6 extra=1.0", "block_s": 0.6, "extra_s": 1.0, "p50_ms": 130.4, "p95_ms": 130.7, "min_ms": 128.6, "rtf_p50": 0.217, "rtf_p95": 0.218},
+    {"config": "block=.15 extra=2.5 (aggressive)", "block_s": 0.15, "extra_s": 2.5, "p50_ms": 109.5, "p95_ms": 109.6, "min_ms": 109.3, "rtf_p50": 0.73, "rtf_p95": 0.73}
+  ],
+  "reading": "Per-call cost is roughly flat (~110-130ms) across this whole block_time/extra_time range, because F0 is cached incrementally (only the new block is re-estimated, infer/rtrvc.py:281-296) and the vocoder only decodes `return_length` samples via skip_head (infer/module/models.py SynthesizerTrnMs768NSFsid.infer), not the whole window. extra_time (history context) barely moves the cost -- block_time is the only real lever, and 0.25-0.4s leaves 2-4x real-time margin on this GPU, vs. the offline pipeline's ~350ms floor. At block=0.15s the margin (rtf=0.73) is thin for a 4GB Pascal card and not recommended as a first target."
+}
