@@ -60,6 +60,9 @@ experiment's resolved model dependency versions plus FastAPI 0.141.1,
 Starlette 1.6.0, uvicorn 0.34.2, websockets 15.0.1. `pip check` passed.
 Dedicated non-login `voice-rvc` account, video/render supplemental groups.
 Verified model, HuBERT, RMVPE and venv are readable by that account.
+The existing venv is owned by `ubuntu:ubuntu` with mode775; rollout therefore
+verifies exact pins read-only and fails closed on mismatch. It does not chown,
+write a marker or install into the shared existing environment.
 
 ## Remaining acceptance gates
 
@@ -100,7 +103,7 @@ Task4 rollout tooling is now implemented but has not yet been run against the
 VM: scoped `deploy/deploy-rvc.sh`, exact native Caddy `/ws/rvc` route and
 `tests/live-rvc.py`. Focused tests exercise exact20ms pacing/sample continuity,
 runtime-stat parsing, scoped staging and automatic rollback on a failed health
-gate. Final local verification:66 Python passed with the same two dependency
+gate. Final local verification after rollback hardening:73 Python passed with the same two dependency
 warnings;19 Node passed. This is source evidence only. New UI/Caddy route remain
 undeployed until the controller runs and records the gates below.
 
