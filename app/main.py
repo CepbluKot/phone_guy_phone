@@ -20,7 +20,7 @@ async def headers(request, call_next):
     response = await call_next(request)
     response.headers['Cache-Control'] = 'no-store'
     response.headers['X-Content-Type-Options'] = 'nosniff'
-    response.headers['Permissions-Policy'] = 'microphone=(self)'
+    response.headers.setdefault('Permissions-Policy', 'microphone=(self)')
     response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' wss://vm-voice-1.lan.awesomeio.ru; frame-ancestors 'none'; base-uri 'none'"
     return response
 
@@ -33,6 +33,12 @@ def healthz():
 @app.get('/')
 def index():
     return FileResponse(web / 'index.html')
+
+
+@app.get('/conference/')
+def conference_index():
+    return FileResponse(web / 'conference' / 'index.html',
+                        headers={'Permissions-Policy': 'microphone=()'})
 
 
 @app.websocket('/ws/audio')

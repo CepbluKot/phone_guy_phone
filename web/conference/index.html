@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Phone Line — конференция</title>
+  <link rel="stylesheet" href="/static/conference/style.css">
+</head>
+<body><main>
+  <p class="eyebrow">PRIVATE VPN VOICE LAB</p>
+  <h1>КОНФЕРЕНЦИЯ PHONE GUY</h1>
+  <p>Только прослушивание демонстрационной комнаты. Эта страница не запрашивает и не передаёт микрофон.</p>
+  <p id="status" role="status">Готово к подключению</p>
+  <div class="controls">
+    <button id="listen">Слушать</button>
+    <button id="disconnect" disabled>Отключиться</button>
+  </div>
+  <section aria-labelledby="room-heading">
+    <h2 id="room-heading">Комната</h2>
+    <p id="room-status">Не подключена</p>
+    <dl class="roles">
+      <div><dt>A</dt><dd id="role-a">Гость A — синтетический участник</dd></div>
+      <div><dt>B</dt><dd id="role-b">Гость B — синтетический участник</dd></div>
+      <div><dt>Phone Guy</dt><dd id="role-phoneguy">Phone Guy AI — голос комнаты</dd></div>
+    </dl>
+  </section>
+  <label>Уровень комнаты <meter id="output" min="0" max="1" value="0"></meter></label>
+  <p>Звук остаётся в этой вкладке. Для выхода нажмите «Отключиться».</p>
+</main><script src="/static/conference/app.js"></script></body>
+</html>
