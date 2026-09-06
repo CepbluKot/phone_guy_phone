@@ -1,0 +1,50 @@
+services:
+  asterisk:
+    image: "voice-conference-asterisk:${CONFERENCE_TAG:?CONFERENCE_TAG is required}"
+    restart: unless-stopped
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 128
+    ports: ["127.0.0.1:8092:8092"]
+    volumes:
+      - "${CONFERENCE_RUNTIME:?CONFERENCE_RUNTIME is required}/asterisk/ari.conf:/etc/asterisk/ari.conf:ro"
+      # The container must listen on its eth0 address for Docker's loopback-only
+      # port publication; the host-visible ARI socket remains 127.0.0.1:8092.
+      - "${CONFERENCE_RUNTIME}/asterisk/http.conf:/etc/asterisk/http.conf:ro"
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/run/asterisk:uid=10001,gid=10001,mode=0755
+      - /var/log/asterisk:uid=10001,gid=10001,mode=0755
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    logging:
+      driver: json-file
+      options: {max-size: 5m, max-file: "2"}
+
+  controller:
+    image: "voice-conference-controller:${CONFERENCE_TAG:?CONFERENCE_TAG is required}"
+    restart: unless-stopped
+    network_mode: host
+    depends_on:
+      asterisk:
+        condition: service_healthy
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 128
+    environment:
+      CONFERENCE_ARI_URL: http://127.0.0.1:8092/ari
+      CONFERENCE_ARI_USERNAME: phoneguy
+      CONFERENCE_FIXTURE_DIR: ${CONFERENCE_FIXTURES:?CONFERENCE_FIXTURES is required}
+      CONFERENCE_RVC_URL: ws://127.0.0.1:8090/ws/rvc
+    command: ["sh", "-c", "export CONFERENCE_ARI_PASSWORD=$(cat /run/conference/ari-password); exec uvicorn conference.server:app --host 127.0.0.1 --port 8091 --workers 1 --ws-max-size 1024 --ws-max-queue 4 --ws-per-message-deflate false"]
+    volumes:
+      - "${CONFERENCE_RUNTIME:?CONFERENCE_RUNTIME is required}/asterisk/ari-password:/run/conference/ari-password:ro"
+      - "${CONFERENCE_FIXTURES:?CONFERENCE_FIXTURES is required}:${CONFERENCE_FIXTURES}:ro"
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    logging:
+      driver: json-file
+      options: {max-size: 5m, max-file: "2"}

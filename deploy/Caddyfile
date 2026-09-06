@@ -4,6 +4,9 @@
 https://vm-voice-1.lan.awesomeio.ru {
     bind 192.168.20.70
     tls /etc/voice-certs/fullchain.pem /etc/voice-certs/key.pem
+    handle /ws/conference {
+        reverse_proxy 127.0.0.1:8091
+    }
     handle /ws/rvc {
         reverse_proxy 127.0.0.1:8090
     }

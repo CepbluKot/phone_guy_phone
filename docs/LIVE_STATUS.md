@@ -102,6 +102,16 @@ Known non-blocking: upstream empty-F0 traceback при прогреве нуля
 Starlette/AnyIO deprecations; Caddy formatting/OCSP/disabled-redirect warnings;
 Docker legacy-builder warning. Ошибками загрузки модели они в прогонах не стали.
 
+## Conference demo status
+
+Слушательская Asterisk-конференция развёрнута на VM209, активный релиз
+`20260906T231500Z`. Страница для пользователя:
+`https://voice.lan.awesomeio.ru/conference/` (только через VPN). Она только
+проигрывает микс: microphone policy запрещена, `getUserMedia` и аудиозагрузка
+отсутствуют. Полная эксплуатационная схема, rollback и живые метрики — в
+[CONFERENCE.md](CONFERENCE.md). Не трогать Frigate, DNS/VPS/firewall и
+`voice-rvc.service` ради этой функции.
+
 ## Следующий исполнитель
 
 Прочитать [HANDOFF.md](HANDOFF.md), сверить runtime read-only, затем выполнять

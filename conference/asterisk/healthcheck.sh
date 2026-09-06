@@ -5,12 +5,14 @@ asterisk -rx "core waitfullybooted" >/dev/null 2>&1
 
 for required_module in \
     app_confbridge \
+    app_stasis \
     bridge_softmix \
     chan_websocket \
     pbx_config \
     res_ari \
     res_ari_asterisk \
     res_ari_channels \
+    res_ari_events \
     res_ari_model \
     res_http_websocket \
     res_sorcery_config \
@@ -23,5 +25,5 @@ for required_module in \
     res_websocket_client
 do
     module_status=$(asterisk -rx "module show like ${required_module}.so" 2>/dev/null)
-    printf '%s\n' "$module_status" | grep -Fq "1 modules loaded"
+    printf '%s\n' "$module_status" | grep -Eq "^${required_module}\.so[[:space:]].*[[:space:]][[:digit:]]+[[:space:]]+Running[[:space:]]"
 done

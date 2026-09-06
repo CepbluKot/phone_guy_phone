@@ -188,3 +188,17 @@ curl -fsS https://voice.lan.awesomeio.ru/healthz
 Исторические материалы: [предыдущий handoff](HANDOFF_PREDEPLOY_2026-09-06.md),
 план и .superpowers/sdd/2026-09-06-rvc-streaming в worktree.
 Они сохранены для разбора решений; актуальный runtime описан выше и в LIVE_STATUS.
+
+## 11. Conference demo (Task 5) — delivered
+
+Слушательская Asterisk-конференция развёрнута на VM209: release
+`20260906T231500Z`, native Caddy содержит `/ws/conference`, а
+`voice-conference-asterisk-1` и `voice-conference-controller-1` должны быть
+healthy. Страница пользователя — `https://voice.lan.awesomeio.ru/conference/`
+через VPN; она receive-only и не запрашивает микрофон.
+
+Подтверждены: пять минут WSS-аудио и reconnect, wrong-Origin rejection,
+`busy` при занятом RVC без raw fallback, ресурсные лимиты 256 MiB/0.5 CPU/128
+PIDs на оба новых контейнера, один scoped rollback и успешный redeploy.
+Комната отсутствует в idle-состоянии; контейнеры остаются запущенными.
+Полный ledger, команды и границы безопасности: [CONFERENCE.md](CONFERENCE.md).
