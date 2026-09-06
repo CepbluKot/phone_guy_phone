@@ -1,0 +1,9 @@
+[general]
+enabled=yes
+pretty=no
+
+; Deployment renders __ARI_PASSWORD__ into ari.conf, mode 0600, owned by UID 10001.
+[phoneguy]
+type=user
+read_only=no
+password=__ARI_PASSWORD__
