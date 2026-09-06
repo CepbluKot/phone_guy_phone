@@ -49,8 +49,9 @@ function client(options = {}) {
   class WorkletNode {
     constructor() {
       node = this;
-      this.port = {messages: [], postMessage: (message) => {
-        this.port.messages.push(message); this.played = message;
+      this.port = {messages: [], postMessage: (message, transfer = []) => {
+        const delivered = structuredClone(message, {transfer});
+        this.port.messages.push(delivered); this.played = delivered;
       }};
     }
     connect() {this.connected = true;}
@@ -162,6 +163,19 @@ test('warming has a 90 second deadline and ready audio has a 10 second progress 
   ready.socket().onmessage({data: JSON.stringify(RVC_READY)});
   ready.advance(10001);
   assert.match(ready.get('status').textContent, /перестала отвечать/i);
+});
+
+test('connecting without ready times out after ten seconds and releases live resources', async () => {
+  const ui = client();
+  await ui.get('start').onclick();
+  ui.socket().onopen();
+  ui.advance(10001);
+  assert.match(ui.get('status').textContent, /не ответил/i);
+  assert.ok(ui.stopped());
+  assert.ok(ui.context().closed);
+  assert.ok(ui.socket().closed);
+  assert.equal(ui.get('start').disabled, false);
+  assert.equal(ui.get('profile').disabled, false);
 });
 
 test('stop during an await and stale replies cannot resurrect capture or playback', async () => {

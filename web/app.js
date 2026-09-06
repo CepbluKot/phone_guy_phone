@@ -26,6 +26,7 @@ const errors = {
   overloaded: 'Обработка не успевает за звуком. Остановите сеанс и повторите запуск.',
   model_unavailable: 'Модель голоса недоступна. Повторите попытку позже или выберите простой эффект вручную.',
   stalled: 'Модель перестала отвечать. Остановите сеанс и запустите его снова.',
+  connecting_timeout: 'Сервис не ответил при подключении за 10 секунд. Проверьте VPN и повторите запуск.',
   protocol: 'Некорректный ответ сервиса голоса. Обновите страницу и повторите попытку.',
   input_overload: 'Сеть или обработка не успевает принимать микрофон. Остановите сеанс и подключитесь снова.'
 };
@@ -117,6 +118,47 @@ async function begin(test = false) {
   session = s;
   setControls(true, test);
   statusEl.textContent = test ? 'Проверяю DSP-линию…' : 'Запрашиваю микрофон…';
+  s.timer = setInterval(() => {
+    if (session !== s) return;
+    const now = performance.now();
+    if (s.phase === 'connecting') {
+      if (now - s.phaseStarted > 10000) {
+        const error = new Error('connecting_timeout');
+        error.code = 'connecting_timeout';
+        fail(s, error);
+      }
+      return;
+    }
+    if (s.phase === 'warming') {
+      if (now - s.phaseStarted > s.warmupTimeoutMs) {
+        const error = new Error('model_unavailable');
+        error.code = 'model_unavailable';
+        fail(s, error);
+      }
+      return;
+    }
+    const progressDeadline = mode === 'rvc' ? 10000 : 6000;
+    if (now - s.lastProgress > progressDeadline) {
+      const error = new Error(mode === 'rvc' ? 'stalled' : 'Нет аудиоответа более 6 секунд.');
+      if (mode === 'rvc') error.code = 'stalled';
+      return fail(s, error);
+    }
+    const deviceMs = ((s.ctx.baseLatency || 0) + (s.ctx.outputLatency || 0)) * 1000;
+    const extraDelayMs = Number(el('delay').value) * 1000;
+    const pitchMs = mode === 'dsp' && Math.abs(settings().pitchSemitones) > .001 ? 40 : 0;
+    // RVC queueMs already contains the full burst and its render-clock hold;
+    // using the cumulative consumed-sample timestamp avoids adding that 2 s twice.
+    const estimate = extraDelayMs + s.networkServerMs + s.queueMs + deviceMs + 20 + pitchMs;
+    latencyEl.textContent = 'Дополнительная задержка: ' + Math.round(extraDelayMs) +
+      ' мс · общая примерно: ' + Math.round(estimate) +
+      ' мс · сеть + сервер: ' + Math.round(s.networkServerMs) + ' мс';
+    const progress = mode === 'rvc'
+      ? 'Отправлено кадров: ' + s.sent + ' · получено фрагментов: ' + s.received +
+        ' · подтверждено: ' + s.acknowledgedSamples + ' сэмплов'
+      : 'Отправлено / получено: ' + s.sent + ' / ' + s.received;
+    el('diagnostics').textContent = progress + ' · обработка: ' + s.processingMs.toFixed(1) +
+      ' мс · прерывания: ' + s.underruns + ' · сброшено: ' + s.dropped;
+  }, 250);
 
   try {
     if (!window.isSecureContext) throw new Error('Нужен HTTPS.');
@@ -273,8 +315,10 @@ async function begin(test = false) {
           const metrics = s.pendingMetrics;
           if (!s.ready || !metrics || !data || data.byteLength !== RVC_OUTPUT_BYTES ||
               data.byteLength !== metrics.outputSamples * 2) throw protocolError();
+          const outputLevel = Math.min(1, level(new Int16Array(data)) * 4);
           if (session !== s) return;
           s.node.port.postMessage({type: 'play', pcm: data}, [data]);
+          el('output').value = outputLevel;
           s.acknowledgedSamples = metrics.consumedSamples;
           s.expectedOutputStart += metrics.outputSamples;
           s.capturePositions = s.capturePositions.filter(position => position.endSample > s.acknowledgedSamples);
@@ -283,12 +327,13 @@ async function begin(test = false) {
         } else {
           if (!data || data.byteLength !== CAPTURE_SAMPLES * 2 || !s.pending.length) throw protocolError();
           s.networkServerMs = performance.now() - s.pending.shift();
+          const outputLevel = Math.min(1, level(new Int16Array(data)) * 4);
           if (session !== s) return;
           s.node.port.postMessage({type: 'play', pcm: data}, [data]);
+          el('output').value = outputLevel;
         }
         s.lastProgress = performance.now();
         s.received++;
-        el('output').value = Math.min(1, level(new Int16Array(data)) * 4);
       } catch (error) {
         fail(s, error);
       }
@@ -297,36 +342,6 @@ async function begin(test = false) {
     s.socket.onclose = () => {
       if (session === s) stop('Соединение закрыто. Проверьте VPN и нажмите «Начать» для повторного подключения.');
     };
-    s.timer = setInterval(() => {
-      if (session !== s) return;
-      const now = performance.now();
-      if (s.phase === 'warming' && now - s.phaseStarted > s.warmupTimeoutMs) {
-        const error = new Error('model_unavailable');
-        error.code = 'model_unavailable';
-        return fail(s, error);
-      }
-      const progressDeadline = mode === 'rvc' ? 10000 : 6000;
-      if (s.phase === 'ready' && now - s.lastProgress > progressDeadline) {
-        const error = new Error(mode === 'rvc' ? 'stalled' : 'Нет аудиоответа более 6 секунд.');
-        if (mode === 'rvc') error.code = 'stalled';
-        return fail(s, error);
-      }
-      const deviceMs = ((s.ctx.baseLatency || 0) + (s.ctx.outputLatency || 0)) * 1000;
-      const extraDelayMs = Number(el('delay').value) * 1000;
-      const pitchMs = mode === 'dsp' && Math.abs(settings().pitchSemitones) > .001 ? 40 : 0;
-      // RVC queueMs already contains the full burst and its render-clock hold;
-      // using the cumulative consumed-sample timestamp avoids adding that 2 s twice.
-      const estimate = extraDelayMs + s.networkServerMs + s.queueMs + deviceMs + 20 + pitchMs;
-      latencyEl.textContent = 'Дополнительная задержка: ' + Math.round(extraDelayMs) +
-        ' мс · общая примерно: ' + Math.round(estimate) +
-        ' мс · сеть + сервер: ' + Math.round(s.networkServerMs) + ' мс';
-      const progress = mode === 'rvc'
-        ? 'Отправлено кадров: ' + s.sent + ' · получено фрагментов: ' + s.received +
-          ' · подтверждено: ' + s.acknowledgedSamples + ' сэмплов'
-        : 'Отправлено / получено: ' + s.sent + ' / ' + s.received;
-      el('diagnostics').textContent = progress + ' · обработка: ' + s.processingMs.toFixed(1) +
-        ' мс · прерывания: ' + s.underruns + ' · сброшено: ' + s.dropped;
-    }, 250);
   } catch (error) {
     fail(s, error);
   }
