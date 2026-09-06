@@ -162,6 +162,16 @@ explicit protocol error.
 
 ## 8. Release 2 decision gate
 
+### User amendment: configurable playback delay (2026-09-06)
+
+The browser adds a continuous playback delay, default 5 seconds, adjustable
+from 0 to 10 seconds in 0.5-second increments. This is additional to the
+transport/DSP delay, not voice-activity detection or waiting for sentence end.
+The delay line lives only in AudioWorklet memory. Changing it clears the
+previous delayed audio; Stop destroys the entire audio context. The test tone
+uses the selected delay and then plays for approximately four seconds.
+
+
 After release 1 passes, run a measured GPU feasibility spike for RVC inference
 inside VM 209. It may be added when it fits within the 4 GiB GPU memory budget
 and remains below the 150 ms end-to-end latency target. The chosen local model
