@@ -58,7 +58,7 @@ class _Run:
 class DemoSession:
     def __init__(self, room_factory, model_factory, *, sources=source_frames,
                  clock=time.monotonic, cooldown=5, ttl=600, output_timeout=10,
-                 startup_timeout=120, cleanup_timeout=30):
+                 startup_timeout=90, cleanup_timeout=30):
         self.room_factory = room_factory
         self.model_factory = model_factory
         self.sources = sources

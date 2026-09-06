@@ -53,6 +53,39 @@ def build(**kwargs):
     return create_app(factory, health_check=kwargs.pop("health_check", healthy), **kwargs), session, rooms, models, calls
 
 
+def test_default_configuration_targets_approved_loopback_ari(monkeypatch):
+    from conference import server
+
+    async def check():
+        monkeypatch.delenv("CONFERENCE_ARI_URL", raising=False)
+        monkeypatch.delenv("CONFERENCE_ARI_USERNAME", raising=False)
+        monkeypatch.setenv("CONFERENCE_ARI_PASSWORD", "test-secret")
+        session = server.default_session()
+        assert session.room_factory().url == "http://127.0.0.1:8092/ari"
+
+        requests = []
+
+        class Client:
+            def __init__(self, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                pass
+
+            async def get(self, url, **kwargs):
+                requests.append((url, kwargs))
+                return httpx.Response(200)
+
+        monkeypatch.setattr(server.httpx, "AsyncClient", Client)
+        assert await server.asterisk_available()
+        assert requests[0][0] == "http://127.0.0.1:8092/ari/asterisk/info"
+
+    asyncio.run(check())
+
+
 def test_allowed_listen_ready_pcm_stop_and_single_application_session():
     async def check():
         app, session, rooms, models, calls = build()

@@ -22,7 +22,7 @@ READY = dict(type="ready", version=1, sampleRate=48000, channels=1,
 def default_session():
     return DemoSession(
         lambda: AsteriskRoom(
-            os.environ.get("CONFERENCE_ARI_URL", "http://127.0.0.1:8088/ari"),
+            os.environ.get("CONFERENCE_ARI_URL", "http://127.0.0.1:8092/ari"),
             os.environ.get("CONFERENCE_ARI_USERNAME", "phoneguy"),
             os.environ.get("CONFERENCE_ARI_PASSWORD", ""),
         ),
@@ -36,7 +36,7 @@ async def asterisk_available():
         return False
     async with httpx.AsyncClient(timeout=2, trust_env=False) as client:
         response = await client.get(
-            os.environ.get("CONFERENCE_ARI_URL", "http://127.0.0.1:8088/ari").rstrip("/")
+            os.environ.get("CONFERENCE_ARI_URL", "http://127.0.0.1:8092/ari").rstrip("/")
             + "/asterisk/info",
             auth=(os.environ.get("CONFERENCE_ARI_USERNAME", "phoneguy"), password),
         )
