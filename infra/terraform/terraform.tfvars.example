@@ -1,0 +1,3 @@
+proxmox_endpoint = "https://192.168.20.67:8006"
+proxmox_password = "<local-only>"
+proxmox_ssh_password = "<local-only>"
