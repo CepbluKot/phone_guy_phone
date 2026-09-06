@@ -1,6 +1,6 @@
 FROM python:3.12-slim
 WORKDIR /opt/voice-changer
-RUN useradd --system --create-home voice
+RUN useradd --system --create-home --gid voice voice
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY app app
