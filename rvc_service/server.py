@@ -1,0 +1,264 @@
+"""Single-model, bounded, memory-only streaming WebSocket service."""
+
+from __future__ import annotations
+
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager, suppress
+import json
+import time
+
+import anyio
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse
+
+from .chunks import Chunker, FRAME_BYTES, HOP_SAMPLES, SAMPLE_RATE
+
+
+STARTUP_SECONDS = 90.0
+STALL_SECONDS = 10.0
+ALLOWED_ORIGINS = {"https://voice.lan.awesomeio.ru",
+                   "https://vm-voice-1.lan.awesomeio.ru"}
+MESSAGES = {
+    "busy": "Другой сеанс ещё работает. Остановите его и повторите подключение.",
+    "model_unavailable": "Модель недоступна. Проверьте состояние RVC-сервиса и повторите запуск.",
+    "invalid_start": "Нужен протокол версии 1: 48000 Гц, моно, PCM16 s16le.",
+    "invalid_frame": "Неверный пакет звука. Перезапустите сеанс; ожидается 1920 байт PCM16.",
+    "overloaded": "Обработка не успевает за звуком. Остановите сеанс и повторите запуск.",
+    "stalled": "Нет прогресса более 10 секунд. Проверьте соединение и повторите запуск.",
+}
+
+
+class SessionError(Exception):
+    pass
+
+
+async def _drain(future):
+    """Cancellation of a waiter must never stand in for a finished GPU call."""
+    with anyio.CancelScope(shield=True):
+        while not future.done():
+            try:
+                await asyncio.shield(asyncio.wrap_future(future))
+            except asyncio.CancelledError:
+                continue
+            except Exception:
+                break
+    # Retrieve the result/exception and then let the caller discard its reference.
+    with suppress(Exception):
+        future.result()
+
+
+class Session:
+    def __init__(self, socket, state):
+        self.socket = socket
+        self.state = state
+        self.chunks = Chunker()
+        self.queue = asyncio.Queue(maxsize=1)
+        self.inflight = None
+        self.accept_audio = False
+        self.progress = time.monotonic()
+        self.output_start = 0
+        self.consumed = 0
+
+    async def receive(self):
+        while True:
+            message = await self.socket.receive()
+            if message["type"] == "websocket.disconnect":
+                return "disconnected"
+            if message.get("text") is not None:
+                try:
+                    control = json.loads(message["text"])
+                except (ValueError, TypeError):
+                    raise SessionError("invalid_frame") from None
+                if isinstance(control, dict) and control.get("type") == "stop":
+                    return "stopped"
+                raise SessionError("invalid_frame")
+            frame = message.get("bytes")
+            if not self.accept_audio or frame is None or len(frame) != FRAME_BYTES:
+                raise SessionError("invalid_frame")
+            window = self.chunks.push(frame)
+            self.progress = time.monotonic()
+            if window is not None:
+                self.consumed += HOP_SAMPLES
+                try:
+                    self.queue.put_nowait((window, self.consumed))
+                except asyncio.QueueFull:
+                    raise SessionError("overloaded") from None
+
+    async def convert(self):
+        while True:
+            window, consumed = await self.queue.get()
+            begun = time.perf_counter()
+            self.inflight = self.state.executor.submit(self.state.engine.convert, window)
+            try:
+                converted = await asyncio.wait_for(
+                    asyncio.shield(asyncio.wrap_future(self.inflight)), STALL_SECONDS
+                )
+                pcm = self.chunks.render(converted)
+            except asyncio.TimeoutError:
+                raise SessionError("stalled") from None
+            except Exception:
+                raise SessionError("model_unavailable") from None
+            self.inflight = None
+            metadata = {"type": "metrics", "outputStart": self.output_start,
+                        "outputSamples": HOP_SAMPLES, "consumedSamples": consumed,
+                        "processingMs": round((time.perf_counter() - begun) * 1000, 3)}
+            await asyncio.wait_for(self.socket.send_json(metadata), STALL_SECONDS)
+            await asyncio.wait_for(self.socket.send_bytes(pcm), STALL_SECONDS)
+            self.output_start += HOP_SAMPLES
+            self.progress = time.monotonic()
+            del converted, pcm, window
+
+    async def watchdog(self):
+        while True:
+            remaining = STALL_SECONDS - (time.monotonic() - self.progress)
+            if remaining <= 0:
+                raise SessionError("stalled")
+            await asyncio.sleep(remaining)
+
+
+def _default_engine():
+    # Importing the ASGI app on the laptop never loads CUDA or the model.
+    from .engine import Engine
+    return Engine()
+
+
+def create_app(engine_factory=_default_engine):
+    @asynccontextmanager
+    async def lifespan(app):
+        state = app.state
+        state.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="rvc")
+        state.engine = None
+        state.status = "warming"
+        state.active = False
+        state.session = None
+        state.loading = state.executor.submit(engine_factory)
+
+        async def initialize():
+            try:
+                state.engine = await asyncio.wait_for(
+                    asyncio.shield(asyncio.wrap_future(state.loading)), STARTUP_SECONDS
+                )
+                state.status = "ready"
+            except Exception:
+                state.status = "model_unavailable"
+
+        state.initialization = asyncio.create_task(initialize())
+        try:
+            yield
+        finally:
+            state.initialization.cancel()
+            with suppress(asyncio.CancelledError):
+                await state.initialization
+            await _drain(state.loading)
+            state.executor.shutdown(wait=True, cancel_futures=True)
+            state.engine = None
+
+    app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None)
+
+    @app.get("/healthz")
+    async def healthz():
+        session = app.state.session
+        running = bool(session and session.inflight is not None and not session.inflight.done())
+        return JSONResponse({"status": app.state.status, "active": app.state.active,
+                             "running": running,
+                             "queuedWindows": session.queue.qsize() if session else 0},
+                            status_code=200 if app.state.status == "ready" else 503,
+                            headers={"Cache-Control": "no-store"})
+
+    @app.websocket("/ws/rvc")
+    async def websocket(socket: WebSocket):
+        if socket.headers.get("origin") not in ALLOWED_ORIGINS:
+            await socket.close(code=1008)
+            return
+        await socket.accept()
+
+        async def error(code):
+            with suppress(RuntimeError, WebSocketDisconnect, asyncio.TimeoutError):
+                await asyncio.wait_for(socket.send_json(
+                    {"type": "error", "code": code, "message": MESSAGES[code]}
+                ), STALL_SECONDS)
+
+        if app.state.active:
+            await error("busy")
+            await socket.close(code=1013)
+            return
+        app.state.active = True
+        session = Session(socket, app.state)
+        app.state.session = session
+        tasks = []
+        try:
+            opening = await asyncio.wait_for(socket.receive(), STALL_SECONDS)
+            if opening["type"] == "websocket.disconnect":
+                return
+            try:
+                start = json.loads(opening.get("text") or "")
+            except (ValueError, TypeError):
+                raise SessionError("invalid_start") from None
+            if (not isinstance(start, dict) or start.get("type") != "start"
+                    or type(start.get("version")) is not int or start["version"] != 1
+                    or start.get("sampleRate") != SAMPLE_RATE
+                    or start.get("channels") != 1 or start.get("sampleFormat") != "s16le"):
+                raise SessionError("invalid_start")
+            receiver = asyncio.create_task(session.receive())
+            tasks.append(receiver)
+            if app.state.status == "warming":
+                await socket.send_json({"type": "warming", "timeoutSeconds": STARTUP_SECONDS})
+                done, _ = await asyncio.wait(
+                    [receiver, app.state.initialization], return_when=asyncio.FIRST_COMPLETED
+                )
+                if receiver in done:
+                    if receiver.result() == "stopped":
+                        await socket.send_json({"type": "stopped"})
+                    return
+            if app.state.status != "ready":
+                raise SessionError("model_unavailable")
+            await socket.send_json({"type": "ready", "version": 1,
+                                    "sampleRate": SAMPLE_RATE, "channels": 1,
+                                    "sampleFormat": "s16le", "frameBytes": FRAME_BYTES,
+                                    "outputSamples": HOP_SAMPLES})
+            session.accept_audio = True
+            session.progress = time.monotonic()
+            tasks.extend([asyncio.create_task(session.convert()),
+                          asyncio.create_task(session.watchdog())])
+            done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            # Stop/disconnect takes precedence over a coincident conversion result.
+            if receiver in done:
+                outcome = receiver.result()
+                for task in tasks[1:]:
+                    task.cancel()
+                if outcome == "stopped":
+                    await socket.send_json({"type": "stopped"})
+            else:
+                for task in done:
+                    task.result()
+        except SessionError as exc:
+            for task in tasks:
+                task.cancel()
+            await error(str(exc))
+        except asyncio.TimeoutError:
+            await error("stalled")
+        except (WebSocketDisconnect, RuntimeError):
+            pass
+        finally:
+            # Shield cleanup from ASGI disconnect cancellation. The concurrent
+            # future, unlike a cancelled asyncio wrapper, proves worker completion.
+            with anyio.CancelScope(shield=True):
+                for task in tasks:
+                    task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+                while not session.queue.empty():
+                    session.queue.get_nowait()
+                if session.inflight is not None:
+                    await _drain(session.inflight)
+                    session.inflight = None
+                session.chunks.reset()
+                app.state.session = None
+                app.state.active = False
+                with suppress(RuntimeError, WebSocketDisconnect):
+                    await socket.close()
+
+    return app
+
+
+app = create_app()

@@ -1,0 +1,41 @@
+[Unit]
+Description=Private Phone Guy RVC streaming worker
+After=network.target
+
+[Service]
+Type=simple
+User=voice-rvc
+Group=voice-rvc
+SupplementaryGroups=video render
+WorkingDirectory=/opt/voice-rvc/current
+ExecStart=/opt/voice-rvc/venv/bin/python -m uvicorn rvc_service.server:app --host 127.0.0.1 --port 8090 --workers 1 --ws-max-size 4096 --ws-max-queue 1 --no-access-log
+Environment=RVC_ASSETS_ROOT=/opt/voice-changer/experiments/phoneguy
+Environment=PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+Environment=NUMBA_CACHE_DIR=/tmp/numba XDG_CACHE_HOME=/tmp/cache
+Environment=HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_DATASETS_OFFLINE=1
+Environment=TORCH_FORCE_WEIGHTS_ONLY_LOAD=1 RVC_CUDA_GRAPH=0
+Environment=OMP_NUM_THREADS=2 OPENBLAS_NUM_THREADS=1
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=100
+MemoryMax=2700M
+MemorySwapMax=0
+CPUQuota=250%
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/opt/voice-rvc /opt/voice-changer/experiments/phoneguy
+PrivateTmp=true
+TemporaryFileSystem=/tmp:rw,nosuid,nodev,size=256M /var/tmp:rw,nosuid,nodev,size=16M
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+IPAddressDeny=any
+IPAddressAllow=localhost
+
+[Install]
+WantedBy=multi-user.target
