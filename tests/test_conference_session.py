@@ -1,5 +1,6 @@
 import asyncio
 import itertools
+import json
 
 import pytest
 
@@ -314,4 +315,73 @@ def test_default_run_expires_on_600_second_timer(monkeypatch):
         await session.close()
         assert listener.terminal == {"type": "error", "code": "expired"}
         assert rooms[0].closed and models[0].closed
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("trigger", ["last_leave", "upstream_failure"])
+def test_real_rvc_worker_close_failure_blocks_replacement(trigger):
+    from conference.rvc import READY, RvcStream
+    from conference.session import DemoSession
+    from test_conference_adapters import Socket
+
+    async def check():
+        socket = Socket(json.dumps(READY))
+        close_attempts = []
+
+        async def failed_close():
+            close_attempts.append(True)
+            raise RuntimeError("private upstream transport close failure")
+
+        socket.close = failed_close
+
+        async def connect(*args, **kwargs):
+            return socket
+
+        room = Room()
+        model = RvcStream("ws://fake-rvc/ws/rvc", connect=connect)
+        session = DemoSession(lambda: room, lambda: model, cooldown=0,
+                              sources=lambda role: itertools.repeat(bytes(1920)))
+        listener = await session.join()
+        await until(lambda: model.reading)
+        if trigger == "upstream_failure":
+            socket.incoming.put_nowait("invalid upstream control")
+            await asyncio.wait_for(listener.done.wait(), 1)
+        await session.leave(listener)
+        assert session.state == "unavailable"
+        with pytest.raises(ValueError, match="busy"):
+            await session.join()
+        # Idempotent later close must retain an unconfirmed transport failure.
+        with pytest.raises(ConnectionError, match="rvc_close_failed"):
+            await model.close()
+        assert room.closed and len(close_attempts) == 1
+        assert not [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+    asyncio.run(check())
+
+
+def test_default_preparation_expires_after_90_seconds_and_cleans(monkeypatch):
+    from conference.session import DemoSession
+
+    async def check():
+        original_timeout = asyncio.timeout
+        deadlines = []
+
+        def capture_timeout(delay):
+            timer = original_timeout(delay)
+            if delay in (90, 120):
+                deadlines.append((delay, timer))
+            return timer
+
+        monkeypatch.setattr(asyncio, "timeout", capture_timeout)
+        room, model = Room(), Model()
+        model.start_gate = asyncio.Event()
+        session = DemoSession(lambda: room, lambda: model)
+        joining = asyncio.create_task(session.join())
+        await model.entered.wait()
+        assert len(deadlines) == 1
+        # Advance the real startup timeout without a 90-second wall-clock wait.
+        deadlines[0][1].reschedule(asyncio.get_running_loop().time())
+        with pytest.raises(ValueError, match="stalled"):
+            await joining
+        assert room.closed and model.closed and session.closed
+        assert deadlines[0][0] == 90
     asyncio.run(check())

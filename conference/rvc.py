@@ -80,6 +80,7 @@ class RvcStream:
         self.socket = None
         self.ready = False
         self.closed = False
+        self.close_error = None
         self.sending = False
         self.reading = False
         self.output_start = 0
@@ -120,15 +121,22 @@ class RvcStream:
     async def close(self):
         if self.closed:
             return
-        self.closed = True
+        if self.close_error is not None:
+            raise ConnectionError("rvc_close_failed") from self.close_error
         self.ready = False
         if self.socket is None:
+            self.closed = True
             return
         with suppress(Exception):
             await asyncio.wait_for(
                 self.socket.send(json.dumps({"type": "stop"})), 2
             )
-        await self.socket.close()
+        try:
+            await self.socket.close()
+        except (Exception, asyncio.CancelledError) as error:
+            self.close_error = error
+            raise ConnectionError("rvc_close_failed") from error
+        self.closed = True
 
     async def send(self, frame):
         if not self.ready or not isinstance(frame, bytes) or len(frame) != FRAME_BYTES:
