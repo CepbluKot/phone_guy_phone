@@ -16,9 +16,14 @@ function deferred() {
 
 function client(options = {}) {
   options.now = options.now ?? 0;
-  const defaults = {profile: 'rvc', delay: '5', pitch: '-1.5', effect: '.85', noise: '.04', gain: '0'};
+  const defaults = {delay: '5'};
+  const allowedIds = new Set([
+    'start', 'stop', 'status', 'latency', 'input', 'output', 'delay',
+    'delay-value', 'diagnostics'
+  ]);
   const elements = new Map();
   const get = id => {
+    if (!allowedIds.has(id)) throw new Error(`Unexpected DOM lookup: ${id}`);
     if (!elements.has(id)) elements.set(id, {
       value: defaults[id] ?? 0, textContent: '', disabled: false, hidden: false
     });
@@ -37,8 +42,6 @@ function client(options = {}) {
     async resume() {if (options.resumeGate) await options.resumeGate.promise; this.resumed = true;}
     close() {this.closed = true;}
     createMediaStreamSource() {return {connect() {}, disconnect() {}};}
-    createOscillator() {return {frequency: {}, connect() {}, disconnect() {}, start() {this.started = true;}, stop() {this.stopped = true;}};}
-    createGain() {return {gain: {}, connect() {}};}
   }
   class Socket {
     static OPEN = 1;
@@ -75,15 +78,25 @@ function client(options = {}) {
   };
 }
 
-test('default Phone Guy profile uses version 1 RVC and accepts many captures before one burst reply', async () => {
+test('page exposes only the approved AI voice controls', () => {
+  const html = fs.readFileSync('web/index.html', 'utf8');
+  const interactiveIds = [...html.matchAll(/<(?:button|select|input)\b[^>]*\bid="([^"]+)"/g)]
+    .map(match => match[1]);
+  const meterIds = [...html.matchAll(/<meter\b[^>]*\bid="([^"]+)"/g)]
+    .map(match => match[1]);
+  assert.deepEqual(interactiveIds, ['start', 'stop', 'delay']);
+  assert.deepEqual(meterIds, ['input', 'output']);
+  assert.match(html, /Phone Guy/);
+});
+
+test('Phone Guy uses version 1 RVC and accepts many captures before one burst reply', async () => {
   const ui = client();
-  assert.equal(ui.get('dsp-settings').hidden, true);
   await ui.get('start').onclick();
   const socket = ui.socket();
   assert.equal(socket.url, 'wss://vm-voice-1.lan.awesomeio.ru/ws/rvc');
-  assert.equal(ui.get('profile').disabled, true);
   assert.equal(ui.node().port.messages[0].type, 'configure');
   assert.equal(ui.node().port.messages[0].mode, 'rvc');
+  assert.equal(ui.node().port.messages[1].seconds, 5);
   socket.onopen();
   const start = JSON.parse(socket.messages[0]);
   assert.equal(start.version, 1);
@@ -102,7 +115,9 @@ test('default Phone Guy profile uses version 1 RVC and accepts many captures bef
     type: 'metrics', outputStart: 0, outputSamples: 96000,
     consumedSamples: 96000, processingMs: 686.6
   })});
-  socket.onmessage({data: new Int16Array(96000).fill(2000).buffer});
+  const reply = new Int16Array(96000).fill(2000).buffer;
+  socket.onmessage({data: reply});
+  assert.equal(reply.byteLength, 0);
   assert.equal(ui.node().played.type, 'play');
   assert.equal(ui.node().played.pcm.byteLength, 192000);
   assert.ok(ui.get('input').value > 0);
@@ -175,7 +190,6 @@ test('connecting without ready times out after ten seconds and releases live res
   assert.ok(ui.context().closed);
   assert.ok(ui.socket().closed);
   assert.equal(ui.get('start').disabled, false);
-  assert.equal(ui.get('profile').disabled, false);
 });
 
 test('stop during an await and stale replies cannot resurrect capture or playback', async () => {
@@ -187,7 +201,6 @@ test('stop during an await and stale replies cannot resurrect capture or playbac
   gate.resolve();
   await starting;
   assert.equal(ui.socket(), undefined);
-  assert.equal(ui.get('profile').disabled, false);
 
   const live = client();
   await live.get('start').onclick();
@@ -201,49 +214,24 @@ test('stop during an await and stale replies cannot resurrect capture or playbac
   })});
   staleSocket.onmessage({data: new ArrayBuffer(192000)});
   assert.notEqual(live.node().played?.type, 'play');
+  assert.deepEqual(JSON.parse(staleSocket.messages.at(-1)), {type: 'stop'});
   assert.ok(live.stopped());
 });
 
-test('fallback profile retains DSP settings and the line test always uses DSP', async () => {
+test('additional delay remains adjustable during RVC and Stop resets visible levels', async () => {
   const ui = client();
-  ui.get('profile').value = 'dsp';
-  ui.get('profile').onchange();
-  assert.equal(ui.get('dsp-settings').hidden, false);
   await ui.get('start').onclick();
-  assert.equal(ui.socket().url, 'wss://vm-voice-1.lan.awesomeio.ru/ws/audio');
-  assert.equal(ui.node().port.messages[0].type, 'configure');
-  assert.equal(ui.node().port.messages[0].mode, 'dsp');
-  ui.socket().onopen();
-  ui.socket().onmessage({data: JSON.stringify({type: 'ready'})});
-  ui.get('pitch').value = -4;
-  ui.get('pitch').oninput();
-  assert.equal(JSON.parse(ui.socket().messages.at(-1)).settings.pitchSemitones, -4);
-
+  assert.equal(ui.get('delay').disabled, false);
+  ui.get('delay').value = '7';
+  ui.get('delay').oninput();
+  assert.equal(ui.get('delay-value').textContent, '7');
+  assert.deepEqual(ui.node().port.messages.at(-1), {type: 'delay', seconds: 7});
+  assert.match(ui.get('status').textContent, /AI-звук очищен/i);
+  ui.get('input').value = 0.4;
+  ui.get('output').value = 0.6;
   ui.get('stop').onclick();
-  ui.get('profile').value = 'rvc';
-  await ui.get('test').onclick();
-  assert.equal(ui.socket().url, 'wss://vm-voice-1.lan.awesomeio.ru/ws/audio');
-  assert.equal(ui.node().port.messages[0].type, 'configure');
-  assert.equal(ui.node().port.messages[0].mode, 'dsp');
-  ui.socket().onopen();
-  ui.socket().onmessage({data: JSON.stringify({type: 'ready'})});
-  assert.match(ui.get('status').textContent, /DSP/i);
-});
-
-test('fallback DSP still accepts server metrics before each PCM reply', async () => {
-  const ui = client();
-  ui.get('profile').value = 'dsp';
-  await ui.get('start').onclick();
-  ui.socket().onopen();
-  ui.socket().onmessage({data: JSON.stringify({type: 'ready'})});
-  ui.node().port.onmessage({data: {
-    type: 'capture', pcm: new Int16Array(960).fill(4096).buffer,
-    queueMs: 40, underruns: 0, dropped: 0
-  }});
-  ui.socket().onmessage({data: JSON.stringify({type: 'metrics', processingMs: 12.5})});
-  ui.socket().onmessage({data: new Int16Array(960).fill(2000).buffer});
-  assert.equal(ui.node().played.type, 'play');
-  assert.equal(ui.socket().closed, undefined);
+  assert.equal(ui.get('input').value, 0);
+  assert.equal(ui.get('output').value, 0);
 });
 
 test('microphone rejection reports actionable error and releases audio context', async () => {

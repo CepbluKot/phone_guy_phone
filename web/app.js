@@ -7,14 +7,9 @@ const RVC_OUTPUT_BYTES = RVC_OUTPUT_SAMPLES * 2;
 const MAX_RVC_INFLIGHT_SAMPLES = SAMPLE_RATE * 12;
 const MAX_RVC_BUFFERED_BYTES = MAX_RVC_INFLIGHT_SAMPLES * 2;
 const el = id => document.getElementById(id);
-const startButton = el('start'), stopButton = el('stop'), testButton = el('test');
-const statusEl = el('status'), latencyEl = el('latency'), profileEl = el('profile');
+const startButton = el('start'), stopButton = el('stop');
+const statusEl = el('status'), latencyEl = el('latency');
 let session = null;
-
-const settings = () => ({
-  pitchSemitones: +el('pitch').value, effectMix: +el('effect').value,
-  noiseMix: +el('noise').value, outputGainDb: +el('gain').value
-});
 
 const errors = {
   NotAllowedError: 'Разрешите доступ к микрофону в настройках сайта.',
@@ -24,7 +19,7 @@ const errors = {
   invalid_start: 'Сервис не принял параметры запуска. Обновите страницу и повторите попытку.',
   invalid_frame: 'Сервис отклонил аудиопакет. Обновите страницу и повторите попытку.',
   overloaded: 'Обработка не успевает за звуком. Остановите сеанс и повторите запуск.',
-  model_unavailable: 'Модель голоса недоступна. Повторите попытку позже или выберите простой эффект вручную.',
+  model_unavailable: 'Модель голоса недоступна. Повторите попытку позже.',
   stalled: 'Модель перестала отвечать. Остановите сеанс и запустите его снова.',
   connecting_timeout: 'Сервис не ответил при подключении за 10 секунд. Проверьте VPN и повторите запуск.',
   protocol: 'Некорректный ответ сервиса голоса. Обновите страницу и повторите попытку.',
@@ -38,16 +33,9 @@ function level(pcm) {
   return Math.sqrt(sum / pcm.length);
 }
 
-function showProfile() {
-  el('dsp-settings').hidden = profileEl.value !== 'dsp';
-}
-
-function setControls(running, test = false) {
+function setControls(running) {
   startButton.disabled = running;
-  testButton.disabled = running;
   stopButton.disabled = !running;
-  profileEl.disabled = running;
-  el('delay').disabled = running && test;
 }
 
 function stop(message = 'Остановлено') {
@@ -55,14 +43,12 @@ function stop(message = 'Остановлено') {
   session = null;
   if (s) {
     clearInterval(s.timer);
-    clearTimeout(s.testTimer);
     s.stream?.getTracks().forEach(track => track.stop());
-    if (s.source?.stop) {try {s.source.stop();} catch {}}
     try {s.source?.disconnect();} catch {}
     try {s.node?.disconnect();} catch {}
     if (s.socket) {
       try {
-        if (s.mode === 'rvc' && s.socket.readyState === WebSocket.OPEN) {
+        if (s.socket.readyState === WebSocket.OPEN) {
           s.socket.send(JSON.stringify({type: 'stop'}));
         }
       } catch {}
@@ -105,19 +91,18 @@ function validateRvcMetrics(s, message) {
     Number.isFinite(message.processingMs) && message.processingMs >= 0;
 }
 
-async function begin(test = false) {
+async function begin() {
   if (session) return;
-  const mode = test ? 'dsp' : profileEl.value;
   const s = {
-    mode, test, ready: false, phase: 'connecting', phaseStarted: performance.now(),
-    sent: 0, received: 0, pending: [], sentSamples: 0, acknowledgedSamples: 0,
+    ready: false, phase: 'connecting', phaseStarted: performance.now(),
+    sent: 0, received: 0, sentSamples: 0, acknowledgedSamples: 0,
     capturePositions: [], expectedOutputStart: 0, pendingMetrics: null,
     lastProgress: performance.now(), warmupTimeoutMs: 90000,
     queueMs: 0, networkServerMs: 0, processingMs: 0, underruns: 0, dropped: 0
   };
   session = s;
-  setControls(true, test);
-  statusEl.textContent = test ? 'Проверяю DSP-линию…' : 'Запрашиваю микрофон…';
+  setControls(true);
+  statusEl.textContent = 'Запрашиваю микрофон…';
   s.timer = setInterval(() => {
     if (session !== s) return;
     const now = performance.now();
@@ -137,25 +122,21 @@ async function begin(test = false) {
       }
       return;
     }
-    const progressDeadline = mode === 'rvc' ? 10000 : 6000;
-    if (now - s.lastProgress > progressDeadline) {
-      const error = new Error(mode === 'rvc' ? 'stalled' : 'Нет аудиоответа более 6 секунд.');
-      if (mode === 'rvc') error.code = 'stalled';
+    if (now - s.lastProgress > 10000) {
+      const error = new Error('stalled');
+      error.code = 'stalled';
       return fail(s, error);
     }
     const deviceMs = ((s.ctx.baseLatency || 0) + (s.ctx.outputLatency || 0)) * 1000;
     const extraDelayMs = Number(el('delay').value) * 1000;
-    const pitchMs = mode === 'dsp' && Math.abs(settings().pitchSemitones) > .001 ? 40 : 0;
     // RVC queueMs already contains the full burst and its render-clock hold;
     // using the cumulative consumed-sample timestamp avoids adding that 2 s twice.
-    const estimate = extraDelayMs + s.networkServerMs + s.queueMs + deviceMs + 20 + pitchMs;
+    const estimate = extraDelayMs + s.networkServerMs + s.queueMs + deviceMs + 20;
     latencyEl.textContent = 'Дополнительная задержка: ' + Math.round(extraDelayMs) +
       ' мс · общая примерно: ' + Math.round(estimate) +
       ' мс · сеть + сервер: ' + Math.round(s.networkServerMs) + ' мс';
-    const progress = mode === 'rvc'
-      ? 'Отправлено кадров: ' + s.sent + ' · получено фрагментов: ' + s.received +
-        ' · подтверждено: ' + s.acknowledgedSamples + ' сэмплов'
-      : 'Отправлено / получено: ' + s.sent + ' / ' + s.received;
+    const progress = 'Отправлено кадров: ' + s.sent + ' · получено фрагментов: ' + s.received +
+      ' · подтверждено: ' + s.acknowledgedSamples + ' сэмплов';
     el('diagnostics').textContent = progress + ' · обработка: ' + s.processingMs.toFixed(1) +
       ' мс · прерывания: ' + s.underruns + ' · сброшено: ' + s.dropped;
   }, 250);
@@ -166,7 +147,7 @@ async function begin(test = false) {
     await s.ctx.resume();
     if (session !== s) return;
     if (s.ctx.sampleRate !== SAMPLE_RATE) throw new Error('Браузер не поддерживает аудио 48 кГц.');
-    await s.ctx.audioWorklet.addModule('/static/audio-worklet.js?v=4');
+    await s.ctx.audioWorklet.addModule('/static/audio-worklet.js?v=5');
     if (session !== s) return;
 
     s.node = new AudioWorkletNode(s.ctx, 'phone-audio', {
@@ -174,7 +155,7 @@ async function begin(test = false) {
       channelCount: 1, channelCountMode: 'explicit'
     });
     // Configure the packet contract before source connection or any playback.
-    s.node.port.postMessage({type: 'configure', mode});
+    s.node.port.postMessage({type: 'configure', mode: 'rvc'});
     s.node.port.postMessage({type: 'delay', seconds: +el('delay').value});
     s.node.port.onmessage = ({data}) => {
       if (session !== s) return;
@@ -188,28 +169,20 @@ async function begin(test = false) {
         if (!s.ready || data.type !== 'capture') return;
         if (!data.pcm || data.pcm.byteLength !== CAPTURE_SAMPLES * 2) throw protocolError();
         if (s.socket.readyState !== WebSocket.OPEN) throw new Error('Соединение ещё не готово.');
-        if (s.mode === 'rvc') {
-          const inFlight = s.sentSamples - s.acknowledgedSamples;
-          if (inFlight + CAPTURE_SAMPLES > MAX_RVC_INFLIGHT_SAMPLES ||
-              s.socket.bufferedAmount > MAX_RVC_BUFFERED_BYTES) {
-            const error = new Error('input_overload');
-            error.code = 'input_overload';
-            throw error;
-          }
-        } else if (s.pending.length > 25 || s.socket.bufferedAmount > 48000) {
-          throw new Error('Сеть не успевает передавать звук. Подключитесь заново.');
+        const inFlight = s.sentSamples - s.acknowledgedSamples;
+        if (inFlight + CAPTURE_SAMPLES > MAX_RVC_INFLIGHT_SAMPLES ||
+            s.socket.bufferedAmount > MAX_RVC_BUFFERED_BYTES) {
+          const error = new Error('input_overload');
+          error.code = 'input_overload';
+          throw error;
         }
 
         el('input').value = Math.min(1, level(new Int16Array(data.pcm)) * 4);
         s.queueMs = Number.isFinite(data.queueMs) && data.queueMs >= 0 ? data.queueMs : 0;
         s.underruns = Number.isInteger(data.underruns) ? data.underruns : 0;
         s.dropped = Number.isInteger(data.dropped) ? data.dropped : 0;
-        if (s.mode === 'rvc') {
-          s.sentSamples += CAPTURE_SAMPLES;
-          s.capturePositions.push({endSample: s.sentSamples, sentAt: performance.now()});
-        } else {
-          s.pending.push(performance.now());
-        }
+        s.sentSamples += CAPTURE_SAMPLES;
+        s.capturePositions.push({endSample: s.sentSamples, sentAt: performance.now()});
         s.sent++;
         s.socket.send(data.pcm);
       } catch (error) {
@@ -217,38 +190,28 @@ async function begin(test = false) {
       }
     };
 
-    if (test) {
-      const oscillator = s.ctx.createOscillator();
-      oscillator.frequency.value = 440;
-      const gain = s.ctx.createGain();
-      gain.gain.value = .12;
-      oscillator.connect(gain);
-      gain.connect(s.node);
-      s.source = oscillator;
-    } else {
-      s.stream = await navigator.mediaDevices.getUserMedia({audio: {
-        channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false
-      }});
-      if (session !== s) {
-        s.stream.getTracks().forEach(track => track.stop());
-        return;
-      }
-      s.source = s.ctx.createMediaStreamSource(s.stream);
-      s.source.connect(s.node);
-      s.stream.getTracks().forEach(track => {
-        track.onended = () => fail(s, new Error('Микрофон отключён.'));
-      });
+    s.stream = await navigator.mediaDevices.getUserMedia({audio: {
+      channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false
+    }});
+    if (session !== s) {
+      s.stream.getTracks().forEach(track => track.stop());
+      return;
     }
+    s.source = s.ctx.createMediaStreamSource(s.stream);
+    s.source.connect(s.node);
+    s.stream.getTracks().forEach(track => {
+      track.onended = () => fail(s, new Error('Микрофон отключён.'));
+    });
 
     if (session !== s) return;
-    const path = mode === 'rvc' ? '/ws/rvc' : '/ws/audio';
-    s.socket = new WebSocket('wss://vm-voice-1.lan.awesomeio.ru' + path);
+    s.socket = new WebSocket('wss://vm-voice-1.lan.awesomeio.ru/ws/rvc');
     s.socket.binaryType = 'arraybuffer';
     s.socket.onopen = () => {
       if (session !== s) return;
-      const start = {type: 'start', sampleRate: SAMPLE_RATE, channels: 1, sampleFormat: 's16le'};
-      if (mode === 'rvc') start.version = 1;
-      else start.settings = settings();
+      const start = {
+        type: 'start', version: 1, sampleRate: SAMPLE_RATE,
+        channels: 1, sampleFormat: 's16le'
+      };
       s.socket.send(JSON.stringify(start));
     };
     s.socket.onmessage = ({data}) => {
@@ -264,7 +227,7 @@ async function begin(test = false) {
             error.serverMessage = message.message;
             throw error;
           }
-          if (message.type === 'warming' && mode === 'rvc') {
+          if (message.type === 'warming') {
             if (!Number.isFinite(message.timeoutSeconds) || message.timeoutSeconds <= 0 || message.timeoutSeconds > 90) {
               throw protocolError();
             }
@@ -275,32 +238,16 @@ async function begin(test = false) {
             return;
           }
           if (message.type === 'ready') {
-            if (s.ready || (mode === 'rvc' && !validateRvcReady(message))) throw protocolError();
+            if (s.ready || !validateRvcReady(message)) throw protocolError();
             s.ready = true;
             s.phase = 'ready';
             s.lastProgress = performance.now();
             s.node.connect(s.ctx.destination);
-            if (test) {
-              s.source.start();
-              s.testTimer = setTimeout(() => {
-                if (session === s) stop(s.received
-                  ? 'Проверка DSP-линии завершена: звук вернулся с сервера. Если тона не было слышно, проверьте громкость и устройство вывода.'
-                  : 'DSP-линия не вернула тестовый тон. Проверьте VPN и повторите попытку.');
-              }, 4000 + Number(el('delay').value) * 1000);
-            }
-            statusEl.textContent = test
-              ? 'Тестовый тон DSP прозвучит после выбранной задержки'
-              : mode === 'rvc'
-                ? 'Phone Guy AI готов — говорите. Первый фрагмент появится после накопления и обработки.'
-                : 'Простой телефонный эффект готов — говорите.';
+            statusEl.textContent = 'Phone Guy AI готов — говорите непрерывно. Первый фрагмент появится после накопления, обработки и выбранной задержки.';
             return;
           }
           if (message.type === 'metrics') {
             if (!Number.isFinite(message.processingMs) || message.processingMs < 0) throw protocolError();
-            if (mode === 'dsp') {
-              s.processingMs = message.processingMs;
-              return;
-            }
             if (!s.ready || !validateRvcMetrics(s, message)) throw protocolError();
             const acknowledged = s.capturePositions.find(position => position.endSample === message.consumedSamples);
             if (!acknowledged) throw protocolError();
@@ -311,27 +258,19 @@ async function begin(test = false) {
           throw protocolError();
         }
 
-        if (mode === 'rvc') {
-          const metrics = s.pendingMetrics;
-          if (!s.ready || !metrics || !data || data.byteLength !== RVC_OUTPUT_BYTES ||
-              data.byteLength !== metrics.outputSamples * 2) throw protocolError();
-          const outputLevel = Math.min(1, level(new Int16Array(data)) * 4);
-          if (session !== s) return;
-          s.node.port.postMessage({type: 'play', pcm: data}, [data]);
-          el('output').value = outputLevel;
-          s.acknowledgedSamples = metrics.consumedSamples;
-          s.expectedOutputStart += metrics.outputSamples;
-          s.capturePositions = s.capturePositions.filter(position => position.endSample > s.acknowledgedSamples);
-          s.processingMs = metrics.processingMs;
-          s.pendingMetrics = null;
-        } else {
-          if (!data || data.byteLength !== CAPTURE_SAMPLES * 2 || !s.pending.length) throw protocolError();
-          s.networkServerMs = performance.now() - s.pending.shift();
-          const outputLevel = Math.min(1, level(new Int16Array(data)) * 4);
-          if (session !== s) return;
-          s.node.port.postMessage({type: 'play', pcm: data}, [data]);
-          el('output').value = outputLevel;
-        }
+        const metrics = s.pendingMetrics;
+        if (!s.ready || !metrics || !data || data.byteLength !== RVC_OUTPUT_BYTES ||
+            data.byteLength !== metrics.outputSamples * 2) throw protocolError();
+        // Read the level before transferring and detaching the reply buffer.
+        const outputLevel = Math.min(1, level(new Int16Array(data)) * 4);
+        if (session !== s) return;
+        s.node.port.postMessage({type: 'play', pcm: data}, [data]);
+        el('output').value = outputLevel;
+        s.acknowledgedSamples = metrics.consumedSamples;
+        s.expectedOutputStart += metrics.outputSamples;
+        s.capturePositions = s.capturePositions.filter(position => position.endSample > s.acknowledgedSamples);
+        s.processingMs = metrics.processingMs;
+        s.pendingMetrics = null;
         s.lastProgress = performance.now();
         s.received++;
       } catch (error) {
@@ -347,27 +286,14 @@ async function begin(test = false) {
   }
 }
 
-startButton.onclick = () => begin(false);
-testButton.onclick = () => begin(true);
+startButton.onclick = () => begin();
 stopButton.onclick = () => stop();
-profileEl.onchange = showProfile;
 el('delay').oninput = () => {
   el('delay-value').textContent = el('delay').value;
   if (session?.node) {
     session.node.port.postMessage({type: 'delay', seconds: +el('delay').value});
-    statusEl.textContent = session.mode === 'rvc'
-      ? 'Дополнительная задержка изменена. Старый отложенный AI-звук очищен.'
-      : 'Задержка изменена. Предыдущий отложенный звук очищен.';
+    statusEl.textContent = 'Дополнительная задержка изменена. Старый отложенный AI-звук очищен.';
   }
 };
-for (const id of ['pitch', 'effect', 'noise', 'gain']) {
-  el(id).oninput = () => {
-    el(id + '-value').textContent = el(id).value;
-    if (session?.ready && session.mode === 'dsp' && session.socket.readyState === WebSocket.OPEN) {
-      session.socket.send(JSON.stringify({type: 'settings', settings: settings()}));
-    }
-  };
-}
-showProfile();
 setControls(false);
 window.addEventListener('pagehide', () => stop());
