@@ -33,6 +33,11 @@ media acceptance claim.
 
 The demo is deployed on VM209 release `20260906T231500Z`.
 
+For the next stage with real telephone hardware, see
+[SIP voice routing](SIP_VOICE_ROUTING.md). It deliberately distinguishes the
+current synthetic conference from the not-yet-implemented SIP identity and
+profile-assignment layer.
+
 - Listener page: `https://voice.lan.awesomeio.ru/conference/` (VPN/private DNS
   required). It is receive-only: its route sends `Permissions-Policy:
   microphone=()` and its client has no `getUserMedia` or audio upload path.
