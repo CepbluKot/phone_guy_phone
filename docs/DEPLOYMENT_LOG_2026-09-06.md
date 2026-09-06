@@ -9,5 +9,15 @@
   `voice.lan.awesomeio.ru`, plus a Caddy VPN-only reverse proxy to
   `192.168.20.70:8080`. The VPS Caddy config validated and the private HTTPS
   health route returned `{"status":"ok"}`.
-- NVIDIA driver installation was started in the guest; final GPU verification
-  and VM reboot evidence are appended after DKMS completes.
+- Rebooted VM 209 after driver installation. `nvidia-smi` reports
+  `NVIDIA GeForce GTX 1050 Ti` with driver `580.173.02`; the Docker container
+  returned to `healthy` after the reboot.
+- Performed a private end-to-end WebSocket check: the `wss://` endpoint
+  accepted a 48 kHz S16LE start packet and returned a processed 1,920-byte PCM
+  frame. No microphone recording was used for this check.
+- Enabled the guest firewall. It denies inbound traffic by default, allows SSH
+  from LAN/VPN, and allows the application port only from the LAN and the VPN
+  Caddy host. The private HTTPS health route and WebSocket check remained
+  healthy after this change.
+- Rechecked Frigate VM 208: it is running and `healthy`, has no `hostpci`
+  entry, and a recent `cam_112` recording is readable (`hevc`).
