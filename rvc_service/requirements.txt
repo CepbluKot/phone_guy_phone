@@ -1,0 +1,8 @@
+# Service additions for the separately provisioned, pinned Phone Guy environment.
+# Model dependencies remain those of experiments/phoneguy; do not use ../requirements.txt.
+fastapi==0.141.1
+starlette==1.6.0
+anyio==4.15.1
+uvicorn==0.34.2
+websockets==15.0.1
+numpy==1.26.4
