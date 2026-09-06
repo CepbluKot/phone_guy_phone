@@ -1,23 +1,16 @@
 <!doctype html>
 <html lang="ru">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Phone Line</title><link rel="stylesheet" href="/static/style.css?v=4"></head>
+<title>Phone Line</title><link rel="stylesheet" href="/static/style.css?v=5"></head>
 <body><main>
 <p class="eyebrow">PRIVATE VPN VOICE LAB</p><h1>PHONE LINE</h1>
-<p>Живой телефонный эффект в стиле Phone Guy. Наденьте наушники, чтобы избежать свиста обратной связи.</p>
+<p>Живой голос Phone Guy с AI-обработкой. Наденьте наушники, чтобы избежать свиста обратной связи.</p>
 <p id="status" role="status">Готов к подключению микрофона</p>
-<label>Профиль <select id="profile"><option value="rvc" selected>Phone Guy — AI</option><option value="dsp">Телефон — простой эффект</option></select></label>
-<div class="controls"><button id="start">Начать</button><button id="stop" disabled>Остановить</button><button id="test">Проверить DSP-линию</button></div>
+<div class="controls"><button id="start">Начать</button><button id="stop" disabled>Остановить</button></div>
 <label>Микрофон <meter id="input" min="0" max="1" value="0"></meter></label>
 <label>Обработанный звук <meter id="output" min="0" max="1" value="0"></meter></label>
 <label>Доп. задержка, сек <input id="delay" type="range" min="0" max="10" value="5" step="0.5"><output id="delay-value">5</output></label>
 <p>Это дополнительная задержка воспроизведения, а не точная общая задержка. Phone Guy AI сначала накапливает речь и обрабатывает её фрагментами. При изменении задержки или остановке старый отложенный звук очищается.</p>
-<fieldset id="dsp-settings" hidden><legend>Настройки простого эффекта</legend>
-  <label>Высота голоса <input id="pitch" type="range" min="-6" max="6" value="-1.5" step="0.5"><output id="pitch-value">-1.5</output></label>
-  <label>Эффект <input id="effect" type="range" min="0" max="1" value="0.85" step="0.05"><output id="effect-value">0.85</output></label>
-  <label>Шум линии <input id="noise" type="range" min="0" max="0.15" value="0.04" step="0.01"><output id="noise-value">0.04</output></label>
-  <label>Громкость, дБ <input id="gain" type="range" min="-18" max="12" value="0" step="1"><output id="gain-value">0</output></label>
-</fieldset>
 <p id="latency">Задержка: —</p><p id="diagnostics">Отправлено / получено: 0 / 0</p>
-<p>«Проверить DSP-линию» использует синусоидальный тон и простой эффект: это проверка связи, а не качества AI-модели. Остановка сразу выключает микрофон и звук; незавершённый фрагмент речи не воспроизводится. Голос звучит в наушниках этой вкладки; микрофон Discord или игры эта демка пока не заменяет.</p>
-</main><script src="/static/app.js?v=4"></script></body></html>
+<p>После запуска дождитесь готовности модели, затем говорите непрерывно и учитывайте выбранную дополнительную задержку. Остановка сразу выключает микрофон и звук и отбрасывает незавершённый последний фрагмент речи. Голос звучит в наушниках этой вкладки; микрофон Discord или игры эта демка пока не заменяет.</p>
+</main><script src="/static/app.js?v=5"></script></body></html>

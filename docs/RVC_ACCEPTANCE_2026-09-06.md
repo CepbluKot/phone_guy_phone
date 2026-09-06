@@ -108,9 +108,11 @@ warnings;19 Node passed. This is source evidence only. New UI/Caddy route remain
 undeployed until the controller runs and records the gates below.
 
 After this tooling was prepared, the user removed the selectable legacy DSP
-profile from the desired final UI. A separate bounded frontend cleanup must land
-before running the deploy script. The underlying HTTP/static service and Caddy
-catch-all remain for transport and rollback; they are not a required UI fallback.
+profile from the desired final UI. The bounded frontend cleanup now leaves only
+Phone Guy, Start/Stop, input/output levels and additional delay. This is source
+evidence only and is not a claim of deployment or physical listening. The
+underlying HTTP/static service and Caddy catch-all remain for transport and
+rollback; they are not a required UI fallback.
 
 Pre-deployment numeric seam inspection of the existing8s core outputs found no
 clipping. Boundary jumps were RU .00018/.00140/.00113 versus step p99 .1044;

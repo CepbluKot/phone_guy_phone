@@ -3,6 +3,18 @@
 Status: approved by the user on 2026-09-06; implementation in progress.
 Date: 2026-09-06.
 
+## Approved amendment: AI-only interface
+
+On 2026-09-06 the user requested removal of the old telephone effect and all
+its controls, then explicitly approved: keep only Phone Guy, Start, Stop,
+input/output indicators and adjustable additional delay; remove profile
+selection, DSP sliders and the old tone test. Preserve the old deployed image
+only as an emergency rollback. This amendment supersedes all requirements
+below for an exposed DSP fallback, profile selector or tone-test button.
+The existing HTTP/static hosting process may remain for this scoped rollout;
+do not couple UI cleanup to a backend/infrastructure rewrite. RVC protocol,
+model preset, buffer limits, privacy and VM isolation remain unchanged.
+
 ## Approved intent and evidence
 
 The user approved the sound of PhoneGuyfnaf1V1 and requested continuous
