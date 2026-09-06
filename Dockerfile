@@ -1,0 +1,10 @@
+FROM python:3.12-slim
+WORKDIR /opt/voice-changer
+RUN useradd --system --create-home voice
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY app app
+COPY web web
+USER voice
+EXPOSE 8080
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
