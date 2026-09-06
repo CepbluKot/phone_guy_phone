@@ -1,6 +1,9 @@
+from pathlib import Path
+
 import numpy as np
 import pytest
 
+import rvc_service.engine as engine_module
 from rvc_service.chunks import (
     CONTEXT_SAMPLES,
     FRAME_BYTES,
@@ -148,3 +151,22 @@ def test_engine_returns_silence_without_running_model_for_silent_window() -> Non
     assert output.shape == (WINDOW_SAMPLES,)
     assert output.dtype == np.float32
     np.testing.assert_array_equal(output, 0)
+
+
+def test_upstream_working_directory_is_scoped_and_restored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service_directory = tmp_path / "service"
+    upstream_directory = tmp_path / "upstream"
+    service_directory.mkdir()
+    upstream_directory.mkdir()
+    monkeypatch.chdir(service_directory)
+
+    with engine_module._working_directory(upstream_directory):
+        assert Path.cwd() == upstream_directory
+    assert Path.cwd() == service_directory
+
+    with pytest.raises(RuntimeError, match="startup failed"):
+        with engine_module._working_directory(upstream_directory):
+            raise RuntimeError("startup failed")
+    assert Path.cwd() == service_directory
