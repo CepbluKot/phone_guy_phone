@@ -8,3 +8,5 @@ __pycache__/
 terraform.tfvars
 *.retry
 .pytest_cache/
+.worktrees/
+.superpowers/
