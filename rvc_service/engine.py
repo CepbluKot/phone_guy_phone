@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 import math
 import os
 from pathlib import Path
@@ -24,6 +26,16 @@ MODEL_NAME = "PhoneGuyfnaf1V1.pth"
 INDEX_NAME = "added_IVF359_Flat_nprobe_1_PhoneGuyfnaf1V1_v2.index"
 MODEL_SAMPLE_RATE = 32_000
 MODEL_INPUT_RATE = 16_000
+
+
+@contextmanager
+def _working_directory(path: Path) -> Iterator[None]:
+    previous = Path.cwd()
+    os.chdir(path)
+    try:
+        yield
+    finally:
+        os.chdir(previous)
 
 
 class Engine:
@@ -82,29 +94,30 @@ class Engine:
             sys.path.remove(upstream_text)
         sys.path.insert(0, upstream_text)
 
-        import torch
-        from configs.config import Config
-        from infer.vc.modules import VC
-        from infer.vc.utils import load_hubert
+        with _working_directory(upstream):
+            import torch
+            from configs.config import Config
+            from infer.vc.modules import VC
+            from infer.vc.utils import load_hubert
 
-        torch.set_num_threads(2)
-        original_argv = sys.argv[:]
-        sys.argv = [sys.argv[0]]
-        try:
-            config = Config()
-        finally:
-            sys.argv = original_argv
-        if not str(config.device).startswith("cuda"):
-            raise RuntimeError("RVC Engine requires a supported CUDA GPU")
-        config.is_half = False
-        config.dtype = torch.float32
-        config.n_cpu = 2
+            torch.set_num_threads(2)
+            original_argv = sys.argv[:]
+            sys.argv = [sys.argv[0]]
+            try:
+                config = Config()
+            finally:
+                sys.argv = original_argv
+            if not str(config.device).startswith("cuda"):
+                raise RuntimeError("RVC Engine requires a supported CUDA GPU")
+            config.is_half = False
+            config.dtype = torch.float32
+            config.n_cpu = 2
 
-        vc = VC(config)
-        vc.get_vc(model.name)
-        vc.hubert_model = load_hubert(config)
-        if vc.tgt_sr != MODEL_SAMPLE_RATE:
-            raise RuntimeError(f"unexpected Phone Guy sample rate: {vc.tgt_sr}")
+            vc = VC(config)
+            vc.get_vc(model.name)
+            vc.hubert_model = load_hubert(config)
+            if vc.tgt_sr != MODEL_SAMPLE_RATE:
+                raise RuntimeError(f"unexpected Phone Guy sample rate: {vc.tgt_sr}")
 
         self._vc = vc
         self._index = str(index)
