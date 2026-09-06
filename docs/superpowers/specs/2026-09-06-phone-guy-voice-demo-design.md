@@ -12,9 +12,9 @@ hears the processed result in the style of the in-universe telephone/radio sound
 of FNaF's Phone Guy.
 
 The first release creates a recognisable *Phone Guy-like communication-channel
-effect*, not an exact synthetic imitation of a particular actor. It must not
-need a downloaded character voice model or transmit microphone audio to a third
-party.
+effect* without transmitting microphone audio to a third party. A locally held
+voice-conversion model may later be connected for a closer character timbre;
+the first delivery is deliberately usable before that optional asset exists.
 
 ## 2. Scope and non-goals
 
@@ -36,7 +36,6 @@ party.
 
 ### Explicitly out of scope for release 1
 
-- Exact cloning of an actor or use of an unlicensed character model.
 - Training a voice-conversion model.
 - A virtual microphone consumable by Discord, Telegram, OBS, or games. That
   requires a separate PipeWire bridge on the workstation and becomes release 2.
@@ -158,7 +157,7 @@ explicit protocol error.
 ## 8. Release 2 decision gate
 
 After release 1 passes, run a measured GPU feasibility spike for RVC inference
-inside VM 209. It may be added only if it fits within the 4 GiB GPU memory
-budget, remains below the 150 ms end-to-end latency target, and uses a model
-whose source and permission are documented. The optional workstation PipeWire
-bridge is a separate release-2 specification after the browser demo works.
+inside VM 209. It may be added when it fits within the 4 GiB GPU memory budget
+and remains below the 150 ms end-to-end latency target. The chosen local model
+is not redistributed by this project. The optional workstation PipeWire bridge
+is a separate release-2 specification after the browser demo works.
