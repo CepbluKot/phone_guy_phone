@@ -2,6 +2,9 @@
 .venv
 .git
 .pytest_cache
+experiments
+.worktrees
+.superpowers
 infra
 docs
 tests

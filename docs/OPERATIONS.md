@@ -1,5 +1,11 @@
 # Voice Changer — эксплуатация
 
+> Этот документ описывает старый DSP production и подготовленную RVC-доставку.
+> Фактическое состояние новой интеграции: [HANDOFF.md](HANDOFF.md). Для RVC НЕ
+> запускать приведённый ниже старый `deploy/deploy.sh`: он копирует большой
+> experiments и затрагивает сетевую настройку. Использовать только проверенный
+> `deploy/deploy-rvc.sh`; до его фактического прогона production остаётся DSP.
+
 Исходники и вся документация: `/home/oleg/Documents/voice-changer` на ноутбуке.
 Runtime: VM 209, `ubuntu@192.168.20.70`, каталог `/opt/voice-changer`.
 UI: https://voice.lan.awesomeio.ru (VPN). Наденьте наушники, обновите страницу
@@ -32,6 +38,51 @@ Discord/OBS не получают виртуальный микрофон авт
 из текущей приёмки. Приоритет — стабильность звука.
 
 ## Проверки и доставка
+
+### RVC: изолированная доставка
+
+Перед запуском проверить `git status`, прочитать
+[RVC acceptance](RVC_ACCEPTANCE_2026-09-06.md) и убедиться, что текущая VM209
+совпадает с baseline. Скрипт рассчитан только на уже настроенную VM209: он не
+создаёт VM, не меняет DNS/VPS, firewall, netplan, ресурсы и Frigate.
+
+```bash
+cd /home/oleg/Documents/voice-changer/.worktrees/rvc-streaming
+./deploy/deploy-rvc.sh
+```
+
+Скрипт сначала выполняет Python/Node unit-тесты. Затем он сохраняет конкретный
+`voice-changer:rollback-<UTC stamp>`, только небольшой source/UI архив, Caddy,
+unit, прежнюю release-ссылку и enabled-state в
+`/opt/voice-rvc/backups/<UTC stamp>`. Каталог `experiments` не копируется.
+RVC release запускается и проходит paced loopback speech gate до смены UI.
+Caddy валидируется до reload; добавляется только `/ws/rvc` на
+`127.0.0.1:8090`, а HTTP/static catch-all остаётся на `.70:8080`. Старый DSP
+образ сохраняется для отката, но его профиль не требуется в финальном UI.
+
+После переключения скрипт проверяет оба private HTTPS health, private WSS,
+ручной restart worker и reconnect. Любой провал запускает возврат сохранённых
+image/source/UI/Caddy/unit/release targets и сохраняет ограниченные журналы без
+PCM. Stamp и backup path печатаются в конце успешного запуска.
+
+Полная синтетическая приёмка private WSS (RU и EN, 960 отсчётов каждые20мс):
+
+```bash
+.venv/bin/python tests/live-rvc.py --seconds 300 \
+  --output-dir /home/oleg/Documents/voice-changer/experiments/phoneguy/outputs/private-wss-acceptance
+```
+
+JSON фиксирует фактическую длительность, sample timeline, processing RTF,
+send drift, лаг, очередь, RAM/GPU и рестарты. WAV-артефакты содержат только
+утверждённые synthetic fixtures и нужны для отдельного прослушивания швов.
+Тест не использует микрофон и не доказывает акустическую end-to-end задержку.
+
+Для ручного отката использовать stamp, напечатанный доставкой. Команды уже
+реализованы в failure trap `deploy-rvc.sh`; перед ручным повтором сначала
+проверить наличие `/opt/voice-rvc/backups/<stamp>` и соответствующего
+`voice-changer:rollback-<stamp>`. Не выбирать «последний» тег вслепую.
+
+### Старый DSP deploy
 
 ```bash
 cd /home/oleg/Documents/voice-changer
