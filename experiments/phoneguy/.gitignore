@@ -1,0 +1,6 @@
+upstream/
+venv/
+models/
+samples/
+outputs/
+*.log
