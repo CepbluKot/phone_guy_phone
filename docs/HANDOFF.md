@@ -36,7 +36,8 @@ Stop немедленно выключает захват/выход и отбр
 | HTTP/static контейнер | voice-changer-voice-1, /opt/voice-changer |
 | Rollback snapshot | /opt/voice-rvc/backups/20260906T161258Z |
 
-Ветка не слита с main и не отправлена в remote. Основной checkout содержит
+Локальная рабочая ветка не слита с локальным main; публикация в GitHub использует
+ветку main репозитория CepbluKot/phone_guy_phone. Основной checkout содержит
 незакоммиченные исследования; их не удалять/не перезаписывать.
 Открытый в IDE proactive-monitoring — другой проект, не трогать.
 

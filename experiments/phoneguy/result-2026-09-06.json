@@ -1,0 +1,65 @@
+{
+  "model": {
+    "version": "v2",
+    "sample_rate": 32000,
+    "f0": 1,
+    "speakers": 109,
+    "unsafe_globals": [],
+    "sha256": "1ff846db9b9ab508b15dff3891da113d004047a378662e2acfe1de0abff109de"
+  },
+  "torch": "2.7.1+cu118",
+  "cuda": "11.8",
+  "gpu": "NVIDIA GeForce GTX 1050 Ti",
+  "precision": "torch.float32",
+  "max_rss_mib": 1947.77734375,
+  "results": [
+    {
+      "input": "en.wav",
+      "input_seconds": 8.0,
+      "output_seconds": 7.98,
+      "wall_seconds": 28.481958011000188,
+      "rtf": 3.5602447513750235,
+      "peak": 0.7822265625,
+      "rms": 0.11879524638953787,
+      "clipping_fraction": 0.0,
+      "gpu_peak_allocated_mib": 1593.501953125,
+      "gpu_peak_reserved_mib": 2304.0
+    },
+    {
+      "input": "en_repeat.wav",
+      "input_seconds": 8.0,
+      "output_seconds": 7.98,
+      "wall_seconds": 1.3619969940000374,
+      "rtf": 0.17024962425000467,
+      "peak": 0.7523193359375,
+      "rms": 0.11814870235302635,
+      "clipping_fraction": 0.0,
+      "gpu_peak_allocated_mib": 1594.439453125,
+      "gpu_peak_reserved_mib": 2346.0
+    },
+    {
+      "input": "ru.wav",
+      "input_seconds": 8.0,
+      "output_seconds": 7.98,
+      "wall_seconds": 1.3502875140002288,
+      "rtf": 0.1687859392500286,
+      "peak": 0.79608154296875,
+      "rms": 0.10317747820556099,
+      "clipping_fraction": 0.0,
+      "gpu_peak_allocated_mib": 1594.439453125,
+      "gpu_peak_reserved_mib": 2346.0
+    },
+    {
+      "input": "ru_repeat.wav",
+      "input_seconds": 8.0,
+      "output_seconds": 7.98,
+      "wall_seconds": 1.3477248859999236,
+      "rtf": 0.16846561074999045,
+      "peak": 0.802215576171875,
+      "rms": 0.10312132569428786,
+      "clipping_fraction": 0.0,
+      "gpu_peak_allocated_mib": 1594.439453125,
+      "gpu_peak_reserved_mib": 2346.0
+    }
+  ]
+}
