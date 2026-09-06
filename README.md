@@ -13,6 +13,7 @@
 
 - [Эксплуатация и диагностика](docs/OPERATIONS.md)
 - [Аудит и проверка](docs/AUDIT_2026-09-06.md)
+- [Как SIP-участнику назначается голос](docs/SIP_VOICE_ROUTING.md)
 - [Исходная спецификация](docs/superpowers/specs/2026-09-06-phone-guy-voice-demo-design.md)
 
 В текущем production работает Phone Guy RVC. В UI нет
