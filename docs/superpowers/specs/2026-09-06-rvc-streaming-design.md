@@ -1,6 +1,8 @@
 # Phone Guy RVC: continuous microphone integration
 
-Status: approved by the user on 2026-09-06; implementation in progress.
+Status: approved; AI-only amendment implemented and deployed on 2026-09-06.
+Technical live gates passed; subjective user listening remains separate.
+Current results: ../../LIVE_STATUS.md.
 Date: 2026-09-06.
 
 ## Approved amendment: AI-only interface
