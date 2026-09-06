@@ -35,12 +35,14 @@ def test_module_allowlist_is_exact_and_contains_release_dependencies():
 
     assert loaded == {
         "app_confbridge",
+        "app_stasis",
         "bridge_softmix",
         "chan_websocket",
         "pbx_config",
         "res_ari",
         "res_ari_asterisk",
         "res_ari_channels",
+        "res_ari_events",
         "res_ari_model",
         "res_http_websocket",
         "res_sorcery_config",
@@ -56,6 +58,28 @@ def test_module_allowlist_is_exact_and_contains_release_dependencies():
     assert "cdr_" not in modules.lower()
     assert "cel_" not in modules.lower()
     assert "res_ari_recordings" not in modules
+
+
+def test_ari_events_is_built_allowlisted_and_health_checked():
+    """ARI event WebSocket support must survive the source-build deployment path."""
+    dockerfile = read("Dockerfile")
+    modules = read("modules.conf")
+    healthcheck = read("healthcheck.sh")
+
+    assert "--enable res_ari_events" in dockerfile
+    assert "load => res_ari_events.so" in modules
+    assert re.search(r"^    res_ari_events \\$", healthcheck, re.MULTILINE)
+
+
+def test_ari_channel_creation_builds_allowlists_and_health_checks_app_stasis():
+    """ARI /channels/create?app= needs the registered Stasis dialplan app."""
+    dockerfile = read("Dockerfile")
+    modules = read("modules.conf")
+    healthcheck = read("healthcheck.sh")
+
+    assert "--enable app_stasis" in dockerfile
+    assert "load => app_stasis.so" in modules
+    assert re.search(r"^    app_stasis \\$", healthcheck, re.MULTILINE)
 
 
 def test_dialplan_profile_and_accounting_are_bounded_and_non_recording():
@@ -86,7 +110,29 @@ def test_source_build_is_reproducible_non_root_and_health_checked():
     assert "CORE-SOUNDS" not in dockerfile
     assert "USER asterisk:asterisk" in dockerfile
     assert 'HEALTHCHECK' in dockerfile
-    assert 'CMD ["asterisk", "-f"' in dockerfile
+    assert "exec asterisk -f" in dockerfile
+
+
+def test_stasis_has_an_explicit_supported_taskpool_config():
+    """Asterisk 22 needs explicit supported bounds for the Stasis task pool."""
+    stasis = read("stasis.conf")
+    dockerfile = read("Dockerfile")
+
+    assert "[taskpool]" in stasis
+    assert "minimum_size" not in stasis
+    assert "initial_size=1" in stasis
+    assert "max_size=4" in stasis
+    assert "[declined_message_types]" not in stasis
+    assert "stasis.conf" in dockerfile
+
+
+def test_astdb_directory_is_created_by_the_non_root_asterisk_process():
+    dockerfile = read("Dockerfile")
+    asterisk = read("asterisk.conf")
+
+    assert "astdbdir => /var/run/asterisk/astdb" in asterisk
+    assert "USER asterisk:asterisk" in dockerfile
+    assert "mkdir -p /var/run/asterisk/astdb" in dockerfile
 
 
 def test_healthcheck_requires_every_allowlisted_module():

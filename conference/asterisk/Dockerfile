@@ -40,12 +40,14 @@ RUN ./configure \
         --disable-category MENUSELECT_MOH \
         --disable-category MENUSELECT_EXTRA_SOUNDS \
         --enable app_confbridge \
+        --enable app_stasis \
         --enable bridge_softmix \
         --enable chan_websocket \
         --enable pbx_config \
         --enable res_ari \
         --enable res_ari_asterisk \
         --enable res_ari_channels \
+        --enable res_ari_events \
         --enable res_ari_model \
         --enable res_http_websocket \
         --enable res_sorcery_config \
@@ -80,7 +82,7 @@ RUN apt-get update \
         --no-create-home --shell /usr/sbin/nologin asterisk
 
 COPY --from=build /opt/asterisk-root/ /
-COPY asterisk.conf cdr.conf cel.conf confbridge.conf extensions.conf http.conf modules.conf /etc/asterisk/
+COPY asterisk.conf cdr.conf cel.conf confbridge.conf extensions.conf http.conf modules.conf stasis.conf /etc/asterisk/
 COPY ari.conf.template /usr/share/asterisk/config/ari.conf.template
 COPY healthcheck.sh /usr/local/bin/asterisk-healthcheck
 
@@ -97,4 +99,4 @@ USER asterisk:asterisk
 HEALTHCHECK --interval=10s --timeout=3s --start-period=20s --retries=3 \
     CMD ["/usr/local/bin/asterisk-healthcheck"]
 
-CMD ["asterisk", "-f", "-C", "/etc/asterisk/asterisk.conf"]
+CMD ["sh", "-c", "mkdir -p /var/run/asterisk/astdb && exec asterisk -f -C /etc/asterisk/asterisk.conf"]
