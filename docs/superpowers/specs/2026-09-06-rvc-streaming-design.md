@@ -1,6 +1,6 @@
 # Phone Guy RVC: continuous microphone integration
 
-Status: proposed; awaiting review of this written specification.
+Status: approved by the user on 2026-09-06; implementation in progress.
 Date: 2026-09-06.
 
 ## Approved intent and evidence
