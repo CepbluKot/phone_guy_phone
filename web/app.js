@@ -30,6 +30,7 @@ function stop(message = 'Остановлено') {
     s.socket?.close(); s.ctx?.close();
   }
   startButton.disabled = false; testButton.disabled = false; stopButton.disabled = true;
+  el('delay').disabled = false;
   el('input').value = 0; el('output').value = 0;
   statusEl.textContent = message;
 }
@@ -42,15 +43,17 @@ async function begin(test = false) {
     queueMs: 0, rtt: 0, processingMs: 0, underruns: 0, dropped: 0};
   session = s;
   startButton.disabled = testButton.disabled = true; stopButton.disabled = false;
+  el('delay').disabled = test;
   statusEl.textContent = test ? 'Проверка линии…' : 'Запрашиваю микрофон…';
   try {
     if (!window.isSecureContext) throw new Error('Нужен HTTPS.');
     s.ctx = new AudioContext({sampleRate: 48000, latencyHint: 'interactive'});
     await s.ctx.resume();
     if (s.ctx.sampleRate !== 48000) throw new Error('Браузер не поддерживает аудио 48 кГц.');
-    await s.ctx.audioWorklet.addModule('/static/audio-worklet.js?v=2');
+    await s.ctx.audioWorklet.addModule('/static/audio-worklet.js?v=3');
     if (session !== s) return;
     s.node = new AudioWorkletNode(s.ctx, 'phone-audio', {numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1], channelCount: 1, channelCountMode: 'explicit'});
+    s.node.port.postMessage({type: 'delay', seconds: +el('delay').value});
     if (test) {
       const oscillator = s.ctx.createOscillator();
       oscillator.frequency.value = 440;
@@ -93,9 +96,9 @@ async function begin(test = false) {
               s.source.start();
               s.testTimer = setTimeout(() => {
                 if (session === s) stop(s.received ? 'Проверка завершена: звук вернулся с сервера. Если тона не было слышно, проверьте громкость и устройство вывода.' : 'Нет ответа со звуком.');
-              }, 4000);
+              }, 4000 + Number(el('delay').value) * 1000);
             }
-            statusEl.textContent = test ? 'Должен быть слышен тестовый тон' : 'Линия подключена — говорите в микрофон';
+            statusEl.textContent = test ? 'Тестовый тон прозвучит после выбранной задержки' : 'Линия подключена — говорите, звук вернётся с выбранной задержкой';
           }
           return;
         }
@@ -112,7 +115,7 @@ async function begin(test = false) {
       if (session !== s) return;
       if (performance.now() - s.lastReply > 6000) return fail(s, new Error('Нет аудиоответа более 6 секунд.'));
       const deviceMs = ((s.ctx.baseLatency || 0) + (s.ctx.outputLatency || 0)) * 1000;
-      const estimate = s.rtt + s.queueMs + deviceMs + 20 + (Math.abs(settings().pitchSemitones) > .001 ? 40 : 0);
+      const estimate = Number(el('delay').value) * 1000 + s.rtt + s.queueMs + deviceMs + 20 + (Math.abs(settings().pitchSemitones) > .001 ? 40 : 0);
       latencyEl.textContent = 'Задержка ≈ ' + Math.round(estimate) + ' мс · сеть + сервер: ' + Math.round(s.rtt) + ' мс';
       el('diagnostics').textContent = 'Отправлено / получено: ' + s.sent + ' / ' + s.received + ' · обработка: ' + s.processingMs.toFixed(1) + ' мс · прерывания: ' + s.underruns + ' · сброшено: ' + s.dropped;
     }, 250);
@@ -121,6 +124,13 @@ async function begin(test = false) {
 startButton.onclick = () => begin(false);
 testButton.onclick = () => begin(true);
 stopButton.onclick = () => stop();
+el('delay').oninput = () => {
+  el('delay-value').textContent = el('delay').value;
+  if (session?.node) {
+    session.node.port.postMessage({type: 'delay', seconds: +el('delay').value});
+    statusEl.textContent = 'Задержка изменена. Предыдущий отложенный звук очищен.';
+  }
+};
 for (const id of ['pitch', 'effect', 'noise', 'gain']) {
   el(id).oninput = () => {
     el(id + '-value').textContent = el(id).value;

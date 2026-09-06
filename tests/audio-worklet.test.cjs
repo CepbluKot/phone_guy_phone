@@ -37,3 +37,32 @@ test('server PCM reaches audio output and backlog stays bounded', () => {
   assert.ok(heard);
   assert.ok(blocks<=150, blocks);
 });
+
+test('selected delay shifts actual PCM by exactly five seconds, without losing samples', () => {
+  const plain = create().node, delayed = create().node;
+  delayed.port.onmessage({data:{type:'delay',seconds:5}});
+  const baseline=[], result=[];
+  for (let block=0;block<350;block++) {
+    const frame=new Int16Array(960).fill(block<20 ? 8192 : 0).buffer;
+    for (const [node,dest] of [[plain,baseline],[delayed,result]]) {
+      node.port.onmessage({data:{type:'play',pcm:frame}});
+      const output=new Float32Array(960);
+      node.process([[]],[[output]]);
+      dest.push(...output);
+    }
+  }
+  assert.ok(result.slice(0,240000).every(x=>x===0));
+  assert.deepEqual(result.slice(240000),baseline.slice(0,result.length-240000));
+  assert.ok(result.some(x=>x!==0));
+});
+
+test('changing delay clears old speech and zero delay immediately plays new PCM', () => {
+  const node=create().node;
+  node.port.onmessage({data:{type:'delay',seconds:5}});
+  for(let i=0;i<10;i++) node.port.onmessage({data:{type:'play',pcm:new Int16Array(960).fill(8192).buffer}});
+  node.process([[]],[[new Float32Array(960)]]);
+  node.port.onmessage({data:{type:'delay',seconds:0}});
+  const output=new Float32Array(960);
+  node.process([[]],[[output]]);
+  assert.ok(output.every(x=>x===.25));
+});

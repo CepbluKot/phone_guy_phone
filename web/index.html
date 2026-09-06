@@ -9,10 +9,12 @@
 <div class="controls"><button id="start">Начать</button><button id="stop" disabled>Остановить</button><button id="test">Проверить звук</button></div>
 <label>Микрофон <meter id="input" min="0" max="1" value="0"></meter></label>
 <label>Обработанный звук <meter id="output" min="0" max="1" value="0"></meter></label>
+<label>Задержка, сек <input id="delay" type="range" min="0" max="10" value="5" step="0.5"><output id="delay-value">5</output></label>
+<p>Звук воспроизводится после выбранной задержки плюс время передачи. При изменении задержки или остановке отложенный звук очищается. «Проверить звук» тоже учитывает задержку.</p>
 <label>Высота голоса <input id="pitch" type="range" min="-6" max="6" value="-1.5" step="0.5"><output id="pitch-value">-1.5</output></label>
 <label>Эффект <input id="effect" type="range" min="0" max="1" value="0.85" step="0.05"><output id="effect-value">0.85</output></label>
 <label>Шум линии <input id="noise" type="range" min="0" max="0.15" value="0.04" step="0.01"><output id="noise-value">0.04</output></label>
 <label>Громкость, дБ <input id="gain" type="range" min="-18" max="12" value="0" step="1"><output id="gain-value">0</output></label>
 <p id="latency">Задержка: —</p><p id="diagnostics">Отправлено / получено: 0 / 0</p>
 <p>Параметры меняются во время разговора. Голос звучит в наушниках этой вкладки; микрофон Discord или игры эта демка пока не заменяет.</p>
-</main><script src="/static/app.js?v=2"></script></body></html>
+</main><script src="/static/app.js?v=3"></script></body></html>
