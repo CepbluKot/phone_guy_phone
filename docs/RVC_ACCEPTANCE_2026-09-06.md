@@ -1,6 +1,8 @@
 # RVC streaming acceptance — 2026-09-06
 
-Status: implementation and validation in progress; not yet deployed as default.
+Status: AI-only deployed and live technical gates passed. Current authoritative
+release/results: [LIVE_STATUS.md](LIVE_STATUS.md). Sections below preserve the
+chronological implementation evidence, including earlier pre-deployment states.
 
 ## Isolation and baseline
 
@@ -119,9 +121,10 @@ clipping. Boundary jumps were RU .00018/.00140/.00113 versus step p99 .1044;
 EN .01273/.00180/.01337 versus step p99 .0878. This does not certify subjective
 seam quality or voice resemblance.
 
-Still pending: actual scoped deployment, private-WSS5min result, real browser
+At this earlier checkpoint still pending were: actual scoped deployment, private-WSS5min result, real browser
 UI, recovery after the deployed worker restart, exercised rollback and physical
-user listening. Do not convert these pending items into pass claims.
+user listening. Subsequent actual results are recorded in LIVE_STATUS.md;
+subjective listening and physical acoustic latency remain distinct from technical tests.
 
 Continuation entry point: [HANDOFF.md](HANDOFF.md). It includes source/runtime
 separation, protocol, exact diagnostic commands, remaining gates and safety
