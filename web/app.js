@@ -94,7 +94,7 @@ function validateRvcMetrics(s, message) {
 async function begin() {
   if (session) return;
   const s = {
-    ready: false, phase: 'connecting', phaseStarted: performance.now(),
+    ready: false, phase: 'preparing', phaseStarted: performance.now(),
     sent: 0, received: 0, sentSamples: 0, acknowledgedSamples: 0,
     capturePositions: [], expectedOutputStart: 0, pendingMetrics: null,
     lastProgress: performance.now(), warmupTimeoutMs: 90000,
@@ -106,6 +106,7 @@ async function begin() {
   s.timer = setInterval(() => {
     if (session !== s) return;
     const now = performance.now();
+    if (s.phase === 'preparing') return;
     if (s.phase === 'connecting') {
       if (now - s.phaseStarted > 10000) {
         const error = new Error('connecting_timeout');
@@ -147,7 +148,7 @@ async function begin() {
     await s.ctx.resume();
     if (session !== s) return;
     if (s.ctx.sampleRate !== SAMPLE_RATE) throw new Error('Браузер не поддерживает аудио 48 кГц.');
-    await s.ctx.audioWorklet.addModule('/static/audio-worklet.js?v=5');
+    await s.ctx.audioWorklet.addModule('/static/audio-worklet.js?v=6');
     if (session !== s) return;
 
     s.node = new AudioWorkletNode(s.ctx, 'phone-audio', {
@@ -204,6 +205,8 @@ async function begin() {
     });
 
     if (session !== s) return;
+    s.phase = 'connecting';
+    s.phaseStarted = performance.now();
     s.socket = new WebSocket('wss://vm-voice-1.lan.awesomeio.ru/ws/rvc');
     s.socket.binaryType = 'arraybuffer';
     s.socket.onopen = () => {

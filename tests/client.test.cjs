@@ -192,6 +192,28 @@ test('connecting without ready times out after ten seconds and releases live res
   assert.equal(ui.get('start').disabled, false);
 });
 
+test('slow microphone permission starts the connection deadline only after permission resolves', async () => {
+  const gate = deferred();
+  const ui = client({micGate: gate});
+  const starting = ui.get('start').onclick();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(ui.socket(), undefined);
+
+  ui.advance(10001);
+  assert.equal(ui.context().closed, undefined);
+  assert.equal(ui.stopped(), false);
+
+  gate.resolve();
+  await starting;
+  const socket = ui.socket();
+  assert.equal(socket.url, 'wss://vm-voice-1.lan.awesomeio.ru/ws/rvc');
+  ui.advance(9999);
+  assert.equal(socket.closed, undefined);
+  socket.onopen();
+  socket.onmessage({data: JSON.stringify(RVC_READY)});
+  assert.match(ui.get('status').textContent, /готов/i);
+});
+
 test('stop during an await and stale replies cannot resurrect capture or playback', async () => {
   const gate = deferred();
   const ui = client({resumeGate: gate});
@@ -201,6 +223,16 @@ test('stop during an await and stale replies cannot resurrect capture or playbac
   gate.resolve();
   await starting;
   assert.equal(ui.socket(), undefined);
+
+  const micGate = deferred();
+  const permission = client({micGate});
+  const awaitingPermission = permission.get('start').onclick();
+  await new Promise(resolve => setImmediate(resolve));
+  permission.get('stop').onclick();
+  micGate.resolve();
+  await awaitingPermission;
+  assert.equal(permission.socket(), undefined);
+  assert.ok(permission.stopped());
 
   const live = client();
   await live.get('start').onclick();
