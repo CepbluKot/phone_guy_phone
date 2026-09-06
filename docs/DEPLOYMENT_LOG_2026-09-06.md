@@ -21,3 +21,19 @@
   healthy after this change.
 - Rechecked Frigate VM 208: it is running and `healthy`, has no `hostpci`
   entry, and a recent `cam_112` recording is readable (`hevc`).
+
+## Audit correction
+
+The first deployment's successful PCM socket probe did not exercise browser
+capture. The browser used an invalid ScriptProcessor buffer and the Pitch
+control was not implemented. Both were corrected during the full audit.
+Also, the UFW-only restriction above did not cover Docker port publishing;
+the current deployment uses a DOCKER-USER allowlist persisted with systemd.
+See `AUDIT_2026-09-06.md` for current evidence and remaining acceptance limits.
+
+- Final deployment uses direct TLS audio at `vm-voice-1.lan.awesomeio.ru`.
+  VM reboot restored Caddy, Docker, ingress rules, certificate timer and GPU.
+- Final 300-second live PCM test: 15000/15000 frames, no underruns or drops,
+  RTT p95 10.22 ms and processing p95 0.936 ms.
+- In-app browser test-tone flow completed after reboot. Busy-session error
+  and recovery of Start/Test buttons were also verified in the real UI.

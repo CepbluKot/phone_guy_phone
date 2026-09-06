@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+from pedalboard import Pedalboard, HighpassFilter, LowpassFilter, Compressor
 
 FRAME_BYTES = 1920
 
@@ -16,6 +17,8 @@ class EffectSettings:
 
 
 def validate_settings(data: dict[str, object]) -> EffectSettings:
+    if not isinstance(data, dict) or any(isinstance(v, bool) for v in data.values()):
+        raise ValueError('settings must be a numeric object')
     values = {
         "pitch_semitones": data.get("pitchSemitones", -1.5),
         "effect_mix": data.get("effectMix", 0.85),
@@ -37,24 +40,54 @@ def validate_settings(data: dict[str, object]) -> EffectSettings:
     return settings
 
 
+class VoiceProcessor:
+    """Session-local filters and crossfaded delay-line pitch effect (20–60 ms history)."""
+
+    def __init__(self, settings: EffectSettings):
+        self.settings = settings
+        self.filters = Pedalboard([HighpassFilter(cutoff_frequency_hz=350),
+                                  LowpassFilter(cutoff_frequency_hz=3400),
+                                  Compressor(threshold_db=-18, ratio=3)])
+        self.history = np.zeros(8192, dtype=np.float32)
+        self.position = 0
+        self.phase = 0.0
+
+    def process(self, frame: bytes) -> bytes:
+        if len(frame) != FRAME_BYTES:
+            raise ValueError("audio frame must contain exactly 960 mono S16LE samples")
+        source = np.frombuffer(frame, dtype='<i2').astype(np.float32) / 32768.0
+        timeline = self.position + np.arange(960)
+        self.history[timeline % len(self.history)] = source
+        settings = self.settings
+        if abs(settings.pitch_semitones) < 0.001:
+            pitched = source
+        else:
+            step = 1 - 2 ** (settings.pitch_semitones / 12)
+            phase = (self.phase + np.arange(960) * step) % 1920
+            other = (phase + 960) % 1920
+
+            def read(delay):
+                positions = timeline - 960 - delay
+                lower = np.floor(positions).astype(np.int64)
+                fraction = positions - lower
+                return (self.history[lower % 8192] * (1 - fraction)
+                        + self.history[(lower + 1) % 8192] * fraction)
+
+            weight = np.sin(np.pi * phase / 1920) ** 2
+            pitched = (read(phase) * weight + read(other) * (1 - weight)).astype(np.float32)
+            self.phase = (self.phase + 960 * step) % 1920
+        band = self.filters(pitched, 48000, reset=False)
+        effected = np.tanh(band * 2) / 1.5
+        if float(np.sqrt(np.mean(source ** 2))) > 0.001:
+            effected += np.sin(timeline * (2 * np.pi * 60 / 48000)) * settings.noise_mix * 0.2
+        mixed = source * (1 - settings.effect_mix) + effected * settings.effect_mix
+        gained = mixed * 10 ** (settings.output_gain_db / 20)
+        self.position += 960
+        return np.rint(np.clip(gained, -1, 32767 / 32768) * 32768).astype('<i2').tobytes()
+
+
 def process_pcm16(frame: bytes, settings: EffectSettings, sample_rate: int = 48000) -> bytes:
-    if len(frame) != FRAME_BYTES:
-        raise ValueError("audio frame must contain exactly 960 mono S16LE samples")
+    """One-shot helper; live audio must retain a VoiceProcessor for the session."""
     if sample_rate != 48000:
         raise ValueError("only 48000 Hz audio is supported")
-    source = np.frombuffer(frame, dtype="<i2").astype(np.float32) / 32768.0
-    # Simple first-order high-pass then low-pass creates the narrow telephone band.
-    high = np.empty_like(source)
-    high[0] = source[0]
-    high[1:] = source[1:] - 0.96 * source[:-1]
-    band = np.empty_like(high)
-    band[0] = high[0]
-    for index in range(1, len(high)):
-        band[index] = band[index - 1] + 0.22 * (high[index] - band[index - 1])
-    # Soft saturation, deterministic line hum, and a bounded output gain.
-    effected = np.tanh(band * 3.0)
-    phase = np.arange(len(source), dtype=np.float32) * (2 * np.pi * 60 / sample_rate)
-    effected += np.sin(phase) * settings.noise_mix
-    mixed = source * (1 - settings.effect_mix) + effected * settings.effect_mix
-    gained = mixed * (10 ** (settings.output_gain_db / 20))
-    return np.clip(gained, -1.0, 0.9999).astype("<f4").__mul__(32768).astype("<i2").tobytes()
+    return VoiceProcessor(settings).process(frame)

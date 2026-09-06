@@ -1,36 +1,102 @@
-# Voice Changer Operations
+# Voice Changer — эксплуатация
 
-## Runtime
+Исходники и вся документация: `/home/oleg/Documents/voice-changer` на ноутбуке.
+Runtime: VM 209, `ubuntu@192.168.20.70`, каталог `/opt/voice-changer`.
+UI: https://voice.lan.awesomeio.ru (VPN). Наденьте наушники, обновите страницу
+и нажмите «Проверить звук» (4 секунды тона), затем «Начать».
 
-- VM: `209` / `voice-changer`, `192.168.20.70`, Ubuntu 24.04.
-- Allocation: 4 vCPU, 4 GiB RAM, 64 GiB local-lvm; NVIDIA GTX 1050 Ti is
-  attached exclusively as PCI `03:00.0`.
-- Private UI: `https://voice.lan.awesomeio.ru`; the name resolves only in the
-  `lan.awesomeio.ru` private zone and Caddy listens on the VPN address.
-- Guest firewall: inbound traffic is denied by default. SSH is allowed from
-  the LAN and VPN; port `8080` is accepted only from the LAN and the VPN Caddy
-  host `10.19.87.1`.
-- Runtime source is copied from this laptop to `/opt/voice-changer` on the VM.
-  The Git source of truth remains this local project.
+## Возможности и ограничения
 
-## Deploy an application update
+Поток 48 кГц mono S16LE, 960 отсчётов / 20 мс. AudioWorklet собирает
+браузерные блоки и воспроизводит ответы через ограниченную очередь.
+Pitch, телефонный фильтр, мягкое насыщение, шум линии и громкость работают
+на сервере. Параметры применяются без переподключения. Состояние DSP
+принадлежит одной сессии; допускается одна активная вкладка.
+
+Это эффект телефонного канала, а не RVC-клонирование тембра. GPU
+GTX 1050 Ti 4 GiB выделена VM 209 и пока не нужна для DSP.
+Discord/OBS не получают виртуальный микрофон автоматически.
+Звук и расшифровки не сохраняются.
+
+Латентность UI — оценка: RTT, очередь воспроизведения, 20 мс кадр,
+примерно 40 мс pitch, объявленная браузером выходная задержка.
+Она не заменяет акустическое измерение. Путь через VPS заметно добавляет
+задержку; по решению пользователя от 2026-09-06 порог <150 мс исключён
+из текущей приёмки. Приоритет — стабильность звука.
+
+## Проверки и доставка
 
 ```bash
-rsync -a --delete --exclude .git --exclude .venv --exclude infra --exclude tests --exclude docs \
-  /home/oleg/Documents/voice-changer/ ubuntu@192.168.20.70:/tmp/voice-changer/
-ssh ubuntu@192.168.20.70 \
-  'sudo rm -rf /opt/voice-changer && sudo mv /tmp/voice-changer /opt/voice-changer && \
-   sudo docker compose -f /opt/voice-changer/compose.yaml up -d --build'
+cd /home/oleg/Documents/voice-changer
+.venv/bin/pytest -q
+node --test tests/*.test.cjs
+node tests/live-audio.cjs 10
+bash deploy/deploy.sh
 ```
 
-## Core checks
+Доставка сохраняет предыдущий runtime в каталоге
+`/opt/voice-changer-backup-<UTC timestamp>` и тегирует предыдущий образ
+`voice-changer:rollback-<UTC timestamp>`. Затем собирает новый образ,
+обновляет контейнер и проверяет HTTPS. В момент обновления текущая
+аудиосессия разрывается; повторите «Начать».
+
+Для восстановления образа выберите конкретный существующий тег
+(`sudo docker image ls voice-changer`), присвойте его `voice-changer:current`
+и выполните `sudo docker compose -p voice-changer -f /opt/voice-changer/compose.yaml up -d --no-build --force-recreate`.
+Не используйте тег без проверки даты. Ранние резервные версии содержат
+исправленные впоследствии дефекты аудио; это средство аварийного отката,
+а не рекомендуемый runtime. Образы/резервные каталоги автоматически не удаляются.
+
+Зависимости зафиксированы с хешами в `requirements.lock`, базовый Docker
+образ — по digest. Для обновления зависимостей используйте
+`uv pip compile requirements.txt --generate-hashes --output-file requirements.lock`,
+затем тесты и `uvx pip-audit -r requirements.lock`.
+
+## Сеть и изоляция
+
+- DNS service: `voice.lan.awesomeio.ru → 10.19.87.1`.
+- DNS VM: `vm-voice-1.lan.awesomeio.ru → 192.168.20.70`.
+- Caddy на VPN VPS проксирует `192.168.20.70:8080`.
+- UI остаётся на прежнем домене; аудио идёт напрямую по TLS к
+  `vm-voice-1.lan.awesomeio.ru:443`. Это исключает лишний путь через VPS
+  для клиента в домашней LAN. Сам UI также доступен на домене VM.
+- Caddy в VM принимает HTTPS только на LAN-адресе; UFW разрешает 443
+  из домашней LAN и VPN. Сертификат обновляется каждые 12 часов через
+  `voice-cert-sync.timer`. SSH-ключ VM на VPS ограничен forced-command,
+  который отдаёт только существующий wildcard-сертификат и его ключ.
+  Приватные ключи находятся только на серверных хостах, вне Git.
+- Docker публикует только LAN IPv4, без IPv6/all-interface listener.
+- `voice-firewall.service` после Docker устанавливает DOCKER-USER правило:
+  разрешены источники `192.168.20.12` (SNAT домашнего VPN-шлюза) и
+  `10.19.87.1`; остальные входящие подключения к 8080 отбрасываются.
+- UFW сам по себе не ограничивает опубликованный Docker-порт.
+- `deploy/60-voice-vpn.yaml` задаёт прямой маршрут к VPN через `.12`.
+- Контейнер: UID 10001, read-only root, без capabilities, 512 MiB, 2 CPU,
+  максимум 128 процессов, ротация логов. Один Uvicorn worker необходим
+  для ограничения одной сессии.
+- VM: 4 vCPU, 4 GiB RAM, 64 GiB local-lvm. Frigate имеет свою VM 208;
+  физический Proxmox хост остаётся общим.
 
 ```bash
 curl -fsS https://voice.lan.awesomeio.ru/healthz
-ssh ubuntu@192.168.20.70 'sudo docker compose -f /opt/voice-changer/compose.yaml ps'
+ssh ubuntu@192.168.20.70 'sudo docker compose -p voice-changer -f /opt/voice-changer/compose.yaml ps'
+ssh ubuntu@192.168.20.70 'sudo systemctl status voice-firewall --no-pager; sudo iptables -nvL VOICE_INGRESS'
 ssh ubuntu@192.168.20.70 nvidia-smi
 ```
 
-No microphone audio is persisted by the application. The current release uses
-deterministic telephone/radio DSP; the GPU is reserved for an optional later
-RVC inference experiment.
+## Если тишина
+
+1. Обновите страницу Ctrl+Shift+R, закройте старые вкладки с демкой.
+2. «Проверить звук» проверяет выход и сервер без микрофона.
+3. «Начать»: разрешите микрофон. Входной индикатор должен реагировать.
+4. Если вход нулевой — проверьте выбранный микрофон и системный mute.
+5. Если выход реагирует, но не слышно — проверьте устройство вывода,
+   громкость системы и отключение звука у вкладки.
+6. Счётчик полученных кадров должен расти вслед за отправленными.
+   Ошибки VPN, разрешения, занятой линии и таймаута показаны в интерфейсе.
+
+Для первичной настройки прямого TLS на новой VM нужны Caddy, отдельный
+SSH-ключ `/root/.ssh/voice-cert-reader`, регистрация его публичной части
+через `deploy/install-vps-export.sh` на VPS и проверенный known_hosts.
+Скрипт доставки предполагает выполненную первичную настройку; текущая VM
+настроена. В случае замены VPS сначала независимо проверьте новый host key.

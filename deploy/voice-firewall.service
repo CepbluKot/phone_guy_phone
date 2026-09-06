@@ -1,0 +1,13 @@
+[Unit]
+Description=Private voice demo Docker ingress
+Requires=docker.service
+After=docker.service network-online.target
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh /opt/voice-changer/deploy/firewall.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=docker.service

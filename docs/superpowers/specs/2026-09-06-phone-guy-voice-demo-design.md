@@ -1,6 +1,6 @@
 # Private Phone Guy-like Voice Demo — Design Specification
 
-**Status:** approved direction, pending specification review  
+**Status:** implemented with audit amendments; physical microphone acceptance pending
 **Date:** 2026-09-06  
 **Owner:** Oleg
 
@@ -84,7 +84,7 @@ The initial effect is deterministic DSP, implemented in the project rather than
 using a hosted voice-changing service:
 
 1. Downmix microphone input to 48 kHz mono 16-bit PCM.
-2. Apply input gate and gain control.
+2. Apply session-local filtering and soft compression; suppress line tone on silence.
 3. Apply gentle pitch shift with a bounded semitone control.
 4. Band-limit the signal to approximately 350–3,400 Hz.
 5. Apply light saturation/compression and optional low-level line noise.
@@ -99,13 +99,13 @@ the release-1 operational limit; a new session receives a clear busy response.
 | Component | Responsibility | Interface |
 | --- | --- | --- |
 | `infra/terraform/` | Provision VM 209, disk, NIC, cloud-init, and exclusive GPU passthrough. | Terraform outputs VM IP and SSH command. |
-| `deploy/compose.yaml` | Start the container with the least needed Linux capabilities and a health check. | Exposes `127.0.0.1:8080` within VM plus LAN listener for Caddy. |
+| `compose.yaml` | Start the container with resource limits, least needed Linux capabilities and a health check. | Exposes `192.168.20.70:8080` behind a Docker ingress allowlist for Caddy. |
 | `app/main.py` | Serve UI, `/healthz`, and `/ws/audio`; own active-session lifecycle. | JSON control frames and binary PCM frames. |
 | `app/dsp.py` | Validate effect settings and transform signed 16-bit PCM chunks. | `process_pcm16(chunk: bytes, settings: EffectSettings) -> bytes`. |
 | `web/` | Browser capture, WebSocket client, AudioWorklet playback, controls, and status. | Sends exactly 960 PCM samples per audio frame at 48 kHz. |
 | `dns-awesomeio/records.tsv` | Add `vm-voice-1` and service record `voice`. | Authoritative private A records. |
 | `dns-awesomeio/caddy/Caddyfile` | Add the VPN-only reverse-proxy host. | `voice.lan.awesomeio.ru` to `http://192.168.20.70:8080`. |
-| `new-vpn/OPERATIONS.md` | Add the VM and private endpoint to current topology. | Current-state documentation only. |
+| `docs/OPERATIONS.md` | Document the VM, private endpoint, deployment and rollback. | Source of truth stays with this project on the laptop. |
 
 Control frames are UTF-8 JSON. Before binary audio begins, the browser must
 send:
@@ -113,6 +113,11 @@ send:
 ```json
 {"type":"start","sampleRate":48000,"channels":1,"sampleFormat":"s16le","settings":{"pitchSemitones":-1.5,"effectMix":0.85,"noiseMix":0.04,"outputGainDb":0}}
 ```
+
+After `ready`, `settings` control messages update the session and receive
+`settings_applied`. A second session receives `busy`. Before each binary
+reply the server sends a `metrics` message with sequence and processingMs.
+The browser measures RTT by pairing ordered PCM responses with sends.
 
 Each audio frame is exactly 1,920 bytes: 960 little-endian signed 16-bit mono
 samples, representing 20 ms at 48 kHz. The matching reply is the processed
@@ -143,9 +148,10 @@ explicit protocol error.
    `https://voice.lan.awesomeio.ru` from a VPN client.
 4. A browser microphone permission prompt appears at the private HTTPS URL;
    speaking produces audible transformed output with no saved audio files.
-5. The UI displays a measured live latency and must stay below 150 ms in a
-   five-minute LAN/VPN test without WebSocket reconnects or browser audio
-   underruns.
+5. The UI displays live transport latency and an explicitly approximate
+   end-to-end latency. User amendment on 2026-09-06: the <150 ms target is
+   deferred; prioritize stable audible output and bounded buffering. Run a
+   five-minute LAN/VPN synthetic audio test and report any interruptions.
 6. Requests using `voice.lan.awesomeio.ru` against public `94.102.89.13` are
    rejected; no direct public port exists for the VM backend.
 7. Frigate remains healthy: VM 208 running, container healthy, recordings

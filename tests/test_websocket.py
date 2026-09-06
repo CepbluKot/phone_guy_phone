@@ -8,6 +8,7 @@ def test_audio_socket_returns_processed_frame() -> None:
         socket.send_json({"type": "start", "sampleRate": 48000, "channels": 1, "sampleFormat": "s16le", "settings": {}})
         assert socket.receive_json()["type"] == "ready"
         socket.send_bytes(b"\x00\x10" * 960)
+        assert socket.receive_json()['type'] == 'metrics'
         assert len(socket.receive_bytes()) == 1920
 
 
