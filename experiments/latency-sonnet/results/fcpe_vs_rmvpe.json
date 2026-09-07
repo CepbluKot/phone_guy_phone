@@ -1,0 +1,13 @@
+{
+  "what": "f0method comparison on the actual live demo engine (infer/rtrvc.py via rt_engine.RtEngine), same model/index/config as rt_server.py (block=0.3s, extra=1.5s), on VM209's GTX 1050 Ti.",
+  "dependencies_added_for_this_test": {
+    "method": "pip install --no-deps --target=/tmp/fcpe_pkgs <pkg> for torchfcpe, einops, local-attention, hyper-connections (43MB total, no torch reinstall this time -- lesson learned from the first FCPE attempt in LATENCY_RESEARCH_SONNET_2026-09-07.md which triggered a 5GB+ torch redownload by not using --no-deps)",
+    "location": "/tmp/fcpe_pkgs on VM209, not installed into /opt/voice-rvc/venv (shared prod env untouched)"
+  },
+  "per_call_timing_20_blocks": {
+    "rmvpe": {"p50_ms": 119.35, "p95_ms": 195.48, "min_ms": 105.66, "max_ms": 198.63},
+    "fcpe":  {"p50_ms": 86.21,  "p95_ms": 146.4,  "min_ms": 84.13,  "max_ms": 163.19}
+  },
+  "reading": "FCPE is ~28% faster at p50 (86ms vs 119ms) and ~25% faster at p95 (146ms vs 195ms) on this GPU/model -- matches the community-reported ~30% figure closely. Both audio outputs are healthy (not silent/garbage: rmvpe rms=0.1017 peak=0.7495, fcpe rms=0.1027 peak=0.7717) but I did not and cannot judge whether FCPE changes the perceived character/quality of this specific Phone Guy voice -- that needs a human listen, same as every other quality judgment in this project's docs. Audio for that: experiments/latency-sonnet/samples/ab_rmvpe.wav vs ab_fcpe.wav (same 8s ru.wav input, same engine, only f0method differs).",
+  "not_yet_switched_in_the_live_demo": "rt_server.py's default engine still uses rmvpe (BLOCK_S/EXTRA_S constants unchanged, f0method defaults to rmvpe in RtEngine.__init__). Switching the demo to fcpe would need torchfcpe+deps installed wherever rt_server.py actually runs (currently /tmp/fcpe_pkgs via PYTHONPATH, ephemeral) -- left as a decision for whoever listens to the A/B pair, not made unilaterally here since it's the one open question only a human ear can settle."
+}
