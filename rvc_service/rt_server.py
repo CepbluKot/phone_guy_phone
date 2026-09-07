@@ -75,6 +75,17 @@ GLM_ROOT = "/tmp/rt_demo_glm"
 GLM_PYTHON = "/opt/voice-rvc/venv/bin/python3"
 GLM_TIMEOUT_S = 150.0
 
+# Median F0 (YIN, see pitch.py) measured locally from the reference clip
+# the user provided (a Phone Guy line made with Voicemod, judged as
+# actually sounding like the character) -- not shipped to this server,
+# just this one derived number. ?transpose=auto on /api/compare measures
+# the *caller's* median F0 the same way and picks the semitone shift that
+# would bring it to this target, instead of making the caller guess one by
+# ear. Only pitch register; see set_formant_shift for why that's not
+# auto-computed the same way.
+TARGET_MEDIAN_F0_HZ = 110.8
+AUTO_TRANSPOSE_LIMIT = 12
+
 _ids = itertools.count(1)
 
 
@@ -505,6 +516,7 @@ def create_app(engine_factory):
     async def _run_compare_job(
         job_id: str, audio_48k, input_wav_bytes: bytes,
         transpose: int = 0, index_rate: float | None = None, formant_shift: float = 0.0,
+        auto_transpose_note: str | None = None,
     ) -> None:
         import base64
         import io
@@ -526,7 +538,9 @@ def create_app(engine_factory):
                 buf = io.BytesIO()
                 sf.write(buf, converted, SAMPLE_RATE, format="WAV", subtype="PCM_16")
                 label = variant["label"]
-                if transpose:
+                if auto_transpose_note:
+                    label += f" · {auto_transpose_note}"
+                elif transpose:
                     label += f" · транспонирование {transpose:+d} полутонов"
                 if formant_shift:
                     label += f" · формант {formant_shift:+g}"
@@ -611,11 +625,15 @@ def create_app(engine_factory):
         if getattr(app.state, "engine", None) is None:
             return JSONResponse({"code": "model_unavailable"}, status_code=503)
 
-        try:
-            transpose = int(request.query_params.get("transpose", "0"))
-        except ValueError:
-            return JSONResponse({"code": "invalid_request", "message": "transpose must be an integer"}, status_code=400)
-        transpose = max(-24, min(24, transpose))
+        transpose_param = request.query_params.get("transpose", "auto")
+        auto_transpose = transpose_param.strip().lower() == "auto"
+        transpose = 0
+        if not auto_transpose:
+            try:
+                transpose = int(transpose_param)
+            except ValueError:
+                return JSONResponse({"code": "invalid_request", "message": "transpose must be an integer or \"auto\""}, status_code=400)
+            transpose = max(-24, min(24, transpose))
         index_rate_param = request.query_params.get("indexRate")
         index_rate = None
         if index_rate_param is not None:
@@ -658,6 +676,23 @@ def create_app(engine_factory):
         audio_48k = pcm16.astype(np.float32) / 32768.0
         input_seconds = round(pcm16.size / SAMPLE_RATE, 2)
 
+        auto_transpose_note = None
+        if auto_transpose:
+            from .pitch import estimate_median_f0
+
+            median_f0 = estimate_median_f0(audio_48k, SAMPLE_RATE)
+            if median_f0 is None:
+                transpose = 0
+                auto_transpose_note = "не удалось измерить высоту голоса в записи, транспонирование не применено"
+            else:
+                import math
+
+                transpose = max(
+                    -AUTO_TRANSPOSE_LIMIT, min(AUTO_TRANSPOSE_LIMIT,
+                    round(12 * math.log2(TARGET_MEDIAN_F0_HZ / median_f0))),
+                )
+                auto_transpose_note = f"авто: ваша высота ~{median_f0:.0f}Гц -> сдвиг {transpose:+d} полутонов"
+
         import io
 
         import soundfile as sf
@@ -672,8 +707,12 @@ def create_app(engine_factory):
         asyncio.create_task(_run_compare_job(
             job_id, audio_48k, wav_buf.getvalue(),
             transpose=transpose, index_rate=index_rate, formant_shift=formant_shift,
+            auto_transpose_note=auto_transpose_note,
         ))
-        return JSONResponse({"jobId": job_id, "inputSeconds": input_seconds, "order": order})
+        return JSONResponse({
+            "jobId": job_id, "inputSeconds": input_seconds, "order": order,
+            "autoTransposeNote": auto_transpose_note,
+        })
 
     static_dir = __import__("pathlib").Path(__file__).resolve().parent.parent / "web-rt"
     if static_dir.exists():

@@ -192,7 +192,7 @@ async function startCompareJob(body, headers) {
   statusEl.textContent = 'Отправляю…';
   setControlsDisabled(true);
   try {
-    const transpose = el('transpose').value || '0';
+    const transpose = el('autoTranspose').checked ? 'auto' : (el('transpose').value || '0');
     const formant = el('formant').value || '0';
     const indexRate = el('indexRate').value || '0.6';
     const query = '?transpose=' + encodeURIComponent(transpose) +
@@ -283,6 +283,9 @@ window.addEventListener('pagehide', () => stopRecording('discard'));
 
 fileInput.onchange = () => { fileGoButton.disabled = busy || !fileInput.files.length; };
 fileGoButton.onclick = () => processFile();
+
+const autoTransposeCheckbox = el('autoTranspose');
+autoTransposeCheckbox.onchange = () => { el('transpose').disabled = autoTransposeCheckbox.checked; };
 
 (function resumeFromUrl() {
   const jobId = new URLSearchParams(location.search).get('job');
