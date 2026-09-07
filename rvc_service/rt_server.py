@@ -28,7 +28,7 @@ import itertools
 import json
 import time
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -297,6 +297,27 @@ def create_app(engine_factory):
             await socket.close(code=1013)
             return
         await room.handle_listener(socket)
+
+    @app.post("/api/tts")
+    async def tts(request: Request):
+        from .rt_tts import TtsError, text_to_phone_guy
+
+        if getattr(app.state, "engine", None) is None:
+            return JSONResponse({"code": "model_unavailable"}, status_code=503)
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"code": "invalid_request"}, status_code=400)
+        text = body.get("text") if isinstance(body, dict) else None
+        lang = body.get("lang") if isinstance(body, dict) else None
+        if not isinstance(text, str) or lang not in ("ru", "en"):
+            return JSONResponse({"code": "invalid_request"}, status_code=400)
+        try:
+            wav_bytes = await text_to_phone_guy(app.state, text, lang, next(_ids))
+        except TtsError as exc:
+            code = str(exc).split(":", 1)[0]
+            return JSONResponse({"code": code, "message": str(exc)}, status_code=422)
+        return Response(content=wav_bytes, media_type="audio/wav")
 
     static_dir = __import__("pathlib").Path(__file__).resolve().parent.parent / "web-rt"
     if static_dir.exists():

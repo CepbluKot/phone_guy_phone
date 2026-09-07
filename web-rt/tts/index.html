@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="ru">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RTRVC text-to-Phone Guy</title><link rel="stylesheet" href="/style.css">
+<style>textarea{width:100%;min-height:120px;font:inherit;background:#0c1210;color:#c2ffe0;border:1px solid #358d5c;padding:8px;box-sizing:border-box}select{font:inherit;padding:6px}audio{width:100%;margin-top:16px}</style>
+</head>
+<body><main>
+<p class="eyebrow">EXPERIMENTAL — TEXT TO PHONE GUY</p><h1>Текст → голос</h1>
+<p>Вводите текст — сначала обычный синтез речи (Piper, без AI-конвертации),
+затем результат проходит через тот же движок <code>infer/rtrvc.py</code>,
+что и живые демки. Микрофон не нужен. <a href="/">← все варианты голоса</a></p>
+<label>Язык
+  <select id="lang"><option value="ru" selected>Русский</option><option value="en">English</option></select>
+</label>
+<textarea id="text" maxlength="400" placeholder="Введите текст (до 400 символов)…">Привет! Это проверка синтеза речи голосом Phone Guy.</textarea>
+<div class="controls"><button id="go">Озвучить</button></div>
+<p id="status" role="status"></p>
+<audio id="player" controls hidden></audio>
+<p>Это research-демо (ветка research/latency-sonnet), не продакшен Phone Guy.
+Текст и звук не сохраняются на сервере после ответа.</p>
+</main><script src="/tts/app.js"></script></body></html>

@@ -67,6 +67,15 @@ class BotRoom:
         engine = self.state.engine
         indices = {bot.name: 0 for bot in self.bots}
         while True:
+            if not self.listeners:
+                # Without this, the bots kept consuming the shared GPU lock
+                # 24/7 even with an empty room, silently eating into every
+                # other session's real-time margin (this is what caused a
+                # solo v3-rmvpe-fast session -- RTF~0.73 on its own -- to
+                # hit "overloaded": it was actually contending with 2 always
+                # -on bots the whole time).
+                await asyncio.sleep(0.5)
+                continue
             for bot in self.bots:
                 frames = frames_by_bot[bot.name]
                 frame = frames[indices[bot.name] % len(frames)]
