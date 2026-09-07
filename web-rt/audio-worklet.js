@@ -18,10 +18,18 @@ class RtAudio extends AudioWorkletProcessor {
     this.holdSamples = 0;
     this.overloaded = false;
     this.underruns = 0;
+    this.delayLine = new Float32Array(0);
+    this.delayPosition = 0;
     this.port.onmessage = ({data}) => this.onMessage(data);
   }
 
   onMessage(data) {
+    if (data.type === 'delay') {
+      if (!Number.isFinite(data.seconds) || data.seconds < 0 || data.seconds > 10) return;
+      this.delayLine = new Float32Array(Math.round(data.seconds * SAMPLE_RATE));
+      this.delayPosition = 0;
+      return;
+    }
     if (data.type !== 'play' || !data.pcm) return;
     if (data.pcm.byteLength % 2 !== 0) return;
     const packet = new Int16Array(data.pcm);
@@ -71,6 +79,12 @@ class RtAudio extends AudioWorkletProcessor {
             this.playOffset = 0;
           }
         }
+      }
+      if (this.delayLine.length) {
+        const current = output[i];
+        output[i] = this.delayLine[this.delayPosition];
+        this.delayLine[this.delayPosition] = current;
+        this.delayPosition = (this.delayPosition + 1) % this.delayLine.length;
       }
     }
     return true;

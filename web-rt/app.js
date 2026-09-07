@@ -2,9 +2,12 @@
 
 const SAMPLE_RATE = 48000;
 const CAPTURE_SAMPLES = 960;
+const VARIANT = window.RT_VARIANT || '';
+const WS_PATH = VARIANT ? '/ws/rvc/' + VARIANT : '/ws/rvc';
 const el = id => document.getElementById(id);
 const startButton = el('start'), stopButton = el('stop');
 const statusEl = el('status'), latencyEl = el('latency');
+const delayInput = el('delay'), delayValue = el('delay-value');
 let session = null;
 
 function level(pcm) {
@@ -71,6 +74,7 @@ async function begin() {
       numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1],
       channelCount: 1, channelCountMode: 'explicit'
     });
+    if (delayInput) s.node.port.postMessage({type: 'delay', seconds: +delayInput.value});
     s.node.port.onmessage = ({data}) => {
       if (session !== s) return;
       if (data.type === 'error') return fail(s, data.code);
@@ -90,7 +94,7 @@ async function begin() {
     s.stream.getTracks().forEach(track => { track.onended = () => fail(s, 'Микрофон отключён.'); });
 
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    s.socket = new WebSocket(proto + '//' + location.host + '/ws/rvc');
+    s.socket = new WebSocket(proto + '//' + location.host + WS_PATH);
     s.socket.binaryType = 'arraybuffer';
     s.socket.onopen = () => s.socket.send(JSON.stringify({
       type: 'start', version: 1, sampleRate: SAMPLE_RATE, channels: 1, sampleFormat: 's16le'
@@ -133,5 +137,11 @@ async function begin() {
 
 startButton.onclick = () => begin();
 stopButton.onclick = () => stop();
+if (delayInput) {
+  delayInput.oninput = () => {
+    if (delayValue) delayValue.textContent = delayInput.value;
+    if (session?.node) session.node.port.postMessage({type: 'delay', seconds: +delayInput.value});
+  };
+}
 setControls(false);
 window.addEventListener('pagehide', () => stop());

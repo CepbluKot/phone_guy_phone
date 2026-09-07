@@ -13,8 +13,12 @@ whenever the engine switches from serving one session to another, so one
 caller's pitch history never bleeds into another's (see
 experiments/latency-sonnet/scripts/rt_restart_check.py for why that matters).
 
-Also serves the demo static files (web-rt/) on the same port so the whole
-thing is reachable through a single SSH-forwarded port.
+Exposes several parameter VARIANTS side by side (different block_time/pitch
+method combinations) on distinct paths, sharing the one loaded engine --
+see docs/LATENCY_VERDICT_SONNET_2026-09-07.md for what each trades off; the
+point is to let a human ear pick, not to declare a winner here.
+
+Also serves the demo static files (web-rt/) on the same port.
 """
 from __future__ import annotations
 
@@ -30,12 +34,31 @@ from fastapi.staticfiles import StaticFiles
 
 from .rt_chunks import FRAME_BYTES, RtFramer, RtStitcher, SAMPLE_RATE
 
-BLOCK_S = 0.3
-EXTRA_S = 1.5
 CROSSFADE_S = 0.05
 SEARCH_S = 0.02
 MAX_SESSIONS = 4
 STALL_SECONDS = 15.0
+
+# Each variant is reachable at /ws/rvc/<key> and web-rt/<key>/index.html.
+VARIANTS = {
+    "v1-rmvpe": {
+        "label": "RMVPE, блок 0.3с (сегодняшний вариант по умолчанию)",
+        "block_s": 0.3, "extra_s": 1.5, "f0method": "rmvpe",
+    },
+    "v2-fcpe": {
+        "label": "FCPE, блок 0.3с (~28% быстрее по питчу, качество не проверено на слух)",
+        "block_s": 0.3, "extra_s": 1.5, "f0method": "fcpe",
+    },
+    "v3-rmvpe-fast": {
+        "label": "RMVPE, блок 0.15с (агрессивно, самый малый запас RTF)",
+        "block_s": 0.15, "extra_s": 2.5, "f0method": "rmvpe",
+    },
+    "v4-fcpe-fast": {
+        "label": "FCPE, блок 0.15с (агрессивно + быстрый питч)",
+        "block_s": 0.15, "extra_s": 2.5, "f0method": "fcpe",
+    },
+}
+DEFAULT_VARIANT = "v1-rmvpe"
 
 _ids = itertools.count(1)
 
@@ -45,12 +68,17 @@ class SessionError(Exception):
 
 
 class Session:
-    def __init__(self, socket: WebSocket, state):
+    def __init__(self, socket: WebSocket, state, variant_key: str):
         self.id = next(_ids)
         self.socket = socket
         self.state = state
-        self.framer = RtFramer(block_s=BLOCK_S, extra_s=EXTRA_S, crossfade_s=CROSSFADE_S, search_s=SEARCH_S)
-        self.stitcher = RtStitcher(tgt_sr=SAMPLE_RATE, block_s=BLOCK_S, crossfade_s=CROSSFADE_S, search_s=SEARCH_S)
+        self.variant_key = variant_key
+        variant = VARIANTS[variant_key]
+        self.f0method = variant["f0method"]
+        self.framer = RtFramer(block_s=variant["block_s"], extra_s=variant["extra_s"],
+                                crossfade_s=CROSSFADE_S, search_s=SEARCH_S)
+        self.stitcher = RtStitcher(tgt_sr=SAMPLE_RATE, block_s=variant["block_s"],
+                                    crossfade_s=CROSSFADE_S, search_s=SEARCH_S)
         self.queue: asyncio.Queue = asyncio.Queue(maxsize=4)
         self.accept_audio = False
         self.progress = time.monotonic()
@@ -97,7 +125,7 @@ class Session:
                 out_np = await loop.run_in_executor(
                     self.state.executor, engine.convert_block_48k,
                     window_16k, self.framer.block_16k, self.framer.skip_head_frames,
-                    self.framer.return_length_frames,
+                    self.framer.return_length_frames, self.f0method,
                 )
             pcm = self.stitcher.render(out_np)
             metadata = {
@@ -125,16 +153,26 @@ def create_app(engine_factory):
         state.status = "warming"
         state.engine = None
         loop = asyncio.get_running_loop()
+
         def load_and_warm():
             engine = engine_factory()
-            # Absorb the one-time RMVPE lazy-load (infer/rtrvc.py loads it on
-            # its *first* inference call, not during construction) here, not
-            # on whichever session happens to connect first.
-            sizing = RtFramer(block_s=BLOCK_S, extra_s=EXTRA_S, crossfade_s=CROSSFADE_S, search_s=SEARCH_S)
+            # Absorb each f0method's one-time lazy model load (infer/rtrvc.py
+            # loads rmvpe/fcpe on their *first* inference call, not during
+            # construction) here, not on whichever session connects first.
+            # Block/extra size doesn't gate a lazy load, so one sizing per
+            # distinct f0method used across VARIANTS is enough.
             import numpy as np
 
-            zeros = np.zeros(sizing.window_16k, dtype=np.float32)
-            engine.convert_block(zeros, sizing.block_16k, sizing.skip_head_frames, sizing.return_length_frames)
+            seen_methods = set()
+            for variant in VARIANTS.values():
+                if variant["f0method"] in seen_methods:
+                    continue
+                seen_methods.add(variant["f0method"])
+                sizing = RtFramer(block_s=variant["block_s"], extra_s=variant["extra_s"],
+                                   crossfade_s=CROSSFADE_S, search_s=SEARCH_S)
+                zeros = np.zeros(sizing.window_16k, dtype=np.float32)
+                engine.convert_block(zeros, sizing.block_16k, sizing.skip_head_frames,
+                                      sizing.return_length_frames, variant["f0method"])
             return engine
 
         state.loading = loop.run_in_executor(state.executor, load_and_warm)
@@ -165,13 +203,19 @@ def create_app(engine_factory):
     async def healthz():
         return JSONResponse(
             {"status": app.state.status, "activeSessions": app.state.active_sessions,
-             "maxSessions": MAX_SESSIONS, "blockS": BLOCK_S, "extraS": EXTRA_S},
+             "maxSessions": MAX_SESSIONS,
+             "variants": {k: {"label": v["label"], "blockS": v["block_s"], "extraS": v["extra_s"],
+                               "f0method": v["f0method"]} for k, v in VARIANTS.items()}},
             status_code=200 if app.state.status == "ready" else 503,
         )
 
-    @app.websocket("/ws/rvc")
-    async def websocket(socket: WebSocket):
+    async def run_session(socket: WebSocket, variant_key: str):
         await socket.accept()
+        if variant_key not in VARIANTS:
+            await socket.send_json({"type": "error", "code": "invalid_start",
+                                     "message": f"unknown variant {variant_key!r}"})
+            await socket.close()
+            return
         if app.state.status == "warming":
             await socket.send_json({"type": "warming", "timeoutSeconds": 60})
             with suppress(Exception):
@@ -187,7 +231,7 @@ def create_app(engine_factory):
             return
 
         app.state.active_sessions += 1
-        session = Session(socket, app.state)
+        session = Session(socket, app.state, variant_key)
         tasks = []
         try:
             opening = await asyncio.wait_for(socket.receive(), STALL_SECONDS)
@@ -200,11 +244,13 @@ def create_app(engine_factory):
 
             receiver = asyncio.create_task(session.receive())
             tasks.append(receiver)
+            variant = VARIANTS[variant_key]
             await socket.send_json({
                 "type": "ready", "version": 1, "sampleRate": SAMPLE_RATE,
                 "channels": 1, "sampleFormat": "s16le",
                 "blockSamples": session.framer.block_48k,
-                "blockSeconds": BLOCK_S, "extraSeconds": EXTRA_S,
+                "blockSeconds": variant["block_s"], "extraSeconds": variant["extra_s"],
+                "f0method": variant["f0method"], "variant": variant_key,
                 "sessionId": session.id,
             })
             session.accept_audio = True
@@ -235,6 +281,14 @@ def create_app(engine_factory):
             app.state.active_sessions -= 1
             with suppress(RuntimeError):
                 await socket.close()
+
+    @app.websocket("/ws/rvc/{variant_key}")
+    async def websocket_variant(socket: WebSocket, variant_key: str):
+        await run_session(socket, variant_key)
+
+    @app.websocket("/ws/rvc")
+    async def websocket_default(socket: WebSocket):
+        await run_session(socket, DEFAULT_VARIANT)
 
     @app.websocket("/ws/listen")
     async def listen(socket: WebSocket):
