@@ -109,6 +109,13 @@ async function begin() {
           s.processingMs = message.processingMs;
           return;
         }
+        if (message.type === 'autoTranspose') {
+          s.autoTransposeText = message.measuredHz
+            ? 'авто-транспонирование: ваша высота ~' + Math.round(message.measuredHz) + 'Гц -> сдвиг ' +
+              message.semitones.toFixed(2) + ' полутонов'
+            : 'авто-транспонирование не применено (не удалось измерить высоту)';
+          return;
+        }
         if (message.type === 'stopped') return;
         return;
       }
@@ -117,7 +124,8 @@ async function begin() {
       s.node.port.postMessage({type: 'play', pcm}, [pcm]);
       s.received++;
       latencyEl.textContent = 'Обработка блока: ' + s.processingMs.toFixed(0) + ' мс';
-      el('diagnostics').textContent = 'Отправлено кадров / получено блоков: ' + s.sent + ' / ' + s.received;
+      el('diagnostics').textContent = 'Отправлено кадров / получено блоков: ' + s.sent + ' / ' + s.received +
+        (s.autoTransposeText ? ' · ' + s.autoTransposeText : ' · авто-транспонирование: измеряю первые 2с…');
     };
     s.socket.onerror = () => fail(s, 'Не удалось подключиться.');
     s.socket.onclose = () => { if (session === s) stop('Соединение закрыто.'); };
