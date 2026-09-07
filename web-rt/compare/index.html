@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>RTRVC: подбор параметров</title><link rel="stylesheet" href="/rtrvc.css">
+<title>RTRVC: сравнение с другими агентами</title><link rel="stylesheet" href="/rtrvc.css">
 <style>
 .result{border:1px solid #358d5c;padding:12px;margin:12px 0;background:#0c1210}
 .result h3{margin:0 0 6px}
@@ -10,16 +10,18 @@
 #timer{font-variant-numeric:tabular-nums}
 </style></head>
 <body><main>
-<p class="eyebrow">EXPERIMENTAL — ПОДБОР ПАРАМЕТРОВ</p>
-<h1>Подбор транспонирования/форманта</h1>
-<p>Сравнение с GPT/GLM временно отключено (каждый добавлял 20-30с ожидания,
-а их скрипты пока не принимают параметры ниже) — пока только наш вариант,
-чтобы быстрее крутить настройки. Запишите одну фразу микрофоном (до 12с)
-или загрузите готовый аудиофайл (до 60с, любой формат). После отправки в
-адресной строке появится ссылка вида <code>?job=...</code> — сохраните
-её, чтобы вернуться к этому результату позже; статус обновляется по
-вебсокету, а не постоянными запросами, так что кратковременный обрыв
-связи просто переподключится, а не зависнет.
+<p class="eyebrow">EXPERIMENTAL — ТРИ ИСТОЧНИКА + ПОДБОР ПАРАМЕТРОВ</p>
+<h1>Сравнить с другими агентами</h1>
+<p>GPT и GLM снова считаются (были ненадолго отключены, чтобы быстрее крутить
+настройки на нашем варианте) — оба теперь тоже получают то же
+транспонирование, что и наш вариант (автоматическое или ручное — см. ниже),
+хотя формант/index_rate у них пока не настраиваются. Каждый добавляет
+15-30с. Запишите одну фразу микрофоном (до 12с) или загрузите готовый
+аудиофайл (до 60с, любой формат). После отправки в адресной строке появится
+ссылка вида <code>?job=...</code> — сохраните её, чтобы вернуться к этому
+результату позже; статус обновляется по вебсокету, а не постоянными
+запросами, так что кратковременный обрыв связи просто переподключится, а не
+зависнет.
 <a href="/">← голос в реальном времени</a></p>
 <p>Наш вариант почти всегда звучит с оттенком исходного голоса: слышно, кто именно
 говорит, по высоте и тембру. RVC переносит тембр модели, но
@@ -38,7 +40,7 @@
 вашего голоса.</p>
 <div class="controls">
   <label><input id="autoTranspose" type="checkbox" checked> Авто-транспонирование</label>
-  <label>вручную <input id="transpose" type="number" value="0" min="-24" max="24" step="1" style="width:4em" disabled> полутонов</label>
+  <label>вручную <input id="transpose" type="number" value="0" min="-24" max="24" step="0.1" style="width:5em" disabled> полутонов</label>
   <label>Формант <input id="formant" type="number" value="0" min="-12" max="12" step="0.5" style="width:4em"></label>
   <label>index_rate <input id="indexRate" type="number" value="0.6" min="0" max="1" step="0.05" style="width:5em"></label>
 </div>

@@ -21,7 +21,7 @@ async def convert_utterance(
     f0method: str,
     crossfade_s: float = 0.05,
     search_s: float = 0.02,
-    transpose: int = 0,
+    transpose: float = 0.0,
     index_rate: float | None = None,
     formant_shift: float = 0.0,
 ) -> np.ndarray:

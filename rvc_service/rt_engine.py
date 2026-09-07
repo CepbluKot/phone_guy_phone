@@ -104,7 +104,7 @@ class RtEngine:
         # whoever does the real server integration, not fixed further here.
         self._upstream = upstream
 
-    def set_transpose(self, semitones: int) -> None:
+    def set_transpose(self, semitones: float) -> None:
         """infer/rtrvc.py's RVC.f0_up_key: shifts the *extracted* pitch
         contour before synthesis (change_key just mutates the attribute,
         infer() reads it fresh every call -- no reload needed). Left at 0
@@ -114,7 +114,9 @@ class RtEngine:
         rather than the target voice: RVC does not automatically retarget
         pitch register, only timbre. The right value is whatever closes the
         gap between the caller's natural range and the target model's
-        trained range, found by ear, not computed."""
+        trained range -- see rt_server.py's TARGET_MEDIAN_F0_HZ/pitch.py for
+        the auto-computed version of this; fractional semitones are fine,
+        infer/rtrvc.py's f0 *= 2**(key/12) doesn't require an integer."""
         self._rvc.change_key(semitones)
 
     def set_index_rate(self, rate: float) -> None:
