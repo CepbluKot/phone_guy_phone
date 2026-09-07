@@ -58,10 +58,12 @@ DEFAULT_VARIANT = "v2-fcpe"
 
 # Cross-agent comparison entries for /api/compare -- see
 # experiments/latency-sonnet/scripts/run_gpt_variant.py and run_glm_variant.py
-# for what each actually runs. Toggled off for now (each adds 20-30s and
-# neither script accepts the transpose/formant/index_rate params being
-# tuned right now) -- the code stays in place, just not invoked.
-RUN_EXTERNAL_VARIANTS = False
+# for what each actually runs. Both now accept --transpose (via a monkeypatch
+# on their pipeline.pipeline() call, see _apply_transpose in each script) and
+# get the same value (auto-computed or manual) as our own v2-fcpe entry, so
+# re-enabling doesn't leave them stuck at f0_up_key=0 -- they still don't
+# accept formant/index_rate, only transpose.
+RUN_EXTERNAL_VARIANTS = True
 GPT_LABEL = ("GPT (research/latency-optimization): их v2-профиль, hop 1.0с / "
              "context 0.5с — прогнано через вашу запись в изоляции (их deployed "
              "release, скопирован read-only), не через живой прод-канарейку")
@@ -464,7 +466,7 @@ def create_app(engine_factory):
 
     async def _run_external_variant(
         *, name: str, script: str, root: str, python: str, timeout_s: float,
-        label: str, input_wav_bytes: bytes,
+        label: str, input_wav_bytes: bytes, transpose: float = 0.0,
     ) -> dict:
         """Runs the recording through another agent's own chunks.py/engine.py
         -- copied read-only into an isolated directory on VM209, never a
@@ -485,11 +487,14 @@ def create_app(engine_factory):
             out_path = Path(tmp) / "out.wav"
             in_path.write_bytes(input_wav_bytes)
 
+            cmd = [python, script, "--input", str(in_path), "--output", str(out_path)]
+            if transpose:
+                cmd += ["--transpose", str(transpose)]
+
             async with app.state.external_lock:
                 begun = time.perf_counter()
                 proc = await asyncio.create_subprocess_exec(
-                    python, script,
-                    "--input", str(in_path), "--output", str(out_path),
+                    *cmd,
                     cwd=root,
                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                 )
@@ -506,6 +511,8 @@ def create_app(engine_factory):
 
             info = sf.info(str(out_path))
             wav_bytes = out_path.read_bytes()
+            if transpose:
+                label += f" · транспонирование {transpose:+.2f} полутонов"
             return {
                 "label": label,
                 "wavBase64": base64.b64encode(wav_bytes).decode("ascii"),
@@ -515,7 +522,7 @@ def create_app(engine_factory):
 
     async def _run_compare_job(
         job_id: str, audio_48k, input_wav_bytes: bytes,
-        transpose: int = 0, index_rate: float | None = None, formant_shift: float = 0.0,
+        transpose: float = 0.0, index_rate: float | None = None, formant_shift: float = 0.0,
         auto_transpose_note: str | None = None,
     ) -> None:
         import base64
@@ -541,7 +548,7 @@ def create_app(engine_factory):
                 if auto_transpose_note:
                     label += f" · {auto_transpose_note}"
                 elif transpose:
-                    label += f" · транспонирование {transpose:+d} полутонов"
+                    label += f" · транспонирование {transpose:+.2f} полутонов"
                 if formant_shift:
                     label += f" · формант {formant_shift:+g}"
                 if index_rate is not None:
@@ -569,6 +576,7 @@ def create_app(engine_factory):
                         job["results"][name] = await _run_external_variant(
                             name=name, script=script, root=root, python=python,
                             timeout_s=timeout_s, label=label, input_wav_bytes=input_wav_bytes,
+                            transpose=transpose,
                         )
                     except Exception as exc:
                         job["results"][name] = {"label": label, "error": str(exc)[:300]}
@@ -630,9 +638,9 @@ def create_app(engine_factory):
         transpose = 0
         if not auto_transpose:
             try:
-                transpose = int(transpose_param)
+                transpose = float(transpose_param)
             except ValueError:
-                return JSONResponse({"code": "invalid_request", "message": "transpose must be an integer or \"auto\""}, status_code=400)
+                return JSONResponse({"code": "invalid_request", "message": "transpose must be a number or \"auto\""}, status_code=400)
             transpose = max(-24, min(24, transpose))
         index_rate_param = request.query_params.get("indexRate")
         index_rate = None
@@ -689,9 +697,9 @@ def create_app(engine_factory):
 
                 transpose = max(
                     -AUTO_TRANSPOSE_LIMIT, min(AUTO_TRANSPOSE_LIMIT,
-                    round(12 * math.log2(TARGET_MEDIAN_F0_HZ / median_f0))),
+                    12 * math.log2(TARGET_MEDIAN_F0_HZ / median_f0)),
                 )
-                auto_transpose_note = f"авто: ваша высота ~{median_f0:.0f}Гц -> сдвиг {transpose:+d} полутонов"
+                auto_transpose_note = f"авто: ваша высота ~{median_f0:.0f}Гц -> сдвиг {transpose:+.2f} полутонов"
 
         import io
 
