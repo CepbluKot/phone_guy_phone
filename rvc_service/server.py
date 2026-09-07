@@ -12,7 +12,14 @@ import anyio
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 
-from .chunks import Chunker, FRAME_BYTES, HOP_SAMPLES, SAMPLE_RATE
+from .chunks import (
+    DEFAULT_PROFILE,
+    LOW_LATENCY_PROFILE,
+    FRAME_BYTES,
+    SAMPLE_RATE,
+    Chunker,
+    RvcProfile,
+)
 
 
 STARTUP_SECONDS = 90.0
@@ -22,7 +29,7 @@ ALLOWED_ORIGINS = {"https://voice.lan.awesomeio.ru",
 MESSAGES = {
     "busy": "Другой сеанс ещё работает. Остановите его и повторите подключение.",
     "model_unavailable": "Модель недоступна. Проверьте состояние RVC-сервиса и повторите запуск.",
-    "invalid_start": "Нужен протокол версии 1: 48000 Гц, моно, PCM16 s16le.",
+    "invalid_start": "Нужен поддерживаемый протокол: 48000 Гц, моно, PCM16 s16le.",
     "invalid_frame": "Неверный пакет звука. Перезапустите сеанс; ожидается 1920 байт PCM16.",
     "overloaded": "Обработка не успевает за звуком. Остановите сеанс и повторите запуск.",
     "stalled": "Нет прогресса более 10 секунд. Проверьте соединение и повторите запуск.",
@@ -64,10 +71,11 @@ async def _complete_cleanup(cleanup):
 
 
 class Session:
-    def __init__(self, socket, state):
+    def __init__(self, socket, state, profile: RvcProfile):
         self.socket = socket
         self.state = state
-        self.chunks = Chunker()
+        self.profile = profile
+        self.chunks = Chunker(profile)
         self.queue = asyncio.Queue(maxsize=1)
         self.inflight = None
         self.sender = None
@@ -96,7 +104,7 @@ class Session:
                 window = self.chunks.push(frame)
                 self.progress = time.monotonic()
                 if window is not None:
-                    self.consumed += HOP_SAMPLES
+                    self.consumed += self.profile.hop_samples
                     try:
                         self.queue.put_nowait((window, self.consumed))
                     except asyncio.QueueFull:
@@ -126,7 +134,8 @@ class Session:
                 raise SessionError("model_unavailable") from None
             self.inflight = None
             metadata = {"type": "metrics", "outputStart": self.output_start,
-                        "outputSamples": HOP_SAMPLES, "consumedSamples": consumed,
+                        "outputSamples": self.profile.hop_samples,
+                        "consumedSamples": consumed,
                         "processingMs": round((time.perf_counter() - begun) * 1000, 3)}
             # timeout keeps the send in this task. wait_for would create a child
             # send task that could resume before cancellation reaches that child.
@@ -138,7 +147,7 @@ class Session:
                 return
             async with asyncio.timeout(STALL_SECONDS):
                 await self.socket.send_bytes(pcm)
-            self.output_start += HOP_SAMPLES
+            self.output_start += self.profile.hop_samples
             self.progress = time.monotonic()
             del converted, pcm, window
 
@@ -199,8 +208,7 @@ def create_app(engine_factory=_default_engine):
                             status_code=200 if app.state.status == "ready" else 503,
                             headers={"Cache-Control": "no-store"})
 
-    @app.websocket("/ws/rvc")
-    async def websocket(socket: WebSocket):
+    async def websocket(socket: WebSocket, profile: RvcProfile):
         if socket.headers.get("origin") not in ALLOWED_ORIGINS:
             await socket.close(code=1008)
             return
@@ -217,7 +225,7 @@ def create_app(engine_factory=_default_engine):
             await socket.close(code=1013)
             return
         app.state.active = True
-        session = Session(socket, app.state)
+        session = Session(socket, app.state, profile)
         app.state.session = session
         tasks = []
         try:
@@ -229,7 +237,8 @@ def create_app(engine_factory=_default_engine):
             except (ValueError, TypeError):
                 raise SessionError("invalid_start") from None
             if (not isinstance(start, dict) or start.get("type") != "start"
-                    or type(start.get("version")) is not int or start["version"] != 1
+                    or type(start.get("version")) is not int
+                    or start["version"] != profile.version
                     or start.get("sampleRate") != SAMPLE_RATE
                     or start.get("channels") != 1 or start.get("sampleFormat") != "s16le"):
                 raise SessionError("invalid_start")
@@ -246,10 +255,10 @@ def create_app(engine_factory=_default_engine):
                     return
             if app.state.status != "ready":
                 raise SessionError("model_unavailable")
-            await socket.send_json({"type": "ready", "version": 1,
+            await socket.send_json({"type": "ready", "version": profile.version,
                                     "sampleRate": SAMPLE_RATE, "channels": 1,
                                     "sampleFormat": "s16le", "frameBytes": FRAME_BYTES,
-                                    "outputSamples": HOP_SAMPLES})
+                                    "outputSamples": profile.hop_samples})
             session.accept_audio = True
             session.progress = time.monotonic()
             session.sender = asyncio.create_task(session.convert())
@@ -295,6 +304,14 @@ def create_app(engine_factory=_default_engine):
             # The whole sequence, including gather, belongs to a separate task.
             # Repeated cancellation can only interrupt its shielded waiter.
             await _complete_cleanup(cleanup())
+
+    @app.websocket("/ws/rvc")
+    async def websocket_v1(socket: WebSocket):
+        await websocket(socket, DEFAULT_PROFILE)
+
+    @app.websocket("/ws/rvc-v2")
+    async def websocket_v2(socket: WebSocket):
+        await websocket(socket, LOW_LATENCY_PROFILE)
 
     return app
 

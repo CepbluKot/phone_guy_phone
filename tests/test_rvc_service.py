@@ -353,3 +353,31 @@ def test_stop_or_disconnect_invalidates_backpressured_output(held_type, disconne
                     await asyncio.gather(task, return_exceptions=True)
 
     asyncio.run(scenario())
+
+
+def test_v2_canary_route_streams_one_second_hops_and_rejects_version_one():
+    with TestClient(create_app(Converter)) as client:
+        with client.websocket_connect("/ws/rvc-v2", headers=ORIGIN) as socket:
+            socket.send_json({**START, "version": 2})
+            message = socket.receive_json()
+            if message["type"] == "warming":
+                message = socket.receive_json()
+            assert message["type"] == "ready"
+            assert message["version"] == 2
+            assert message["outputSamples"] == 48_000
+            frames(socket, 55)
+            metadata = socket.receive_json()
+            assert metadata["outputStart"] == 0
+            assert metadata["outputSamples"] == 48_000
+            assert metadata["consumedSamples"] == 48_000
+            pcm = np.frombuffer(socket.receive_bytes(), dtype="<i2")
+            assert pcm.shape == (48_000,)
+            assert np.all(pcm == 8192)
+            socket.send_json({"type": "stop"})
+            assert socket.receive_json()["type"] == "stopped"
+
+        with client.websocket_connect("/ws/rvc-v2", headers=ORIGIN) as socket:
+            socket.send_json(START)  # version 1 on the v2 route is invalid
+            error = socket.receive_json()
+            assert error["type"] == "error"
+            assert error["code"] == "invalid_start"
