@@ -319,6 +319,52 @@ def create_app(engine_factory):
             return JSONResponse({"code": code, "message": str(exc)}, status_code=422)
         return Response(content=wav_bytes, media_type="audio/wav")
 
+    @app.post("/api/compare")
+    async def compare(request: Request):
+        """One recording (raw PCM16 48kHz mono in the request body) run
+        through every VARIANT in turn, so it can be judged from a single
+        take instead of re-recording per page. Sequential, not parallel --
+        all variants share the one GPU-resident engine and its lock."""
+        import base64
+        import io
+        import time
+
+        import numpy as np
+        import soundfile as sf
+
+        from .rt_batch import convert_utterance
+        from .rt_chunks import FRAME_SAMPLES
+
+        if getattr(app.state, "engine", None) is None:
+            return JSONResponse({"code": "model_unavailable"}, status_code=503)
+        body = await request.body()
+        if len(body) < FRAME_SAMPLES * 2 or len(body) % 2 != 0:
+            return JSONResponse({"code": "invalid_request"}, status_code=400)
+        max_seconds = 15
+        if len(body) > max_seconds * SAMPLE_RATE * 2:
+            return JSONResponse({"code": "recording_too_long",
+                                  "message": f"max {max_seconds}s"}, status_code=413)
+        pcm16 = np.frombuffer(body, dtype="<i2")
+        audio_48k = pcm16.astype(np.float32) / 32768.0
+
+        results = {}
+        for key, variant in VARIANTS.items():
+            begun = time.perf_counter()
+            converted = await convert_utterance(
+                app.state, audio_48k, next(_ids),
+                block_s=variant["block_s"], extra_s=variant["extra_s"], f0method=variant["f0method"],
+            )
+            wall_ms = round((time.perf_counter() - begun) * 1000, 1)
+            buf = io.BytesIO()
+            sf.write(buf, converted, SAMPLE_RATE, format="WAV", subtype="PCM_16")
+            results[key] = {
+                "label": variant["label"],
+                "wavBase64": base64.b64encode(buf.getvalue()).decode("ascii"),
+                "wallMs": wall_ms,
+                "outputSeconds": round(converted.size / SAMPLE_RATE, 2),
+            }
+        return JSONResponse({"inputSeconds": round(pcm16.size / SAMPLE_RATE, 2), "results": results})
+
     static_dir = __import__("pathlib").Path(__file__).resolve().parent.parent / "web-rt"
     if static_dir.exists():
         app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="static")

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ru">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RTRVC: одна запись, все варианты</title><link rel="stylesheet" href="/style.css">
+<style>
+.result{border:1px solid #358d5c;padding:12px;margin:12px 0;background:#0c1210}
+.result h3{margin:0 0 6px}
+.result audio{width:100%}
+.result .meta{font-size:.85rem;color:#61e69a;margin-top:6px}
+#timer{font-variant-numeric:tabular-nums}
+</style></head>
+<body><main>
+<p class="eyebrow">EXPERIMENTAL — ОДНА ЗАПИСЬ, ВСЕ ВАРИАНТЫ</p>
+<h1>Сравнить все разом</h1>
+<p>Запишите одну фразу микрофоном (до 12с) — она пройдёт через все 4
+варианта движка по очереди, результаты появятся ниже друг под другом для
+прямого сравнения. <a href="/">← все варианты голоса</a></p>
+<p id="status" role="status">Готово к записи</p>
+<div class="controls">
+  <button id="record">Начать запись</button>
+  <button id="stop" disabled>Остановить и обработать</button>
+</div>
+<label>Уровень микрофона <meter id="input" min="0" max="1" value="0"></meter></label>
+<p id="timer">00:00</p>
+<div id="results"></div>
+<p>Это research-демо (ветка research/latency-sonnet), не продакшен Phone Guy.
+Запись отправляется на сервер только для обработки и не сохраняется.</p>
+</main><script src="/compare/app.js"></script></body></html>
