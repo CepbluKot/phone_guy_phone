@@ -143,6 +143,17 @@ def create_app(engine_factory):
             state.status = "ready"
         except Exception:
             state.status = "model_unavailable"
+
+        state.bot_room = None
+        if state.status == "ready":
+            from pathlib import Path
+
+            from .rt_bots import BotRoom
+
+            samples_dir = Path(__file__).resolve().parent.parent / "samples-rt"
+            wav_paths = [samples_dir / "ru.wav", samples_dir / "en.wav"]
+            state.bot_room = BotRoom(state, wav_paths)
+            state.bot_room.start()
         try:
             yield
         finally:
@@ -224,6 +235,14 @@ def create_app(engine_factory):
             app.state.active_sessions -= 1
             with suppress(RuntimeError):
                 await socket.close()
+
+    @app.websocket("/ws/listen")
+    async def listen(socket: WebSocket):
+        room = app.state.bot_room
+        if room is None:
+            await socket.close(code=1013)
+            return
+        await room.handle_listener(socket)
 
     static_dir = __import__("pathlib").Path(__file__).resolve().parent.parent / "web-rt"
     if static_dir.exists():

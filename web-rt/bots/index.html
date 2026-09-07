@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="ru">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RTRVC bot room</title><link rel="stylesheet" href="/style.css"></head>
+<body><main>
+<p class="eyebrow">EXPERIMENTAL RTRVC.PY ENGINE — LISTEN ONLY</p><h1>Комната ботов</h1>
+<p>Здесь никто по-настоящему не говорит — два скрипта зациклили записанную
+речь через тот же движок <code>infer/rtrvc.py</code>, что и живая демка.
+Микрофон не запрашивается, ничего от вас не нужно, кроме нажать «Слушать».</p>
+<p id="status" role="status">Готово к подключению</p>
+<div class="controls"><button id="start">Слушать</button><button id="stop" disabled>Остановить</button></div>
+<label>Звук <meter id="output" min="0" max="1" value="0"></meter></label>
+<p id="diagnostics">Получено блоков: 0</p>
+<p>Это research-демо (ветка research/latency-sonnet), не продакшен Phone Guy.
+Ничего не сохраняется.</p>
+</main><script src="/bots/app.js"></script></body></html>
