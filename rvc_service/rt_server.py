@@ -78,18 +78,19 @@ GLM_ROOT = "/tmp/rt_demo_glm"
 GLM_PYTHON = "/opt/voice-rvc/venv/bin/python3"
 GLM_TIMEOUT_S = 150.0
 
-# Median F0 (YIN, see pitch.py) measured locally from an actual FNAF1
-# Phone Guy dialogue clip the user provided (fnaf1_phone_guy_dialogue_5s_
-# to_2m35s.mp3, ~2m30s of real game audio, 4919 voiced frames) -- not
-# shipped to this server, just this one derived number. Supersedes an
-# earlier version of this constant (110.8Hz) measured from a much shorter
-# (~8s) Voicemod reconstruction rather than the genuine character voice;
-# the real dialogue reads distinctly higher (152.9Hz). ?transpose=auto on
-# /api/compare measures the *caller's* median F0 the same way and picks
-# the semitone shift that would bring it to this target, instead of making
-# the caller guess one by ear. Only pitch register; see set_formant_shift
-# for why that's not auto-computed the same way.
-TARGET_MEDIAN_F0_HZ = 152.9
+# Median F0 (YIN, see pitch.py) measured from the Voicemod-made reference
+# clip the user originally provided. Briefly changed to 152.9Hz (measured
+# the same way from an actual ~2m30s FNAF1 dialogue clip, 4919 voiced
+# frames) on the theory that genuine game audio beats a third-party
+# reconstruction -- reverted after the user judged the +5.1-semitone
+# result it produced as worse, not better, than this value. Likely cause,
+# not chased further: per-20s-chunk F0 on that dialogue ranged ~119-197Hz
+# (checked after the fact) -- it includes dramatic/tense delivery, so its
+# overall median sits well above the character's neutral conversational
+# pitch, which is closer to what a calm speaking recording should be
+# matched against. The user's ear on the actual output is the real test
+# here, not which reference sounds more "authentic" on paper.
+TARGET_MEDIAN_F0_HZ = 110.8
 AUTO_TRANSPOSE_LIMIT = 12
 
 _ids = itertools.count(1)
