@@ -192,13 +192,10 @@ async function startCompareJob(body, headers) {
   statusEl.textContent = 'Отправляю…';
   setControlsDisabled(true);
   try {
-    const transpose = el('autoTranspose').checked ? 'auto' : (el('transpose').value || '0');
-    const formant = el('autoFormant').checked ? 'auto' : (el('formant').value || '0');
-    const indexRate = el('indexRate').value || '0.6';
-    const query = '?transpose=' + encodeURIComponent(transpose) +
-      '&formant=' + encodeURIComponent(formant) +
-      '&indexRate=' + encodeURIComponent(indexRate);
-    const response = await fetch('/api/compare' + query, {method: 'POST', headers, body});
+    // No manual knobs on this page -- transpose is always auto-computed
+    // server-side (see rt_server.py's TARGET_MEDIAN_F0_HZ); formant/
+    // index_rate are left at their defaults (untouched, not auto-applied).
+    const response = await fetch('/api/compare?transpose=auto', {method: 'POST', headers, body});
     if (!response.ok) {
       let code = 'error';
       try { code = (await response.json()).code || code; } catch {}
@@ -283,12 +280,6 @@ window.addEventListener('pagehide', () => stopRecording('discard'));
 
 fileInput.onchange = () => { fileGoButton.disabled = busy || !fileInput.files.length; };
 fileGoButton.onclick = () => processFile();
-
-const autoTransposeCheckbox = el('autoTranspose');
-autoTransposeCheckbox.onchange = () => { el('transpose').disabled = autoTransposeCheckbox.checked; };
-
-const autoFormantCheckbox = el('autoFormant');
-autoFormantCheckbox.onchange = () => { el('formant').disabled = autoFormantCheckbox.checked; };
 
 (function resumeFromUrl() {
   const jobId = new URLSearchParams(location.search).get('job');
