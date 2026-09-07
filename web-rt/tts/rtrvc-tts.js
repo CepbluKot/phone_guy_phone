@@ -14,9 +14,14 @@ const ERRORS = {
   internal_error: 'Внутренняя ошибка сервера.',
 };
 let pollTimer = null;
+let socket = null;
 
 function stopPolling() {
   if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+}
+
+function closeSocket() {
+  if (socket) { try { socket.close(); } catch {} socket = null; }
 }
 
 function showResult(data) {
@@ -29,10 +34,21 @@ function showResult(data) {
   player.play().catch(() => {});
 }
 
-// Polls GET /api/tts/<jobId> instead of blocking one fetch on the whole
-// Piper+RVC pipeline (see rvc_service/rt_jobs.py) -- a dropped connection
-// just fails one poll tick, not the synthesis, and the job id in the URL
-// means this page reopened later shows the same result again.
+function applyJobSnapshot(data) {
+  if (data.status === 'running') {
+    statusEl.textContent = 'Озвучиваю… (Piper, затем RVC — может занять несколько секунд)';
+  } else if (data.status === 'done') {
+    showResult(data);
+  } else {
+    statusEl.textContent = ERRORS[data.error] || ('Ошибка: ' + data.error);
+    goButton.disabled = false;
+  }
+}
+
+// Polling fallback for GET /api/tts/<jobId> -- only used if the websocket
+// below can't even connect. A dropped tick just retries on the next one
+// instead of losing the synthesis, and the job id in the URL means this
+// page reopened later (or on another device) shows the same result again.
 async function pollJob(jobId) {
   stopPolling();
   const tick = async () => {
@@ -44,20 +60,42 @@ async function pollJob(jobId) {
         return;
       }
       const data = await response.json();
-      if (data.status === 'running') {
-        statusEl.textContent = 'Озвучиваю… (Piper, затем RVC — может занять несколько секунд)';
-        pollTimer = setTimeout(tick, POLL_MS);
-      } else if (data.status === 'done') {
-        showResult(data);
-      } else {
-        statusEl.textContent = ERRORS[data.error] || ('Ошибка: ' + data.error);
-        goButton.disabled = false;
-      }
+      applyJobSnapshot(data);
+      if (data.status === 'running') pollTimer = setTimeout(tick, POLL_MS);
     } catch {
       pollTimer = setTimeout(tick, POLL_MS);
     }
   };
   await tick();
+}
+
+// Primary transport: the server pushes a snapshot over /ws/tts/<id> on
+// connect and again when the job finishes, instead of asking on a timer.
+function watchJob(jobId) {
+  closeSocket();
+  stopPolling();
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const ws = new WebSocket(proto + '//' + location.host + '/ws/tts/' + jobId);
+  socket = ws;
+  let gotAnyMessage = false;
+  ws.onmessage = (event) => {
+    gotAnyMessage = true;
+    const data = JSON.parse(event.data);
+    if (data.code === 'not_found') {
+      statusEl.textContent = 'Результат не найден (сервер перезапускался или прошло много времени) — озвучьте заново.';
+      goButton.disabled = false;
+      closeSocket();
+      return;
+    }
+    applyJobSnapshot(data);
+    if (data.status !== 'running') closeSocket();
+  };
+  ws.onerror = () => {
+    if (!gotAnyMessage) pollJob(jobId);
+  };
+  ws.onclose = () => {
+    if (socket === ws) socket = null;
+  };
 }
 
 goButton.onclick = async () => {
@@ -81,7 +119,7 @@ goButton.onclick = async () => {
     const url = new URL(location.href);
     url.searchParams.set('job', data.jobId);
     history.pushState({job: data.jobId}, '', url);
-    pollJob(data.jobId);
+    watchJob(data.jobId);
   } catch (error) {
     statusEl.textContent = error.message || 'Ошибка синтеза.';
     goButton.disabled = false;
@@ -93,6 +131,6 @@ goButton.onclick = async () => {
   if (jobId) {
     goButton.disabled = true;
     statusEl.textContent = 'Загружаю сохранённый результат…';
-    pollJob(jobId);
+    watchJob(jobId);
   }
 })();
