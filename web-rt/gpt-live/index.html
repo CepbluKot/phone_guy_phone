@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="ru">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RTRVC: GPT в реальном времени</title><link rel="stylesheet" href="/rtrvc.css"></head>
+<body><main>
+<p class="eyebrow">EXPERIMENTAL — GPT ВЖИВУЮ</p>
+<h1>GPT (research/latency-optimization) в реальном времени</h1>
+<p>То же самое, что и наш вариант на главной, но чужой движок: их
+собственный v2-профиль (hop 1.0с, context 0.5с) — их изолированная копия,
+не живой прод. Блок здесь крупнее нашего (секунда, а не 0.3с), так что
+пауза перед первым звуком и между фразами будет заметнее.
+<a href="/">← голос в реальном времени (наш)</a></p>
+<p id="status" role="status">Готов к подключению микрофона</p>
+<div class="controls"><button id="start">Начать</button><button id="stop" disabled>Остановить</button></div>
+<label>Микрофон <meter id="input" min="0" max="1" value="0"></meter></label>
+<label>Обработанный звук <meter id="output" min="0" max="1" value="0"></meter></label>
+<p id="latency">Задержка: —</p><p id="diagnostics">Отправлено кадров / получено блоков: 0 / 0</p>
+<p>Research-демо (ветка research/latency-sonnet), не продакшен Phone Guy.
+Голос не сохраняется. Наушники обязательны. Одновременно доступна только
+одна сессия — если кто-то уже подключён, попробуйте позже.</p>
+</main><script src="/gpt-live/rtrvc-gpt-live.js"></script></body></html>

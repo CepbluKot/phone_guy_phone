@@ -1,0 +1,28 @@
+{
+  "what": "End-to-end incremental streaming validation of rvc_service/rt_chunks.py (RtFramer+RtStitcher) + rt_engine.py (infer/rtrvc.py wrapper), fed real 20ms PCM16 frames one at a time exactly like a real client would, not the batch/manual-window approach of the earlier new_way.py draft.",
+  "host": "VM209 (ubuntu@192.168.20.70), GTX 1050 Ti 4GiB, is_half=False",
+  "runs": [
+    {
+      "label": "block=0.3s extra=1.5s, 40s of looped ru.wav+en.wav",
+      "block_s": 0.3, "extra_s": 1.5,
+      "input_seconds": 40.0, "output_seconds": 39.9,
+      "calls": 133, "wall_s": 19.21,
+      "processing_p50_ms": 105.8, "processing_p95_ms": 107.5, "processing_max_ms": 115.5,
+      "rtf_p50": 0.353,
+      "gpu_mem_before_load_mb": 1043.0, "gpu_mem_after_load_mb": 2267.0, "gpu_mem_final_mb": 2267.0,
+      "output_audio": "experiments/latency-sonnet/samples/rt_stream_40s.wav"
+    },
+    {
+      "label": "block=0.25s extra=2.5s (upstream's own default), 90s of looped ru.wav+en.wav",
+      "block_s": 0.25, "extra_s": 2.5,
+      "input_seconds": 90.0, "output_seconds": 90.0,
+      "calls": 360, "wall_s": 55.43,
+      "processing_p50_ms": 119.1, "processing_p95_ms": 120.4, "processing_max_ms": 121.7,
+      "rtf_p50": 0.476,
+      "gpu_mem_before_load_mb": 1043.0, "gpu_mem_after_load_mb": 2249.0, "gpu_mem_final_mb": 2249.0,
+      "output_audio": "experiments/latency-sonnet/samples/rt_stream_90s_default.wav"
+    }
+  ],
+  "reading": "Both runs reproduce section 3's block-sweep numbers (rtrvc_block_sweep.json) almost exactly, this time through the real incremental per-20ms-frame path a client would drive, with a proper duration-preserving stitcher: output length now equals input length to the frame (39.9/40.0s and 90.0/90.0s), fixing the earlier new_way.py draft's duration-inflation bug. GPU memory is flat across 133 and 360 calls (19s and 55s of continuous wall-clock GPU work) -- no growth observed from the persistent cache_pitch/cache_pitchf/rolling-buffer state over these run lengths. Processing time variance is very tight (max-min < 16ms in both runs after the one-time RMVPE-load warmup is absorbed before the timed loop starts).",
+  "known_limitation_found": "infer/rtrvc.py's RVC.cache_pitch/cache_pitchf (1024-frame sliding buffers) persist on the RVC object across calls with no reset hook. Reusing one RtEngine/RVC instance for a second, unrelated session (as rvc_service/server.py's one-engine-many-sessions design does) leaves the previous session's pitch history bleeding into the new session's first ~150-300ms of pitch conditioning unless explicitly cleared. Confirmed via experiments/latency-sonnet/scripts/rt_restart_check.py: cache_pitch had 840/1024 non-zero entries after a real-speech session, still 930/1024 non-zero after a full silent session on the same engine with no reset. realtime_gui.py handles this by zeroing both buffers once at startup (prewarm_cuda_graph) but never again per-session, because it's a single continuous local session by design -- a multi-session server integrating infer/rtrvc.py needs its own explicit `engine._rvc.cache_pitch.zero_(); engine._rvc.cache_pitchf.zero_()` (or an equivalent reset) on every session start/stop, mirroring what rvc_service/chunks.py's Chunker.reset() already does for the offline path's per-session state."
+}

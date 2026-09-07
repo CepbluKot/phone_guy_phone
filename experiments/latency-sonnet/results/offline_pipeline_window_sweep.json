@@ -1,0 +1,14 @@
+{
+  "engine": "infer/vc/pipeline.py (offline pipeline, used today by rvc_service/engine.py)",
+  "host": "VM209 (ubuntu@192.168.20.70), GTX 1050 Ti 4GiB, is_half=False",
+  "sample": "experiments/phoneguy/samples/input/ru.wav, looped to 6s",
+  "method": "torch.cuda.synchronize() around vc.pipeline.pipeline(), 1 warm-up + 6 timed calls per config, same loaded model reused across configs",
+  "results": [
+    {"config": "current 2.6s (ctx.5+hop2+la.1)", "f0method": "rmvpe", "hop_s": 2.0, "window_s": 2.6, "p50_ms": 647.0, "p95_ms": 659.0, "min_ms": 642.5, "rtf_p50": 0.323, "rtf_p95": 0.329},
+    {"config": "1.1s (ctx.2+hop.8+la.1)", "f0method": "rmvpe", "hop_s": 0.8, "window_s": 1.1, "p50_ms": 468.1, "p95_ms": 472.4, "min_ms": 461.9, "rtf_p50": 0.585, "rtf_p95": 0.59},
+    {"config": "0.7s (ctx.15+hop.5+la.05)", "f0method": "rmvpe", "hop_s": 0.5, "window_s": 0.7, "p50_ms": 425.8, "p95_ms": 429.6, "min_ms": 422.3, "rtf_p50": 0.852, "rtf_p95": 0.859},
+    {"config": "0.4s (ctx.1+hop.25+la.05)", "f0method": "rmvpe", "hop_s": 0.25, "window_s": 0.4, "p50_ms": 380.0, "p95_ms": 384.6, "min_ms": 377.0, "rtf_p50": 1.52, "rtf_p95": 1.539},
+    {"config": "0.25s (ctx.05+hop.15+la.05)", "f0method": "rmvpe", "hop_s": 0.15, "window_s": 0.25, "p50_ms": 357.4, "p95_ms": 360.6, "min_ms": 353.6, "rtf_p50": 2.383, "rtf_p95": 2.404}
+  ],
+  "reading": "Per-call cost has a large fixed component (~350ms floor) that does not shrink much with window size, because the offline pipeline recomputes F0 and fully decodes the whole window every call. RTF crosses 1.0 (no longer real-time) once hop drops below roughly 0.5-0.8s on this GPU -- shrinking hop/context alone on this code path cannot reach sub-second latency without breaking real-time."
+}
