@@ -298,6 +298,24 @@ def create_app(engine_factory):
             return
         await room.handle_listener(socket)
 
+    @app.get("/api/tts")
+    async def tts_get_hint():
+        # Browsers land here directly (typed/pasted URL, not the page's own
+        # fetch()) often enough that a bare 404 is worth replacing with a
+        # pointer to the actual page -- confirmed via server logs that a
+        # real visitor did exactly this.
+        return JSONResponse(
+            {"code": "use_post", "message": "This endpoint only accepts POST from the /tts/ page -- open https://voice-claude.lan.awesomeio.ru/tts/ instead."},
+            status_code=405,
+        )
+
+    @app.get("/api/compare")
+    async def compare_get_hint():
+        return JSONResponse(
+            {"code": "use_post", "message": "This endpoint only accepts POST from the /compare/ page -- open https://voice-claude.lan.awesomeio.ru/compare/ instead."},
+            status_code=405,
+        )
+
     @app.post("/api/tts")
     async def tts(request: Request):
         from .rt_tts import TtsError, text_to_phone_guy
