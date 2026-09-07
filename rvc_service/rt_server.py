@@ -58,12 +58,13 @@ DEFAULT_VARIANT = "v2-fcpe"
 
 # Cross-agent comparison entries for /api/compare -- see
 # experiments/latency-sonnet/scripts/run_gpt_variant.py and run_glm_variant.py
-# for what each actually runs. Both now accept --transpose (via a monkeypatch
-# on their pipeline.pipeline() call, see _apply_transpose in each script) and
-# get the same value (auto-computed or manual) as our own v2-fcpe entry, so
-# re-enabling doesn't leave them stuck at f0_up_key=0 -- they still don't
-# accept formant/index_rate, only transpose.
-RUN_EXTERNAL_VARIANTS = True
+# for what each actually runs. Both accept --transpose (via a monkeypatch on
+# their pipeline.pipeline() call, see _apply_transpose in each script) and
+# get the same value (auto-computed or manual) as our own v2-fcpe entry --
+# they still don't accept formant/index_rate, only transpose. GLM toggled
+# off per user request; code and its isolated runner stay in place.
+RUN_GPT_VARIANT = True
+RUN_GLM_VARIANT = False
 GPT_LABEL = ("GPT (research/latency-optimization): их v2-профиль, hop 1.0с / "
              "context 0.5с — прогнано через вашу запись в изоляции (их deployed "
              "release, скопирован read-only), не через живой прод-канарейку")
@@ -565,13 +566,14 @@ def create_app(engine_factory):
             # external_lock): a failure here (an isolated copy OOMing,
             # timing out, etc.) shows up as an error on just that one card,
             # not as a failure of the whole job -- our own result above
-            # already landed regardless. Skipped entirely while
-            # RUN_EXTERNAL_VARIANTS is off (see that constant).
-            if RUN_EXTERNAL_VARIANTS:
-                for name, script, root, python, timeout_s, label in (
-                    ("gpt", "run_gpt_variant.py", GPT_ROOT, GPT_PYTHON, GPT_TIMEOUT_S, GPT_LABEL),
-                    ("glm", "run_glm_variant.py", GLM_ROOT, GLM_PYTHON, GLM_TIMEOUT_S, GLM_LABEL),
-                ):
+            # already landed regardless. Each skipped while its
+            # RUN_*_VARIANT flag is off (see those constants).
+            external_variants = [
+                *([("gpt", "run_gpt_variant.py", GPT_ROOT, GPT_PYTHON, GPT_TIMEOUT_S, GPT_LABEL)] if RUN_GPT_VARIANT else []),
+                *([("glm", "run_glm_variant.py", GLM_ROOT, GLM_PYTHON, GLM_TIMEOUT_S, GLM_LABEL)] if RUN_GLM_VARIANT else []),
+            ]
+            if external_variants:
+                for name, script, root, python, timeout_s, label in external_variants:
                     try:
                         job["results"][name] = await _run_external_variant(
                             name=name, script=script, root=root, python=python,
@@ -708,7 +710,11 @@ def create_app(engine_factory):
         wav_buf = io.BytesIO()
         sf.write(wav_buf, audio_48k, SAMPLE_RATE, format="WAV", subtype="PCM_16")
 
-        order = [*VARIANTS.keys(), *(["gpt", "glm"] if RUN_EXTERNAL_VARIANTS else [])]
+        order = [
+            *VARIANTS.keys(),
+            *(["gpt"] if RUN_GPT_VARIANT else []),
+            *(["glm"] if RUN_GLM_VARIANT else []),
+        ]
         job_id = app.state.compare_jobs.create(
             status="running", inputSeconds=input_seconds, order=order, results={},
         )
