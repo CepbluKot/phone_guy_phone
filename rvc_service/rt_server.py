@@ -58,7 +58,10 @@ DEFAULT_VARIANT = "v2-fcpe"
 
 # Cross-agent comparison entries for /api/compare -- see
 # experiments/latency-sonnet/scripts/run_gpt_variant.py and run_glm_variant.py
-# for what each actually runs.
+# for what each actually runs. Toggled off for now (each adds 20-30s and
+# neither script accepts the transpose/formant/index_rate params being
+# tuned right now) -- the code stays in place, just not invoked.
+RUN_EXTERNAL_VARIANTS = False
 GPT_LABEL = ("GPT (research/latency-optimization): их v2-профиль, hop 1.0с / "
              "context 0.5с — прогнано через вашу запись в изоляции (их deployed "
              "release, скопирован read-only), не через живой прод-канарейку")
@@ -541,19 +544,21 @@ def create_app(engine_factory):
             # external_lock): a failure here (an isolated copy OOMing,
             # timing out, etc.) shows up as an error on just that one card,
             # not as a failure of the whole job -- our own result above
-            # already landed regardless.
-            for name, script, root, python, timeout_s, label in (
-                ("gpt", "run_gpt_variant.py", GPT_ROOT, GPT_PYTHON, GPT_TIMEOUT_S, GPT_LABEL),
-                ("glm", "run_glm_variant.py", GLM_ROOT, GLM_PYTHON, GLM_TIMEOUT_S, GLM_LABEL),
-            ):
-                try:
-                    job["results"][name] = await _run_external_variant(
-                        name=name, script=script, root=root, python=python,
-                        timeout_s=timeout_s, label=label, input_wav_bytes=input_wav_bytes,
-                    )
-                except Exception as exc:
-                    job["results"][name] = {"label": label, "error": str(exc)[:300]}
-                app.state.compare_jobs.notify(job_id)
+            # already landed regardless. Skipped entirely while
+            # RUN_EXTERNAL_VARIANTS is off (see that constant).
+            if RUN_EXTERNAL_VARIANTS:
+                for name, script, root, python, timeout_s, label in (
+                    ("gpt", "run_gpt_variant.py", GPT_ROOT, GPT_PYTHON, GPT_TIMEOUT_S, GPT_LABEL),
+                    ("glm", "run_glm_variant.py", GLM_ROOT, GLM_PYTHON, GLM_TIMEOUT_S, GLM_LABEL),
+                ):
+                    try:
+                        job["results"][name] = await _run_external_variant(
+                            name=name, script=script, root=root, python=python,
+                            timeout_s=timeout_s, label=label, input_wav_bytes=input_wav_bytes,
+                        )
+                    except Exception as exc:
+                        job["results"][name] = {"label": label, "error": str(exc)[:300]}
+                    app.state.compare_jobs.notify(job_id)
 
             job["status"] = "done"
         except Exception as exc:
@@ -660,7 +665,7 @@ def create_app(engine_factory):
         wav_buf = io.BytesIO()
         sf.write(wav_buf, audio_48k, SAMPLE_RATE, format="WAV", subtype="PCM_16")
 
-        order = [*VARIANTS.keys(), "gpt", "glm"]
+        order = [*VARIANTS.keys(), *(["gpt", "glm"] if RUN_EXTERNAL_VARIANTS else [])]
         job_id = app.state.compare_jobs.create(
             status="running", inputSeconds=input_seconds, order=order, results={},
         )
