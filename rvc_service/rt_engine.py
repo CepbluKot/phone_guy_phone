@@ -104,6 +104,28 @@ class RtEngine:
         # whoever does the real server integration, not fixed further here.
         self._upstream = upstream
 
+    def set_transpose(self, semitones: int) -> None:
+        """infer/rtrvc.py's RVC.f0_up_key: shifts the *extracted* pitch
+        contour before synthesis (change_key just mutates the attribute,
+        infer() reads it fresh every call -- no reload needed). Left at 0
+        everywhere so far, which means the output's F0 contour is exactly
+        the source speaker's own, just re-timbred -- a well-known reason a
+        conversion still reads as "the source person doing an impression"
+        rather than the target voice: RVC does not automatically retarget
+        pitch register, only timbre. The right value is whatever closes the
+        gap between the caller's natural range and the target model's
+        trained range, found by ear, not computed."""
+        self._rvc.change_key(semitones)
+
+    def set_index_rate(self, rate: float) -> None:
+        """infer/rtrvc.py's RVC.index_rate: how much of the target
+        speaker's own nearest-neighbour HuBERT features (from the FAISS
+        index) get blended in versus the source's raw features (see
+        RVC.infer's index-search block). Higher pulls harder toward the
+        target's own recorded timbre at some risk of artifacts if the
+        index has thin coverage for a given sound."""
+        self._rvc.change_index_rate(rate)
+
     def reset_pitch_cache(self) -> None:
         """Zero infer/rtrvc.py's cache_pitch/cache_pitchf. Call this whenever
         the engine switches from serving one session/speaker to another --
