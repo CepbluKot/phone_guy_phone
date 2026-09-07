@@ -78,6 +78,14 @@ GLM_ROOT = "/tmp/rt_demo_glm"
 GLM_PYTHON = "/opt/voice-rvc/venv/bin/python3"
 GLM_TIMEOUT_S = 150.0
 
+# Isolated persistent GPT live-streaming server (see gpt_live_server.py) --
+# a separate OS process on its own port, holding its own GPU-resident
+# engine copy for real-time use (unlike the transient per-job subprocess
+# above). Relayed via /ws/rvc-gpt rather than proxied at the Caddy layer;
+# see that route's docstring for why.
+GPT_LIVE_WS_URL = "ws://127.0.0.1:8098/ws/rvc-v2"
+GPT_LIVE_ORIGIN = "https://voice-claude.lan.awesomeio.ru"
+
 # Median F0 (YIN, see pitch.py) measured from the Voicemod-made reference
 # clip the user originally provided. Briefly changed to 152.9Hz (measured
 # the same way from an actual ~2m30s FNAF1 dialogue clip, 4919 voiced
@@ -353,6 +361,62 @@ def create_app(engine_factory):
             await socket.close(code=1013)
             return
         await room.handle_listener(socket)
+
+    @app.websocket("/ws/rvc-gpt")
+    async def gpt_live_proxy(socket: WebSocket):
+        """Transparent relay to the isolated GPT live server on GPT_LIVE_PORT
+        (its own process, its own copy of research/latency-optimization's
+        server.py/chunks.py/engine.py -- see experiments/latency-sonnet/
+        scripts/gpt_live_server.py) so the browser only ever talks to this
+        one already-working domain/port.
+
+        Not routing this through Caddy directly: adding a second path-based
+        route (or a second reverse_proxy target) to the voice-claude site
+        block reproducibly 403s the websocket upgrade before it reaches any
+        backend -- reproduced with completely unrelated ports/paths/syntax
+        (handle blocks, named matchers, multiple reverse_proxy directives),
+        while the *exact* same target works immediately from a fresh,
+        single-target site block on its own hostname. Never root-caused
+        (not worth more time on a research demo's Caddy oddity); relaying
+        inside our own already-proxied FastAPI app sidesteps it entirely
+        and needs no Caddy or DNS changes."""
+        await socket.accept()
+        import websockets as ws_client
+
+        try:
+            async with ws_client.connect(
+                GPT_LIVE_WS_URL, origin=GPT_LIVE_ORIGIN, max_size=None,
+            ) as upstream:
+                async def browser_to_upstream():
+                    while True:
+                        message = await socket.receive()
+                        if message["type"] == "websocket.disconnect":
+                            return
+                        if message.get("text") is not None:
+                            await upstream.send(message["text"])
+                        elif message.get("bytes") is not None:
+                            await upstream.send(message["bytes"])
+
+                async def upstream_to_browser():
+                    async for message in upstream:
+                        if isinstance(message, (bytes, bytearray)):
+                            await socket.send_bytes(message)
+                        else:
+                            await socket.send_text(message)
+
+                tasks = [asyncio.create_task(browser_to_upstream()),
+                         asyncio.create_task(upstream_to_browser())]
+                try:
+                    await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+                finally:
+                    for task in tasks:
+                        task.cancel()
+                    await asyncio.gather(*tasks, return_exceptions=True)
+        except Exception:
+            pass
+        finally:
+            with suppress(RuntimeError, WebSocketDisconnect):
+                await socket.close()
 
     @app.get("/api/tts")
     async def tts_get_hint():
