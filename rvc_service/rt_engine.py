@@ -104,6 +104,16 @@ class RtEngine:
         # whoever does the real server integration, not fixed further here.
         self._upstream = upstream
 
+    def reset_pitch_cache(self) -> None:
+        """Zero infer/rtrvc.py's cache_pitch/cache_pitchf. Call this whenever
+        the engine switches from serving one session/speaker to another --
+        see experiments/latency-sonnet/scripts/rt_restart_check.py: without
+        it, up to ~1024 frames (a few seconds) of the previous speaker's
+        pitch history keep sliding through and bias the next speaker's
+        first calls."""
+        self._rvc.cache_pitch.zero_()
+        self._rvc.cache_pitchf.zero_()
+
     def warmup(self, block_16k: int, skip_head_frames: int, return_length_frames: int) -> None:
         zeros = self._torch.zeros(
             skip_head_frames * 160 + return_length_frames * 160 // 2 + block_16k,
