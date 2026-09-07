@@ -93,6 +93,18 @@ GLM_TIMEOUT_S = 150.0
 TARGET_MEDIAN_F0_HZ = 110.8
 AUTO_TRANSPOSE_LIMIT = 12
 
+# Same idea as TARGET_MEDIAN_F0_HZ but for the first formant (see
+# formant.py) -- median F1 of the same Voicemod reference clip. Opt-in via
+# ?formant=auto, NOT the default the way transpose=auto is: LPC formant
+# tracking is a much shakier measurement than YIN pitch tracking, and the
+# auto-transpose episode (a "more authentic" reference producing a *worse*
+# result per the user's own ear, reverted) is reason enough to not repeat
+# that mistake by defaulting an even less trustworthy auto-correction.
+# Clamped tighter than transpose, too -- formant_shift distorts audibly
+# well before +-12.
+TARGET_F1_HZ = 572.1
+AUTO_FORMANT_LIMIT = 3
+
 _ids = itertools.count(1)
 
 
@@ -528,7 +540,7 @@ def create_app(engine_factory):
     async def _run_compare_job(
         job_id: str, audio_48k, input_wav_bytes: bytes,
         transpose: float = 0.0, index_rate: float | None = None, formant_shift: float = 0.0,
-        auto_transpose_note: str | None = None,
+        auto_transpose_note: str | None = None, auto_formant_note: str | None = None,
     ) -> None:
         import base64
         import io
@@ -554,7 +566,9 @@ def create_app(engine_factory):
                     label += f" · {auto_transpose_note}"
                 elif transpose:
                     label += f" · транспонирование {transpose:+.2f} полутонов"
-                if formant_shift:
+                if auto_formant_note:
+                    label += f" · {auto_formant_note}"
+                elif formant_shift:
                     label += f" · формант {formant_shift:+g}"
                 if index_rate is not None:
                     label += f" · index_rate {index_rate:g}"
@@ -655,11 +669,15 @@ def create_app(engine_factory):
                 index_rate = max(0.0, min(1.0, float(index_rate_param)))
             except ValueError:
                 return JSONResponse({"code": "invalid_request", "message": "indexRate must be a number"}, status_code=400)
-        try:
-            formant_shift = float(request.query_params.get("formant", "0"))
-        except ValueError:
-            return JSONResponse({"code": "invalid_request", "message": "formant must be a number"}, status_code=400)
-        formant_shift = max(-24.0, min(24.0, formant_shift))
+        formant_param = request.query_params.get("formant", "0")
+        auto_formant = formant_param.strip().lower() == "auto"
+        formant_shift = 0.0
+        if not auto_formant:
+            try:
+                formant_shift = float(formant_param)
+            except ValueError:
+                return JSONResponse({"code": "invalid_request", "message": "formant must be a number or \"auto\""}, status_code=400)
+            formant_shift = max(-24.0, min(24.0, formant_shift))
 
         content_type = request.headers.get("content-type", "")
         if content_type.startswith("multipart/form-data"):
@@ -707,6 +725,23 @@ def create_app(engine_factory):
                 )
                 auto_transpose_note = f"авто: ваша высота ~{median_f0:.0f}Гц -> сдвиг {transpose:+.2f} полутонов"
 
+        auto_formant_note = None
+        if auto_formant:
+            from .formant import estimate_median_f1
+
+            median_f1 = estimate_median_f1(audio_48k, SAMPLE_RATE)
+            if median_f1 is None:
+                formant_shift = 0.0
+                auto_formant_note = "не удалось измерить формант в записи, сдвиг не применён"
+            else:
+                import math
+
+                formant_shift = max(
+                    -AUTO_FORMANT_LIMIT, min(AUTO_FORMANT_LIMIT,
+                    12 * math.log2(TARGET_F1_HZ / median_f1)),
+                )
+                auto_formant_note = f"авто-формант (менее надёжно, проверьте на слух): ваш F1 ~{median_f1:.0f}Гц -> сдвиг {formant_shift:+.2f}"
+
         import io
 
         import soundfile as sf
@@ -725,11 +760,11 @@ def create_app(engine_factory):
         asyncio.create_task(_run_compare_job(
             job_id, audio_48k, wav_buf.getvalue(),
             transpose=transpose, index_rate=index_rate, formant_shift=formant_shift,
-            auto_transpose_note=auto_transpose_note,
+            auto_transpose_note=auto_transpose_note, auto_formant_note=auto_formant_note,
         ))
         return JSONResponse({
             "jobId": job_id, "inputSeconds": input_seconds, "order": order,
-            "autoTransposeNote": auto_transpose_note,
+            "autoTransposeNote": auto_transpose_note, "autoFormantNote": auto_formant_note,
         })
 
     static_dir = __import__("pathlib").Path(__file__).resolve().parent.parent / "web-rt"
