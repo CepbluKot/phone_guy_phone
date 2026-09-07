@@ -193,8 +193,11 @@ async function startCompareJob(body, headers) {
   setControlsDisabled(true);
   try {
     const transpose = el('transpose').value || '0';
+    const formant = el('formant').value || '0';
     const indexRate = el('indexRate').value || '0.6';
-    const query = '?transpose=' + encodeURIComponent(transpose) + '&indexRate=' + encodeURIComponent(indexRate);
+    const query = '?transpose=' + encodeURIComponent(transpose) +
+      '&formant=' + encodeURIComponent(formant) +
+      '&indexRate=' + encodeURIComponent(indexRate);
     const response = await fetch('/api/compare' + query, {method: 'POST', headers, body});
     if (!response.ok) {
       let code = 'error';

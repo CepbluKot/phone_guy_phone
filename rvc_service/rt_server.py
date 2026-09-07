@@ -501,7 +501,7 @@ def create_app(engine_factory):
 
     async def _run_compare_job(
         job_id: str, audio_48k, input_wav_bytes: bytes,
-        transpose: int = 0, index_rate: float | None = None,
+        transpose: int = 0, index_rate: float | None = None, formant_shift: float = 0.0,
     ) -> None:
         import base64
         import io
@@ -517,7 +517,7 @@ def create_app(engine_factory):
                 converted = await convert_utterance(
                     app.state, audio_48k, next(_ids),
                     block_s=variant["block_s"], extra_s=variant["extra_s"], f0method=variant["f0method"],
-                    transpose=transpose, index_rate=index_rate,
+                    transpose=transpose, index_rate=index_rate, formant_shift=formant_shift,
                 )
                 wall_ms = round((time.perf_counter() - begun) * 1000, 1)
                 buf = io.BytesIO()
@@ -525,6 +525,8 @@ def create_app(engine_factory):
                 label = variant["label"]
                 if transpose:
                     label += f" · транспонирование {transpose:+d} полутонов"
+                if formant_shift:
+                    label += f" · формант {formant_shift:+g}"
                 if index_rate is not None:
                     label += f" · index_rate {index_rate:g}"
                 job["results"][key] = {
@@ -616,6 +618,11 @@ def create_app(engine_factory):
                 index_rate = max(0.0, min(1.0, float(index_rate_param)))
             except ValueError:
                 return JSONResponse({"code": "invalid_request", "message": "indexRate must be a number"}, status_code=400)
+        try:
+            formant_shift = float(request.query_params.get("formant", "0"))
+        except ValueError:
+            return JSONResponse({"code": "invalid_request", "message": "formant must be a number"}, status_code=400)
+        formant_shift = max(-24.0, min(24.0, formant_shift))
 
         content_type = request.headers.get("content-type", "")
         if content_type.startswith("multipart/form-data"):
@@ -658,7 +665,8 @@ def create_app(engine_factory):
             status="running", inputSeconds=input_seconds, order=order, results={},
         )
         asyncio.create_task(_run_compare_job(
-            job_id, audio_48k, wav_buf.getvalue(), transpose=transpose, index_rate=index_rate,
+            job_id, audio_48k, wav_buf.getvalue(),
+            transpose=transpose, index_rate=index_rate, formant_shift=formant_shift,
         ))
         return JSONResponse({"jobId": job_id, "inputSeconds": input_seconds, "order": order})
 
