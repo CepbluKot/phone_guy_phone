@@ -499,7 +499,10 @@ def create_app(engine_factory):
                 "outputSeconds": round(info.frames / info.samplerate, 2),
             }
 
-    async def _run_compare_job(job_id: str, audio_48k, input_wav_bytes: bytes) -> None:
+    async def _run_compare_job(
+        job_id: str, audio_48k, input_wav_bytes: bytes,
+        transpose: int = 0, index_rate: float | None = None,
+    ) -> None:
         import base64
         import io
 
@@ -514,12 +517,18 @@ def create_app(engine_factory):
                 converted = await convert_utterance(
                     app.state, audio_48k, next(_ids),
                     block_s=variant["block_s"], extra_s=variant["extra_s"], f0method=variant["f0method"],
+                    transpose=transpose, index_rate=index_rate,
                 )
                 wall_ms = round((time.perf_counter() - begun) * 1000, 1)
                 buf = io.BytesIO()
                 sf.write(buf, converted, SAMPLE_RATE, format="WAV", subtype="PCM_16")
+                label = variant["label"]
+                if transpose:
+                    label += f" · транспонирование {transpose:+d} полутонов"
+                if index_rate is not None:
+                    label += f" · index_rate {index_rate:g}"
                 job["results"][key] = {
-                    "label": variant["label"],
+                    "label": label,
                     "wavBase64": base64.b64encode(buf.getvalue()).decode("ascii"),
                     "wallMs": wall_ms,
                     "outputSeconds": round(converted.size / SAMPLE_RATE, 2),
@@ -595,6 +604,19 @@ def create_app(engine_factory):
         if getattr(app.state, "engine", None) is None:
             return JSONResponse({"code": "model_unavailable"}, status_code=503)
 
+        try:
+            transpose = int(request.query_params.get("transpose", "0"))
+        except ValueError:
+            return JSONResponse({"code": "invalid_request", "message": "transpose must be an integer"}, status_code=400)
+        transpose = max(-24, min(24, transpose))
+        index_rate_param = request.query_params.get("indexRate")
+        index_rate = None
+        if index_rate_param is not None:
+            try:
+                index_rate = max(0.0, min(1.0, float(index_rate_param)))
+            except ValueError:
+                return JSONResponse({"code": "invalid_request", "message": "indexRate must be a number"}, status_code=400)
+
         content_type = request.headers.get("content-type", "")
         if content_type.startswith("multipart/form-data"):
             form = await request.form()
@@ -635,7 +657,9 @@ def create_app(engine_factory):
         job_id = app.state.compare_jobs.create(
             status="running", inputSeconds=input_seconds, order=order, results={},
         )
-        asyncio.create_task(_run_compare_job(job_id, audio_48k, wav_buf.getvalue()))
+        asyncio.create_task(_run_compare_job(
+            job_id, audio_48k, wav_buf.getvalue(), transpose=transpose, index_rate=index_rate,
+        ))
         return JSONResponse({"jobId": job_id, "inputSeconds": input_seconds, "order": order})
 
     static_dir = __import__("pathlib").Path(__file__).resolve().parent.parent / "web-rt"

@@ -21,6 +21,8 @@ async def convert_utterance(
     f0method: str,
     crossfade_s: float = 0.05,
     search_s: float = 0.02,
+    transpose: int = 0,
+    index_rate: float | None = None,
 ) -> np.ndarray:
     """Returns 48kHz float32 PCM, same length (rounded up to a whole 20ms
     frame) as the input."""
@@ -42,6 +44,13 @@ async def convert_utterance(
             if state.last_session_id != session_id:
                 state.engine.reset_pitch_cache()
                 state.last_session_id = session_id
+            # Cheap attribute sets (see RtEngine.set_transpose/set_index_rate),
+            # not a model reload -- but the engine is shared across
+            # sessions/jobs, so re-apply every block in case another caller
+            # changed them while this one waited for the lock.
+            state.engine.set_transpose(transpose)
+            if index_rate is not None:
+                state.engine.set_index_rate(index_rate)
             out_np = await loop.run_in_executor(
                 state.executor, state.engine.convert_block_48k,
                 window_16k, framer.block_16k, framer.skip_head_frames,
