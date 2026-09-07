@@ -57,18 +57,20 @@ VARIANTS = {
 DEFAULT_VARIANT = "v2-fcpe"
 
 # Cross-agent comparison entries for /api/compare -- see
-# experiments/latency-sonnet/scripts/run_gpt_variant.py and the "GLM
-# reference" note below for what each actually is.
+# experiments/latency-sonnet/scripts/run_gpt_variant.py and run_glm_variant.py
+# for what each actually runs.
 GPT_LABEL = ("GPT (research/latency-optimization): их v2-профиль, hop 1.0с / "
              "context 0.5с — прогнано через вашу запись в изоляции (их deployed "
              "release, скопирован read-only), не через живой прод-канарейку")
-GLM_LABEL = ("GLM (research/latency-glm): их лучший профиль, hop 1.0с / "
-             "context 0.5с — статический пример на синтетической фразе из их "
-             "собственного бенчмарка, НЕ ваша запись (спуск GLM живьём отложен "
-             "из-за нехватки GPU-памяти)")
+GLM_LABEL = ("GLM (research/latency-glm): их рекомендованный профиль, hop 1.0с / "
+             "context 0.5с — прогнано через вашу запись в изоляции (их собственная "
+             "бенчмарк-копия, скопирована read-only)")
 GPT_ROOT = "/tmp/rt_demo_gpt"
 GPT_PYTHON = "/opt/voice-rvc/venv/bin/python3"
 GPT_TIMEOUT_S = 150.0
+GLM_ROOT = "/tmp/rt_demo_glm"
+GLM_PYTHON = "/opt/voice-rvc/venv/bin/python3"
+GLM_TIMEOUT_S = 150.0
 
 _ids = itertools.count(1)
 
@@ -159,12 +161,14 @@ def create_app(engine_factory):
         state.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="rtrvc")
         state.gpu_lock = asyncio.Lock()
         # Separate from gpu_lock on purpose: holding gpu_lock for an entire
-        # GPT subprocess run (can be tens of seconds for a long recording)
-        # would starve every live v2-fcpe/bots/tts caller's per-block calls
-        # long enough to trip their own STALL_SECONDS watchdog. This only
-        # needs to stop two GPT subprocesses (two concurrent compare jobs)
-        # from both loading a model copy at once.
-        state.gpt_lock = asyncio.Lock()
+        # GPT/GLM subprocess run (can be tens of seconds for a long
+        # recording) would starve every live v2-fcpe/bots/tts caller's
+        # per-block calls long enough to trip their own STALL_SECONDS
+        # watchdog. This only needs to stop two of these transient ~1-1.5GB
+        # copies (GPT and/or GLM, from one or two concurrent compare jobs)
+        # from being resident at once -- see the VRAM budget note on
+        # _run_gpt_variant below.
+        state.external_lock = asyncio.Lock()
         state.last_session_id = None
         state.active_sessions = 0
         state.compare_jobs = JobStore()
@@ -444,51 +448,52 @@ def create_app(engine_factory):
             "error": job.get("error"),
         })
 
-    async def _run_gpt_variant(input_wav_bytes: bytes) -> dict:
-        """Runs the recording through research/latency-optimization's own
-        LOW_LATENCY_PROFILE chunks.py/engine.py -- copied read-only from
-        their already-deployed production release into /tmp/rt_demo_gpt on
-        VM209, never the live voice-rvc.service process -- as an isolated
-        subprocess with its own CUDA context. Serialized behind our own
-        gpt_lock (its own lock, not the real-time engine's gpu_lock -- see
-        that field's comment) so two compare jobs can't launch two of these
-        at once and double up the transient ~1.1GB it needs on top of
-        production (~1.0GB) and our own resident engine (~1.5GB before this
-        trimmed RMVPE out; see VARIANTS above)."""
+    async def _run_external_variant(
+        *, name: str, script: str, root: str, python: str, timeout_s: float,
+        label: str, input_wav_bytes: bytes,
+    ) -> dict:
+        """Runs the recording through another agent's own chunks.py/engine.py
+        -- copied read-only into an isolated directory on VM209, never a
+        live process of theirs -- as its own subprocess with its own CUDA
+        context. Serialized behind external_lock (its own lock, not the
+        real-time engine's gpu_lock -- see that field's comment) so two
+        compare jobs can't have two of these transient ~1-1.5GB copies
+        resident at once on top of production (~1.0GB) and our own engine
+        (~0.8GB, trimmed to fcpe-only; see VARIANTS above)."""
         import base64
         import tempfile
         from pathlib import Path
 
         import soundfile as sf
 
-        with tempfile.TemporaryDirectory(prefix="rt_compare_gpt_") as tmp:
+        with tempfile.TemporaryDirectory(prefix=f"rt_compare_{name}_") as tmp:
             in_path = Path(tmp) / "in.wav"
             out_path = Path(tmp) / "out.wav"
             in_path.write_bytes(input_wav_bytes)
 
-            async with app.state.gpt_lock:
+            async with app.state.external_lock:
                 begun = time.perf_counter()
                 proc = await asyncio.create_subprocess_exec(
-                    GPT_PYTHON, "run_gpt_variant.py",
+                    python, script,
                     "--input", str(in_path), "--output", str(out_path),
-                    cwd=GPT_ROOT,
+                    cwd=root,
                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                 )
                 try:
-                    _, stderr = await asyncio.wait_for(proc.communicate(), GPT_TIMEOUT_S)
+                    _, stderr = await asyncio.wait_for(proc.communicate(), timeout_s)
                 except asyncio.TimeoutError:
                     proc.kill()
-                    raise RuntimeError("gpt_timeout: превышено время ожидания") from None
+                    raise RuntimeError(f"{name}_timeout: превышено время ожидания") from None
                 wall_ms = round((time.perf_counter() - begun) * 1000, 1)
 
             if proc.returncode != 0 or not out_path.exists():
                 tail = stderr.decode("utf-8", "replace").strip().splitlines()
-                raise RuntimeError("gpt_failed: " + (tail[-1] if tail else "unknown error")[:250])
+                raise RuntimeError(f"{name}_failed: " + (tail[-1] if tail else "unknown error")[:250])
 
             info = sf.info(str(out_path))
             wav_bytes = out_path.read_bytes()
             return {
-                "label": GPT_LABEL,
+                "label": label,
                 "wavBase64": base64.b64encode(wav_bytes).decode("ascii"),
                 "wallMs": wall_ms,
                 "outputSeconds": round(info.frames / info.samplerate, 2),
@@ -521,15 +526,23 @@ def create_app(engine_factory):
                 }
                 app.state.compare_jobs.notify(job_id)
 
-            # Cross-agent entries are best-effort: a failure here (GPT's
-            # isolated copy OOMing, timing out, etc.) shows up as an error
-            # on just that one card, not as a failure of the whole job --
-            # our own result above already landed regardless.
-            try:
-                job["results"]["gpt"] = await _run_gpt_variant(input_wav_bytes)
-            except Exception as exc:
-                job["results"]["gpt"] = {"label": GPT_LABEL, "error": str(exc)[:300]}
-            app.state.compare_jobs.notify(job_id)
+            # Cross-agent entries are best-effort and run one at a time (see
+            # external_lock): a failure here (an isolated copy OOMing,
+            # timing out, etc.) shows up as an error on just that one card,
+            # not as a failure of the whole job -- our own result above
+            # already landed regardless.
+            for name, script, root, python, timeout_s, label in (
+                ("gpt", "run_gpt_variant.py", GPT_ROOT, GPT_PYTHON, GPT_TIMEOUT_S, GPT_LABEL),
+                ("glm", "run_glm_variant.py", GLM_ROOT, GLM_PYTHON, GLM_TIMEOUT_S, GLM_LABEL),
+            ):
+                try:
+                    job["results"][name] = await _run_external_variant(
+                        name=name, script=script, root=root, python=python,
+                        timeout_s=timeout_s, label=label, input_wav_bytes=input_wav_bytes,
+                    )
+                except Exception as exc:
+                    job["results"][name] = {"label": label, "error": str(exc)[:300]}
+                app.state.compare_jobs.notify(job_id)
 
             job["status"] = "done"
         except Exception as exc:
@@ -619,14 +632,8 @@ def create_app(engine_factory):
         sf.write(wav_buf, audio_48k, SAMPLE_RATE, format="WAV", subtype="PCM_16")
 
         order = [*VARIANTS.keys(), "gpt", "glm"]
-        results = {"glm": {
-            "label": GLM_LABEL,
-            "wavUrl": "/compare/reference-glm.wav",
-            "wallMs": 0,
-            "outputSeconds": 15.0,
-        }}
         job_id = app.state.compare_jobs.create(
-            status="running", inputSeconds=input_seconds, order=order, results=results,
+            status="running", inputSeconds=input_seconds, order=order, results={},
         )
         asyncio.create_task(_run_compare_job(job_id, audio_48k, wav_buf.getvalue()))
         return JSONResponse({"jobId": job_id, "inputSeconds": input_seconds, "order": order})
