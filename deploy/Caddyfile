@@ -7,10 +7,23 @@ https://vm-voice-1.lan.awesomeio.ru {
     handle /ws/conference {
         reverse_proxy 127.0.0.1:8091
     }
+    handle /ws/rvc-v2 {
+        reverse_proxy 127.0.0.1:8090
+    }
     handle /ws/rvc {
         reverse_proxy 127.0.0.1:8090
     }
     handle {
         reverse_proxy 192.168.20.70:8080
     }
+}
+
+# Research demo stack (rvc_service.rt_server on 8093 + isolated GPT v2 copy on
+# 8098). Not production; this block must stay in the template because every
+# deploy regenerates /etc/caddy/Caddyfile from it (see
+# docs/RT_DEMO_SONNET_2026-09-07.md, "shared Caddyfile" section).
+https://voice-claude.lan.awesomeio.ru {
+    bind 192.168.20.70
+    tls /etc/voice-certs/fullchain.pem /etc/voice-certs/key.pem
+    reverse_proxy 127.0.0.1:8093
 }

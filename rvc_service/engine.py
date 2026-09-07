@@ -12,12 +12,9 @@ import sys
 import numpy as np
 
 from .chunks import (
-    ALIGNMENT_SEARCH_SAMPLES,
-    CONTEXT_SAMPLES,
-    HOP_SAMPLES,
-    OVERLAP_SAMPLES,
+    DEFAULT_PROFILE,
+    LOW_LATENCY_PROFILE,
     SAMPLE_RATE,
-    WINDOW_SAMPLES,
 )
 
 
@@ -26,6 +23,10 @@ MODEL_NAME = "PhoneGuyfnaf1V1.pth"
 INDEX_NAME = "added_IVF359_Flat_nprobe_1_PhoneGuyfnaf1V1_v2.index"
 MODEL_SAMPLE_RATE = 32_000
 MODEL_INPUT_RATE = 16_000
+SUPPORTED_WINDOW_SAMPLES = {
+    DEFAULT_PROFILE.window_samples,
+    LOW_LATENCY_PROFILE.window_samples,
+}
 
 
 @contextmanager
@@ -50,20 +51,23 @@ class Engine:
         self._load(root)
         # Deliberately bypass the public silence shortcut: readiness means the
         # full production-shaped CUDA/RMVPE path has completed once.
-        self._convert_with_model(np.zeros(WINDOW_SAMPLES, dtype=np.float32))
+        self._convert_with_model(
+            np.zeros(DEFAULT_PROFILE.window_samples, dtype=np.float32)
+        )
 
     def convert(self, window: np.ndarray) -> np.ndarray:
         """Convert one normalized 48 kHz contextual window entirely in memory."""
         audio = np.asarray(window)
-        if audio.ndim != 1 or audio.size != WINDOW_SAMPLES:
+        if audio.ndim != 1 or audio.size not in SUPPORTED_WINDOW_SAMPLES:
             raise ValueError(
-                f"RVC input window must contain exactly {WINDOW_SAMPLES} samples"
+                "RVC input window has an unsupported number of samples: "
+                f"{audio.size}"
             )
         if not np.isfinite(audio).all():
             raise ValueError("RVC input window must contain only finite samples")
         audio = audio.astype(np.float32, copy=False)
         if not np.any(audio):
-            return np.zeros(WINDOW_SAMPLES, dtype=np.float32)
+            return np.zeros(audio.size, dtype=np.float32)
         return self._convert_with_model(audio)
 
     def _load(self, root: Path) -> None:
@@ -163,18 +167,8 @@ class Engine:
             SAMPLE_RATE // divisor,
             self._vc.tgt_sr // divisor,
         ).astype(np.float32)
-        minimum = (
-            CONTEXT_SAMPLES
-            + HOP_SAMPLES
-            + ALIGNMENT_SEARCH_SAMPLES
-            + OVERLAP_SAMPLES
-        )
-        if output.size < minimum:
-            raise RuntimeError(
-                f"RVC output is too short for aligned rendering: {output.size} samples"
-            )
-        if output.size < WINDOW_SAMPLES:
-            output = np.pad(output, (0, WINDOW_SAMPLES - output.size), mode="edge")
+        if output.size < window.size:
+            output = np.pad(output, (0, window.size - output.size), mode="edge")
         else:
-            output = output[:WINDOW_SAMPLES]
+            output = output[:window.size]
         return np.clip(output, -1.0, 1.0).astype(np.float32, copy=False)
