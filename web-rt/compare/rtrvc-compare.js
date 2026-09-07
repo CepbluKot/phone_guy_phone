@@ -193,7 +193,7 @@ async function startCompareJob(body, headers) {
   setControlsDisabled(true);
   try {
     const transpose = el('autoTranspose').checked ? 'auto' : (el('transpose').value || '0');
-    const formant = el('formant').value || '0';
+    const formant = el('autoFormant').checked ? 'auto' : (el('formant').value || '0');
     const indexRate = el('indexRate').value || '0.6';
     const query = '?transpose=' + encodeURIComponent(transpose) +
       '&formant=' + encodeURIComponent(formant) +
@@ -286,6 +286,9 @@ fileGoButton.onclick = () => processFile();
 
 const autoTransposeCheckbox = el('autoTranspose');
 autoTransposeCheckbox.onchange = () => { el('transpose').disabled = autoTransposeCheckbox.checked; };
+
+const autoFormantCheckbox = el('autoFormant');
+autoFormantCheckbox.onchange = () => { el('formant').disabled = autoFormantCheckbox.checked; };
 
 (function resumeFromUrl() {
   const jobId = new URLSearchParams(location.search).get('job');
