@@ -86,6 +86,12 @@ class BotRoom:
                         if self.state.last_session_id != bot.id:
                             engine.reset_pitch_cache()
                             self.state.last_session_id = bot.id
+                        # Engine is shared with live v2-fcpe sessions, which
+                        # now set their own auto-measured transpose on every
+                        # block (see rt_server.py's Session.convert) -- reset
+                        # it back to 0 here so a bot never inherits whatever
+                        # a live caller last set.
+                        engine.set_transpose(0.0)
                         out_np = await loop.run_in_executor(
                             self.state.executor, engine.convert_block_48k,
                             window_16k, bot.framer.block_16k, bot.framer.skip_head_frames,

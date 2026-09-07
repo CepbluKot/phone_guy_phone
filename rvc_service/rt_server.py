@@ -100,6 +100,12 @@ GPT_LIVE_ORIGIN = "https://voice-claude.lan.awesomeio.ru"
 # here, not which reference sounds more "authentic" on paper.
 TARGET_MEDIAN_F0_HZ = 110.8
 AUTO_TRANSPOSE_LIMIT = 12
+# How much live mic audio a Session accumulates before measuring its own
+# median F0 once (see Session._measure_auto_transpose) -- long enough for
+# pitch.py's YIN tracker to see plenty of voiced frames, short enough that
+# the untransposed warm-up period at the start of a session is barely
+# noticeable.
+AUTO_TRANSPOSE_WARMUP_SAMPLES = SAMPLE_RATE * 2
 
 # Same idea as TARGET_MEDIAN_F0_HZ but for the first formant (see
 # formant.py) -- median F1 of the same Voicemod reference clip. Opt-in via
@@ -136,6 +142,37 @@ class Session:
         self.accept_audio = False
         self.progress = time.monotonic()
         self.consumed = 0
+        # Same idea as /api/compare's ?transpose=auto (see TARGET_MEDIAN_F0_HZ),
+        # just measured from the first couple seconds of live mic audio
+        # instead of a whole recording up front -- None until then, so the
+        # very start of a session runs untransposed and self-corrects once
+        # enough signal has come in.
+        self.transpose = None
+        self._pitch_frames = []
+        self._pitch_samples = 0
+
+    async def _measure_auto_transpose(self, frame: bytes) -> None:
+        import math
+
+        import numpy as np
+
+        from .pitch import estimate_median_f0
+
+        self._pitch_frames.append(np.frombuffer(frame, dtype="<i2"))
+        self._pitch_samples += FRAME_BYTES // 2
+        if self._pitch_samples < AUTO_TRANSPOSE_WARMUP_SAMPLES:
+            return
+        audio = np.concatenate(self._pitch_frames).astype(np.float32) / 32768.0
+        self._pitch_frames = []
+        median_f0 = estimate_median_f0(audio, SAMPLE_RATE)
+        self.transpose = 0.0 if median_f0 is None else max(
+            -AUTO_TRANSPOSE_LIMIT, min(AUTO_TRANSPOSE_LIMIT,
+            12 * math.log2(TARGET_MEDIAN_F0_HZ / median_f0)),
+        )
+        with suppress(Exception):
+            await self.socket.send_json({
+                "type": "autoTranspose", "measuredHz": median_f0, "semitones": self.transpose,
+            })
 
     async def receive(self):
         try:
@@ -154,6 +191,8 @@ class Session:
                 frame = message.get("bytes")
                 if not self.accept_audio or frame is None or len(frame) != FRAME_BYTES:
                     raise SessionError("invalid_frame")
+                if self.transpose is None:
+                    await self._measure_auto_transpose(frame)
                 window = self.framer.push(frame)
                 self.progress = time.monotonic()
                 if window is not None:
@@ -174,6 +213,10 @@ class Session:
                 if self.state.last_session_id != self.id:
                     engine.reset_pitch_cache()
                     self.state.last_session_id = self.id
+                # Shared engine, so re-apply every block in case another
+                # session's turn changed it in between (same reasoning as
+                # rt_batch.py's convert_utterance).
+                engine.set_transpose(self.transpose or 0.0)
                 loop = asyncio.get_running_loop()
                 out_np = await loop.run_in_executor(
                     self.state.executor, engine.convert_block_48k,

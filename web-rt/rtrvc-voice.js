@@ -62,7 +62,8 @@ async function begin() {
       ' мс · сеть+сервер: ' + s.networkServerMs.toFixed(0) + ' мс · блок: ' +
       (s.blockSeconds * 1000).toFixed(0) + ' мс';
     el('diagnostics').textContent = 'Отправлено кадров: ' + s.sent + ' · получено блоков: ' + s.received +
-      ' · sessionId: ' + s.sessionId;
+      ' · sessionId: ' + s.sessionId +
+      (s.autoTransposeText ? ' · ' + s.autoTransposeText : ' · авто-транспонирование: измеряю первые 2с…');
   }, 250);
 
   try {
@@ -117,6 +118,13 @@ async function begin() {
           s.pending = message;
           const sentAt = s.lastSentAt.get(Math.round(message.consumedSamples / CAPTURE_SAMPLES));
           if (sentAt) s.networkServerMs = performance.now() - sentAt;
+          return;
+        }
+        if (message.type === 'autoTranspose') {
+          s.autoTransposeText = message.measuredHz
+            ? 'авто-транспонирование: ваша высота ~' + Math.round(message.measuredHz) + 'Гц -> сдвиг ' +
+              message.semitones.toFixed(2) + ' полутонов'
+            : 'авто-транспонирование не применено (не удалось измерить высоту)';
           return;
         }
         if (message.type === 'stopped') return;

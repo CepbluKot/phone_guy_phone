@@ -2,15 +2,30 @@
 
 Isolated read-only-derived copy of research/latency-optimization's
 rvc_service/server.py (byte-identical to the deployed production release
-at copy time -- verified via md5sum -- except for the one deliberate
-change below: ALLOWED_ORIGINS). Run as its own process on its own port on
-VM209 (see docs/RT_DEMO_SONNET_2026-09-07.md's "GPT live" section), never
-touching voice-rvc.service or its port. Exists so
+at copy time -- verified via md5sum -- except for two deliberate changes:
+ALLOWED_ORIGINS, and the auto-transpose measurement/application described
+below). Run as its own process on its own port on VM209 (see
+docs/RT_DEMO_SONNET_2026-09-07.md's "GPT live" section), never touching
+voice-rvc.service or its port. Exists so
 https://voice-claude.lan.awesomeio.ru/gpt-live/ can stream live mic audio
 through GPT's actual LOW_LATENCY_PROFILE code, the same way our own
 /v2-fcpe/ does for ours -- the offline experiments/latency-sonnet/scripts/
 run_gpt_variant.py batch driver is a separate, unrelated use of the same
 upstream engine.py/chunks.py.
+
+Auto-transpose: same idea as our own Session (rt_server.py) and
+/api/compare's ?transpose=auto -- a Session measures the median F0 of its
+first couple seconds of mic audio (pitch.py, deployed alongside this file)
+and picks the semitone shift toward TARGET_MEDIAN_F0_HZ. Their Engine has
+no transpose parameter at all (engine.py's _convert_with_model hardcodes
+f0_up_key=0 in the infer/vc/pipeline.py call) -- applied the same
+monkeypatch trick as run_gpt_variant.py's _apply_transpose, overriding
+pipeline.pipeline()'s 6th positional argument, except here it's re-applied
+per block (see Session.convert) since a session's own measured value can
+change from None to a real number mid-session, and reset for whichever
+session runs next -- unlike the batch driver, this process serves more
+than one session over its lifetime, just never two at once
+(app.state.active already enforces that).
 """
 
 from __future__ import annotations
@@ -19,6 +34,7 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, suppress
 import json
+import math
 import time
 
 import anyio
@@ -33,10 +49,17 @@ from .chunks import (
     Chunker,
     RvcProfile,
 )
+from .pitch import estimate_median_f0
 
 
 STARTUP_SECONDS = 90.0
 STALL_SECONDS = 10.0
+# Same target as rt_server.py's TARGET_MEDIAN_F0_HZ (measured from the same
+# Voicemod reference clip) so GPT's live page gets the identical correction
+# our own live page would compute for the same voice.
+TARGET_MEDIAN_F0_HZ = 110.8
+AUTO_TRANSPOSE_LIMIT = 12
+AUTO_TRANSPOSE_WARMUP_SAMPLES = SAMPLE_RATE * 2
 ALLOWED_ORIGINS = {"https://voice.lan.awesomeio.ru",
                    "https://vm-voice-1.lan.awesomeio.ru",
                    # The one deliberate change from their real server.py:
@@ -54,6 +77,21 @@ MESSAGES = {
 
 class SessionError(Exception):
     pass
+
+
+def _apply_transpose(engine, original_pipeline_call, semitones: float) -> None:
+    """Rewraps engine._vc.pipeline.pipeline around the *saved original*
+    bound method every time (not whatever it currently is), so repeated
+    calls across many sessions over this process's lifetime never chain
+    wrappers -- see create_app's initialize() for where the original gets
+    saved once, right after the engine loads."""
+    def patched(*a, **kw):
+        a = list(a)
+        if len(a) > 5:
+            a[5] = semitones
+        return original_pipeline_call(*a, **kw)
+
+    engine._vc.pipeline.pipeline = patched
 
 
 async def _drain(future):
@@ -99,6 +137,28 @@ class Session:
         self.progress = time.monotonic()
         self.output_start = 0
         self.consumed = 0
+        self.transpose = None
+        self._pitch_frames = []
+        self._pitch_samples = 0
+
+    async def _measure_auto_transpose(self, frame: bytes) -> None:
+        import numpy as np
+
+        self._pitch_frames.append(np.frombuffer(frame, dtype="<i2"))
+        self._pitch_samples += FRAME_BYTES // 2
+        if self._pitch_samples < AUTO_TRANSPOSE_WARMUP_SAMPLES:
+            return
+        audio = np.concatenate(self._pitch_frames).astype(np.float32) / 32768.0
+        self._pitch_frames = []
+        median_f0 = estimate_median_f0(audio, SAMPLE_RATE)
+        self.transpose = 0.0 if median_f0 is None else max(
+            -AUTO_TRANSPOSE_LIMIT, min(AUTO_TRANSPOSE_LIMIT,
+            12 * math.log2(TARGET_MEDIAN_F0_HZ / median_f0)),
+        )
+        with suppress(Exception):
+            await self.socket.send_json({
+                "type": "autoTranspose", "measuredHz": median_f0, "semitones": self.transpose,
+            })
 
     async def receive(self):
         try:
@@ -117,6 +177,8 @@ class Session:
                 frame = message.get("bytes")
                 if not self.accept_audio or frame is None or len(frame) != FRAME_BYTES:
                     raise SessionError("invalid_frame")
+                if self.transpose is None:
+                    await self._measure_auto_transpose(frame)
                 window = self.chunks.push(frame)
                 self.progress = time.monotonic()
                 if window is not None:
@@ -138,6 +200,11 @@ class Session:
         while True:
             window, consumed = await self.queue.get()
             begun = time.perf_counter()
+            # Only one session is ever active at a time (app.state.active),
+            # but re-apply every block anyway: cheap, and it means a fresh
+            # session's first block always starts from self.transpose (None
+            # -> 0.0) regardless of what the previous session left behind.
+            _apply_transpose(self.state.engine, self.state.original_pipeline_call, self.transpose or 0.0)
             self.inflight = self.state.executor.submit(self.state.engine.convert, window)
             try:
                 converted = await asyncio.wait_for(
@@ -197,6 +264,11 @@ def create_app(engine_factory=_default_engine):
                 state.engine = await asyncio.wait_for(
                     asyncio.shield(asyncio.wrap_future(state.loading)), STARTUP_SECONDS
                 )
+                # Saved once here, not re-read later: _apply_transpose always
+                # wraps from this exact original, so many sessions patching
+                # it in turn over this process's lifetime never chain
+                # wrappers around each other.
+                state.original_pipeline_call = state.engine._vc.pipeline.pipeline
                 state.status = "ready"
             except Exception:
                 state.status = "model_unavailable"
