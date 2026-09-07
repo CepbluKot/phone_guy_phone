@@ -126,6 +126,21 @@ class RtEngine:
         index has thin coverage for a given sound."""
         self._rvc.change_index_rate(rate)
 
+    def set_formant_shift(self, semitones: float) -> None:
+        """infer/rtrvc.py's RVC.formant_shift: resamples the synthesis
+        window by 2**(shift/12) before vocoding (see RVC.infer's `factor`),
+        which moves formant frequencies -- i.e. the *vocal tract size* cue
+        (what mainly reads as "a man" vs "a woman" vs "a child" independent
+        of pitch) -- while infer() compensates the F0 extraction by the
+        same amount (f0_up_key - formant_shift) so this doesn't also shift
+        perceived pitch. transpose (set_transpose) only moves pitch
+        register; this is the separate, also-always-0-until-now knob for
+        vocal tract size, which is what actually carries the male/female/
+        speaker-identity cue that survives pitch correction alone. Typical
+        useful range is small (roughly -3..+3), unlike transpose's wider
+        useful range -- large values distort quickly."""
+        self._rvc.change_formant(semitones)
+
     def reset_pitch_cache(self) -> None:
         """Zero infer/rtrvc.py's cache_pitch/cache_pitchf. Call this whenever
         the engine switches from serving one session/speaker to another --
