@@ -16,7 +16,8 @@ from pathlib import Path
 
 import numpy as np
 
-from .rt_chunks import FRAME_SAMPLES, RtFramer, RtStitcher, SAMPLE_RATE
+from .rt_batch import convert_utterance
+from .rt_chunks import SAMPLE_RATE
 
 PIPER_PYTHON = Path("/tmp/tts_venv/bin/python3")
 VOICES_DIR = Path("/tmp/rt_demo/piper_voices")
@@ -79,41 +80,6 @@ def resample_to_48k(audio: np.ndarray, src_sr: int) -> np.ndarray:
     return resample_poly(audio, SAMPLE_RATE // g, src_sr // g).astype(np.float32)
 
 
-async def convert_through_rvc(state, audio_48k: np.ndarray, session_id: int) -> np.ndarray:
-    """Feed a full utterance through the shared engine block-by-block, same
-    algorithm as a live session, just without a real-time deadline. Returns
-    48kHz float32 PCM."""
-    framer = RtFramer(block_s=0.3, extra_s=1.5, crossfade_s=0.05, search_s=0.02)
-    stitcher = RtStitcher(tgt_sr=SAMPLE_RATE, block_s=0.3, crossfade_s=0.05, search_s=0.02)
-    pcm16 = np.clip(np.rint(audio_48k * 32768.0), -32768, 32767).astype("<i2")
-    # pad to a whole number of capture frames so the trailing partial second
-    # of speech isn't silently dropped by the framer
-    pad = (-pcm16.size) % FRAME_SAMPLES
-    if pad:
-        pcm16 = np.pad(pcm16, (0, pad))
-
-    loop = asyncio.get_running_loop()
-    out_chunks = []
-    for i in range(pcm16.size // FRAME_SAMPLES):
-        frame = pcm16[i * FRAME_SAMPLES:(i + 1) * FRAME_SAMPLES].tobytes()
-        window_16k = framer.push(frame)
-        if window_16k is None:
-            continue
-        async with state.gpu_lock:
-            if state.last_session_id != session_id:
-                state.engine.reset_pitch_cache()
-                state.last_session_id = session_id
-            out_np = await loop.run_in_executor(
-                state.executor, state.engine.convert_block_48k,
-                window_16k, framer.block_16k, framer.skip_head_frames, framer.return_length_frames,
-            )
-        out_chunks.append(stitcher.render(out_np))
-    if state.last_session_id == session_id:
-        state.last_session_id = None
-    pcm = b"".join(out_chunks)
-    return np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32768.0
-
-
 async def text_to_phone_guy(state, text: str, lang: str, session_id: int) -> bytes:
     """Full pipeline: text -> Piper -> resample -> shared RVC engine -> WAV bytes."""
     import io
@@ -122,7 +88,8 @@ async def text_to_phone_guy(state, text: str, lang: str, session_id: int) -> byt
     base_audio = await synthesize_base_voice(text, lang)
     base_sr = _piper_sample_rate(lang)
     audio_48k = resample_to_48k(base_audio, base_sr)
-    converted = await convert_through_rvc(state, audio_48k, session_id)
+    converted = await convert_utterance(state, audio_48k, session_id,
+                                         block_s=0.3, extra_s=1.5, f0method="rmvpe")
 
     buf = io.BytesIO()
     sf.write(buf, converted, SAMPLE_RATE, format="WAV", subtype="PCM_16")
