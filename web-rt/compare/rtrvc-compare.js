@@ -10,6 +10,8 @@ const fileInput = el('fileInput'), fileGoButton = el('fileGo');
 let rec = null;
 let busy = false;
 let pollTimer = null;
+let socket = null;
+const filledKeys = new Set();
 
 function level(pcm) {
   if (!pcm.length) return 0;
@@ -52,21 +54,49 @@ function appendPlaceholder(key, label) {
   resultsEl.appendChild(div);
 }
 
+// Only one <audio> plays at a time: starting one pauses every other result
+// (and the just-started recording/upload wipes stale ones via renderPlaceholders,
+// so this only has to handle "user pressed play on two cards").
+function pauseOtherAudios(current) {
+  for (const audio of resultsEl.querySelectorAll('audio')) {
+    if (audio !== current) audio.pause();
+  }
+}
+
+// Called once per key, ever (see filledKeys below) -- both the websocket
+// push and the polling fallback resend the *whole* job snapshot on every
+// update, and re-setting an <audio> element's innerHTML while it's mid
+// playback restarts it. Rendering a key only the first time it appears
+// keeps an already-playing result untouched when a later result lands.
 function fillResult(info) {
   const div = el('result-' + info.key);
-  if (!div) return;
+  if (!div || filledKeys.has(info.key)) return;
+  filledKeys.add(info.key);
+  if (info.error) {
+    div.innerHTML = '<h3>' + info.key + '</h3><p>' + (info.label || '') + '</p>' +
+      '<p class="meta">не обработано: ' + info.error + '</p>';
+    return;
+  }
+  const src = info.wavUrl || ('data:audio/wav;base64,' + info.wavBase64);
+  const wallText = info.wallMs ? ('обработка: ' + info.wallMs + ' мс · ') : '';
   div.innerHTML = '<h3>' + info.key + '</h3><p>' + info.label + '</p>' +
-    '<audio controls src="data:audio/wav;base64,' + info.wavBase64 + '"></audio>' +
-    '<p class="meta">обработка всей записи: ' + info.wallMs + ' мс · выход: ' + info.outputSeconds + 'с</p>';
+    '<audio controls src="' + src + '"></audio>' +
+    '<p class="meta">' + wallText + 'выход: ' + info.outputSeconds + 'с</p>';
+  div.querySelector('audio').addEventListener('play', (e) => pauseOtherAudios(e.target));
 }
 
 function renderPlaceholders(order) {
   resultsEl.innerHTML = '';
+  filledKeys.clear();
   for (const key of order) appendPlaceholder(key, '…');
 }
 
 function stopPolling() {
   if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+}
+
+function closeSocket() {
+  if (socket) { try { socket.close(); } catch {} socket = null; }
 }
 
 function applyJobSnapshot(data) {
@@ -76,9 +106,9 @@ function applyJobSnapshot(data) {
     if (info) fillResult({...info, key});
   }
   if (data.status === 'running') {
-    statusEl.textContent = 'Обрабатываю запись ' + data.inputSeconds + 'с через все 4 варианта — по одному, результаты появятся ниже. Ссылка на этот результат сохранена в адресной строке.';
+    statusEl.textContent = 'Обрабатываю запись ' + data.inputSeconds + 'с — результаты появятся ниже по одному, каждый источник считает независимо. Ссылка на этот результат сохранена в адресной строке.';
   } else if (data.status === 'done') {
-    statusEl.textContent = 'Готово — все 4 варианта обработаны. Эту ссылку можно сохранить, чтобы вернуться к результату позже.';
+    statusEl.textContent = 'Готово. Эту ссылку можно сохранить, чтобы вернуться к результату позже.';
     stopPolling();
     setControlsDisabled(false);
   } else if (data.status === 'error') {
@@ -94,11 +124,11 @@ function applyJobSnapshot(data) {
   }
 }
 
-// Polls GET /api/compare/<jobId> instead of holding one HTTP response open
-// for the whole multi-minute conversion (see rvc_service/rt_jobs.py) -- a
-// dropped connection just fails one poll tick, not the whole comparison,
-// and the job id in the URL means this same page reopened later (or on
-// another device) picks the result back up.
+// Polling fallback for GET /api/compare/<jobId> -- only used if the
+// websocket below can't even connect (odd proxy, browser without WS).
+// A dropped tick just retries on the next one instead of losing the whole
+// comparison, and the job id in the URL means this page reopened later (or
+// on another device) picks the result back up.
 async function pollJob(jobId) {
   stopPolling();
   setControlsDisabled(true);
@@ -120,8 +150,45 @@ async function pollJob(jobId) {
   await tick();
 }
 
+// Primary transport: the server pushes a full snapshot over /ws/compare/<id>
+// on connect and again every time a new result lands (see rt_jobs.py's
+// JobStore.notify), so the page just waits instead of asking on a timer.
+function watchJob(jobId) {
+  closeSocket();
+  stopPolling();
+  setControlsDisabled(true);
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const ws = new WebSocket(proto + '//' + location.host + '/ws/compare/' + jobId);
+  socket = ws;
+  let gotAnyMessage = false;
+  ws.onmessage = (event) => {
+    gotAnyMessage = true;
+    const data = JSON.parse(event.data);
+    if (data.code === 'not_found') {
+      statusEl.textContent = 'Результат не найден (сервер перезапускался или прошло много времени) — начните новое сравнение.';
+      setControlsDisabled(false);
+      closeSocket();
+      return;
+    }
+    applyJobSnapshot(data);
+    if (data.status !== 'running') closeSocket();
+  };
+  ws.onerror = () => {
+    if (!gotAnyMessage) {
+      // Couldn't even open the socket (proxy/browser issue) -- fall back
+      // to polling instead of leaving the page stuck.
+      pollJob(jobId);
+    }
+  };
+  ws.onclose = () => {
+    if (socket === ws) socket = null;
+  };
+}
+
 async function startCompareJob(body, headers) {
+  closeSocket();
   resultsEl.innerHTML = '';
+  filledKeys.clear();
   statusEl.textContent = 'Отправляю…';
   setControlsDisabled(true);
   try {
@@ -136,7 +203,7 @@ async function startCompareJob(body, headers) {
     url.searchParams.set('job', data.jobId);
     history.pushState({job: data.jobId}, '', url);
     renderPlaceholders(data.order);
-    pollJob(data.jobId);
+    watchJob(data.jobId);
   } catch (error) {
     statusEl.textContent = error.message || 'Ошибка отправки.';
     setControlsDisabled(false);
@@ -215,6 +282,6 @@ fileGoButton.onclick = () => processFile();
   const jobId = new URLSearchParams(location.search).get('job');
   if (jobId) {
     statusEl.textContent = 'Загружаю сохранённый результат…';
-    pollJob(jobId);
+    watchJob(jobId);
   }
 })();

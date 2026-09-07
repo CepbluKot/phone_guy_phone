@@ -42,26 +42,33 @@ STALL_SECONDS = 15.0
 MAX_COMPARE_SECONDS = 60
 MAX_UPLOAD_BYTES = 30 * 1024 * 1024
 
-# Each variant is reachable at /ws/rvc/<key> and web-rt/<key>/index.html.
+# Down to the one variant listening picked as best (see
+# docs/LATENCY_VERDICT_SONNET_2026-09-07.md and the user's own A/B result:
+# "FCPE, блок 0.3с - топ"). RMVPE is no longer loaded anywhere in this
+# process as a result -- rt_tts.py and rt_bots.py were switched to fcpe too
+# so nothing lazy-loads it, freeing that memory for the cross-agent GPT
+# comparison in /api/compare (see _run_gpt_variant below).
 VARIANTS = {
-    "v1-rmvpe": {
-        "label": "RMVPE, блок 0.3с (сегодняшний вариант по умолчанию)",
-        "block_s": 0.3, "extra_s": 1.5, "f0method": "rmvpe",
-    },
     "v2-fcpe": {
-        "label": "FCPE, блок 0.3с (~28% быстрее по питчу, качество не проверено на слух)",
+        "label": "Sonnet: FCPE, блок 0.3с",
         "block_s": 0.3, "extra_s": 1.5, "f0method": "fcpe",
     },
-    "v3-rmvpe-fast": {
-        "label": "RMVPE, блок 0.15с (агрессивно, самый малый запас RTF)",
-        "block_s": 0.15, "extra_s": 2.5, "f0method": "rmvpe",
-    },
-    "v4-fcpe-fast": {
-        "label": "FCPE, блок 0.15с (агрессивно + быстрый питч)",
-        "block_s": 0.15, "extra_s": 2.5, "f0method": "fcpe",
-    },
 }
-DEFAULT_VARIANT = "v1-rmvpe"
+DEFAULT_VARIANT = "v2-fcpe"
+
+# Cross-agent comparison entries for /api/compare -- see
+# experiments/latency-sonnet/scripts/run_gpt_variant.py and the "GLM
+# reference" note below for what each actually is.
+GPT_LABEL = ("GPT (research/latency-optimization): их v2-профиль, hop 1.0с / "
+             "context 0.5с — прогнано через вашу запись в изоляции (их deployed "
+             "release, скопирован read-only), не через живой прод-канарейку")
+GLM_LABEL = ("GLM (research/latency-glm): их лучший профиль, hop 1.0с / "
+             "context 0.5с — статический пример на синтетической фразе из их "
+             "собственного бенчмарка, НЕ ваша запись (спуск GLM живьём отложен "
+             "из-за нехватки GPU-памяти)")
+GPT_ROOT = "/tmp/rt_demo_gpt"
+GPT_PYTHON = "/opt/voice-rvc/venv/bin/python3"
+GPT_TIMEOUT_S = 150.0
 
 _ids = itertools.count(1)
 
@@ -151,6 +158,13 @@ def create_app(engine_factory):
 
         state.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="rtrvc")
         state.gpu_lock = asyncio.Lock()
+        # Separate from gpu_lock on purpose: holding gpu_lock for an entire
+        # GPT subprocess run (can be tens of seconds for a long recording)
+        # would starve every live v2-fcpe/bots/tts caller's per-block calls
+        # long enough to trip their own STALL_SECONDS watchdog. This only
+        # needs to stop two GPT subprocesses (two concurrent compare jobs)
+        # from both loading a model copy at once.
+        state.gpt_lock = asyncio.Lock()
         state.last_session_id = None
         state.active_sessions = 0
         state.compare_jobs = JobStore()
@@ -350,6 +364,33 @@ def create_app(engine_factory):
         except Exception:
             job["status"] = "error"
             job["error"] = "internal_error"
+        finally:
+            app.state.tts_jobs.notify(job_id)
+
+    @app.websocket("/ws/tts/{job_id}")
+    async def tts_ws(socket: WebSocket, job_id: str):
+        """Pushed alternative to polling GET /api/tts/<job_id>: sends a
+        snapshot on connect and again every time the job changes, until it
+        reaches a terminal status."""
+        await socket.accept()
+        try:
+            while True:
+                job = app.state.tts_jobs.get(job_id)
+                if job is None:
+                    await socket.send_json({"code": "not_found"})
+                    return
+                await socket.send_json({
+                    "status": job["status"], "text": job.get("text"), "lang": job.get("lang"),
+                    "wavBase64": job.get("wavBase64"), "error": job.get("error"),
+                })
+                if job["status"] != "running":
+                    return
+                await app.state.tts_jobs.wait_for_update(job_id)
+        except WebSocketDisconnect:
+            pass
+        finally:
+            with suppress(RuntimeError):
+                await socket.close()
 
     @app.post("/api/tts")
     async def tts(request: Request):
@@ -403,10 +444,59 @@ def create_app(engine_factory):
             "error": job.get("error"),
         })
 
-    async def _run_compare_job(job_id: str, audio_48k) -> None:
+    async def _run_gpt_variant(input_wav_bytes: bytes) -> dict:
+        """Runs the recording through research/latency-optimization's own
+        LOW_LATENCY_PROFILE chunks.py/engine.py -- copied read-only from
+        their already-deployed production release into /tmp/rt_demo_gpt on
+        VM209, never the live voice-rvc.service process -- as an isolated
+        subprocess with its own CUDA context. Serialized behind our own
+        gpt_lock (its own lock, not the real-time engine's gpu_lock -- see
+        that field's comment) so two compare jobs can't launch two of these
+        at once and double up the transient ~1.1GB it needs on top of
+        production (~1.0GB) and our own resident engine (~1.5GB before this
+        trimmed RMVPE out; see VARIANTS above)."""
+        import base64
+        import tempfile
+        from pathlib import Path
+
+        import soundfile as sf
+
+        with tempfile.TemporaryDirectory(prefix="rt_compare_gpt_") as tmp:
+            in_path = Path(tmp) / "in.wav"
+            out_path = Path(tmp) / "out.wav"
+            in_path.write_bytes(input_wav_bytes)
+
+            async with app.state.gpt_lock:
+                begun = time.perf_counter()
+                proc = await asyncio.create_subprocess_exec(
+                    GPT_PYTHON, "run_gpt_variant.py",
+                    "--input", str(in_path), "--output", str(out_path),
+                    cwd=GPT_ROOT,
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                )
+                try:
+                    _, stderr = await asyncio.wait_for(proc.communicate(), GPT_TIMEOUT_S)
+                except asyncio.TimeoutError:
+                    proc.kill()
+                    raise RuntimeError("gpt_timeout: превышено время ожидания") from None
+                wall_ms = round((time.perf_counter() - begun) * 1000, 1)
+
+            if proc.returncode != 0 or not out_path.exists():
+                tail = stderr.decode("utf-8", "replace").strip().splitlines()
+                raise RuntimeError("gpt_failed: " + (tail[-1] if tail else "unknown error")[:250])
+
+            info = sf.info(str(out_path))
+            wav_bytes = out_path.read_bytes()
+            return {
+                "label": GPT_LABEL,
+                "wavBase64": base64.b64encode(wav_bytes).decode("ascii"),
+                "wallMs": wall_ms,
+                "outputSeconds": round(info.frames / info.samplerate, 2),
+            }
+
+    async def _run_compare_job(job_id: str, audio_48k, input_wav_bytes: bytes) -> None:
         import base64
         import io
-        import time
 
         import soundfile as sf
 
@@ -429,10 +519,49 @@ def create_app(engine_factory):
                     "wallMs": wall_ms,
                     "outputSeconds": round(converted.size / SAMPLE_RATE, 2),
                 }
+                app.state.compare_jobs.notify(job_id)
+
+            # Cross-agent entries are best-effort: a failure here (GPT's
+            # isolated copy OOMing, timing out, etc.) shows up as an error
+            # on just that one card, not as a failure of the whole job --
+            # our own result above already landed regardless.
+            try:
+                job["results"]["gpt"] = await _run_gpt_variant(input_wav_bytes)
+            except Exception as exc:
+                job["results"]["gpt"] = {"label": GPT_LABEL, "error": str(exc)[:300]}
+            app.state.compare_jobs.notify(job_id)
+
             job["status"] = "done"
         except Exception as exc:
             job["status"] = "error"
             job["error"] = str(exc)[:300]
+        finally:
+            app.state.compare_jobs.notify(job_id)
+
+    @app.websocket("/ws/compare/{job_id}")
+    async def compare_ws(socket: WebSocket, job_id: str):
+        """Pushed alternative to polling GET /api/compare/<job_id>: sends a
+        snapshot on connect and again every time a new result lands, until
+        the job reaches a terminal status."""
+        await socket.accept()
+        try:
+            while True:
+                job = app.state.compare_jobs.get(job_id)
+                if job is None:
+                    await socket.send_json({"code": "not_found"})
+                    return
+                await socket.send_json({
+                    "status": job["status"], "inputSeconds": job["inputSeconds"],
+                    "order": job["order"], "results": job["results"], "error": job.get("error"),
+                })
+                if job["status"] != "running":
+                    return
+                await app.state.compare_jobs.wait_for_update(job_id)
+        except WebSocketDisconnect:
+            pass
+        finally:
+            with suppress(RuntimeError):
+                await socket.close()
 
     @app.post("/api/compare")
     async def compare(request: Request):
@@ -482,12 +611,25 @@ def create_app(engine_factory):
         audio_48k = pcm16.astype(np.float32) / 32768.0
         input_seconds = round(pcm16.size / SAMPLE_RATE, 2)
 
+        import io
+
+        import soundfile as sf
+
+        wav_buf = io.BytesIO()
+        sf.write(wav_buf, audio_48k, SAMPLE_RATE, format="WAV", subtype="PCM_16")
+
+        order = [*VARIANTS.keys(), "gpt", "glm"]
+        results = {"glm": {
+            "label": GLM_LABEL,
+            "wavUrl": "/compare/reference-glm.wav",
+            "wallMs": 0,
+            "outputSeconds": 15.0,
+        }}
         job_id = app.state.compare_jobs.create(
-            status="running", inputSeconds=input_seconds,
-            order=list(VARIANTS.keys()), results={},
+            status="running", inputSeconds=input_seconds, order=order, results=results,
         )
-        asyncio.create_task(_run_compare_job(job_id, audio_48k))
-        return JSONResponse({"jobId": job_id, "inputSeconds": input_seconds, "order": list(VARIANTS.keys())})
+        asyncio.create_task(_run_compare_job(job_id, audio_48k, wav_buf.getvalue()))
+        return JSONResponse({"jobId": job_id, "inputSeconds": input_seconds, "order": order})
 
     static_dir = __import__("pathlib").Path(__file__).resolve().parent.parent / "web-rt"
     if static_dir.exists():
@@ -499,7 +641,7 @@ def create_app(engine_factory):
 def _default_engine():
     from .rt_engine import RtEngine
 
-    return RtEngine()
+    return RtEngine(f0method="fcpe")
 
 
 app = create_app(_default_engine)

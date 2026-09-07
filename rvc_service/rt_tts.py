@@ -89,7 +89,7 @@ async def text_to_phone_guy(state, text: str, lang: str, session_id: int) -> byt
     base_sr = _piper_sample_rate(lang)
     audio_48k = resample_to_48k(base_audio, base_sr)
     converted = await convert_utterance(state, audio_48k, session_id,
-                                         block_s=0.3, extra_s=1.5, f0method="rmvpe")
+                                         block_s=0.3, extra_s=1.5, f0method="fcpe")
 
     buf = io.BytesIO()
     sf.write(buf, converted, SAMPLE_RATE, format="WAV", subtype="PCM_16")

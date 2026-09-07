@@ -8,15 +8,20 @@ connection and the page is stuck showing "processing" forever with nothing
 to retry, because there was never anything to reconnect *to*: the result
 only ever existed inside that one response.
 
-Instead each POST creates a job with a UUID, kicks off the actual work as a
-background asyncio task, and returns immediately; the page polls
-GET /api/<endpoint>/<job_id> on an interval and can resume from a dropped
-poll on the next tick, or from a totally new page load if the job id is
-still in the URL (bookmarked/shared/reopened later). This is a research
-demo, not a queue -- one process, in-memory, gone on restart.
+Instead each POST creates a job with a UUID and kicks off the actual work
+as a background asyncio task, returning immediately. The page opens
+GET /ws/<endpoint>/<job_id> and gets pushed a full snapshot every time the
+job changes (see `notify`/`wait_for_update` below) instead of polling on a
+timer; GET /api/<endpoint>/<job_id> still exists as a one-shot fallback for
+a client that can't hold a websocket open. A dropped connection just
+reopens and re-reads the current snapshot instead of losing the whole
+comparison, and the job id staying in the URL (bookmarked/shared/reopened
+later) means the same page reopened later shows the same result. This is a
+research demo, not a queue -- one process, in-memory, gone on restart.
 """
 from __future__ import annotations
 
+import asyncio
 import time
 import uuid
 
@@ -30,11 +35,28 @@ class JobStore:
     def create(self, **fields) -> str:
         self._prune()
         job_id = uuid.uuid4().hex
-        self._jobs[job_id] = {"createdAt": time.time(), **fields}
+        self._jobs[job_id] = {"createdAt": time.time(), "_event": asyncio.Event(), **fields}
         return job_id
 
     def get(self, job_id: str) -> dict | None:
         return self._jobs.get(job_id)
+
+    def notify(self, job_id: str) -> None:
+        """Wake every websocket currently waiting on this job's next update.
+        Replaces the Event rather than clearing it, so a waiter that grabs
+        the new one right after can't miss the wakeup and block forever."""
+        job = self._jobs.get(job_id)
+        if job is None:
+            return
+        stale_event = job["_event"]
+        job["_event"] = asyncio.Event()
+        stale_event.set()
+
+    async def wait_for_update(self, job_id: str) -> None:
+        job = self._jobs.get(job_id)
+        if job is None:
+            return
+        await job["_event"].wait()
 
     def _prune(self) -> None:
         now = time.time()
