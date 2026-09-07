@@ -29,7 +29,7 @@ import json
 import time
 
 from fastapi import FastAPI, Request, Response, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from .rt_chunks import FRAME_BYTES, RtFramer, RtStitcher, SAMPLE_RATE
@@ -38,6 +38,8 @@ CROSSFADE_S = 0.05
 SEARCH_S = 0.02
 MAX_SESSIONS = 4
 STALL_SECONDS = 15.0
+MAX_COMPARE_SECONDS = 60
+MAX_UPLOAD_BYTES = 30 * 1024 * 1024
 
 # Each variant is reachable at /ws/rvc/<key> and web-rt/<key>/index.html.
 VARIANTS = {
@@ -337,12 +339,34 @@ def create_app(engine_factory):
             return JSONResponse({"code": code, "message": str(exc)}, status_code=422)
         return Response(content=wav_bytes, media_type="audio/wav")
 
+    async def _decode_upload_to_pcm16_48k(raw: bytes, max_seconds: int) -> bytes:
+        """Any container/codec ffmpeg understands -> raw PCM16 48kHz mono,
+        trimmed to max_seconds during decode so a long upload never gets
+        fully decoded into memory."""
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-nostdin", "-v", "error", "-i", "pipe:0",
+            "-t", str(max_seconds), "-ac", "1", "-ar", str(SAMPLE_RATE),
+            "-c:a", "pcm_s16le", "-f", "s16le", "pipe:1",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate(raw)
+        if proc.returncode != 0 or not stdout:
+            lines = stderr.decode("utf-8", "replace").strip().splitlines()
+            raise ValueError((lines[-1] if lines else "decode failed")[:300])
+        return stdout
+
     @app.post("/api/compare")
     async def compare(request: Request):
-        """One recording (raw PCM16 48kHz mono in the request body) run
-        through every VARIANT in turn, so it can be judged from a single
-        take instead of re-recording per page. Sequential, not parallel --
-        all variants share the one GPU-resident engine and its lock."""
+        """One recording -- either raw PCM16 48kHz mono in the request body
+        (the mic-recording page) or an uploaded audio file of any format
+        the server's ffmpeg understands (multipart field "audio") -- run
+        through every VARIANT in turn, streamed back as one JSON line per
+        finished variant so the page can render results as they land
+        instead of waiting for all four. Sequential, not parallel -- all
+        variants share the one GPU-resident engine and its lock, and only
+        one variant's audio is ever held in memory at a time."""
         import base64
         import io
         import time
@@ -355,33 +379,58 @@ def create_app(engine_factory):
 
         if getattr(app.state, "engine", None) is None:
             return JSONResponse({"code": "model_unavailable"}, status_code=503)
-        body = await request.body()
+
+        content_type = request.headers.get("content-type", "")
+        if content_type.startswith("multipart/form-data"):
+            form = await request.form()
+            upload = form.get("audio")
+            if upload is None:
+                return JSONResponse({"code": "invalid_request"}, status_code=400)
+            raw = await upload.read()
+            if not raw:
+                return JSONResponse({"code": "invalid_request"}, status_code=400)
+            if len(raw) > MAX_UPLOAD_BYTES:
+                return JSONResponse(
+                    {"code": "file_too_large", "message": f"max {MAX_UPLOAD_BYTES // (1024 * 1024)}MB"},
+                    status_code=413,
+                )
+            try:
+                body = await _decode_upload_to_pcm16_48k(raw, MAX_COMPARE_SECONDS)
+            except ValueError as exc:
+                return JSONResponse({"code": "decode_failed", "message": str(exc)}, status_code=400)
+        else:
+            body = await request.body()
+            if len(body) > MAX_COMPARE_SECONDS * SAMPLE_RATE * 2:
+                body = body[:MAX_COMPARE_SECONDS * SAMPLE_RATE * 2]
+
         if len(body) < FRAME_SAMPLES * 2 or len(body) % 2 != 0:
             return JSONResponse({"code": "invalid_request"}, status_code=400)
-        max_seconds = 15
-        if len(body) > max_seconds * SAMPLE_RATE * 2:
-            return JSONResponse({"code": "recording_too_long",
-                                  "message": f"max {max_seconds}s"}, status_code=413)
         pcm16 = np.frombuffer(body, dtype="<i2")
         audio_48k = pcm16.astype(np.float32) / 32768.0
+        input_seconds = round(pcm16.size / SAMPLE_RATE, 2)
 
-        results = {}
-        for key, variant in VARIANTS.items():
-            begun = time.perf_counter()
-            converted = await convert_utterance(
-                app.state, audio_48k, next(_ids),
-                block_s=variant["block_s"], extra_s=variant["extra_s"], f0method=variant["f0method"],
-            )
-            wall_ms = round((time.perf_counter() - begun) * 1000, 1)
-            buf = io.BytesIO()
-            sf.write(buf, converted, SAMPLE_RATE, format="WAV", subtype="PCM_16")
-            results[key] = {
-                "label": variant["label"],
-                "wavBase64": base64.b64encode(buf.getvalue()).decode("ascii"),
-                "wallMs": wall_ms,
-                "outputSeconds": round(converted.size / SAMPLE_RATE, 2),
-            }
-        return JSONResponse({"inputSeconds": round(pcm16.size / SAMPLE_RATE, 2), "results": results})
+        async def stream():
+            yield json.dumps({"type": "start", "inputSeconds": input_seconds}) + "\n"
+            for key, variant in VARIANTS.items():
+                begun = time.perf_counter()
+                converted = await convert_utterance(
+                    app.state, audio_48k, next(_ids),
+                    block_s=variant["block_s"], extra_s=variant["extra_s"], f0method=variant["f0method"],
+                )
+                wall_ms = round((time.perf_counter() - begun) * 1000, 1)
+                buf = io.BytesIO()
+                sf.write(buf, converted, SAMPLE_RATE, format="WAV", subtype="PCM_16")
+                yield json.dumps({
+                    "type": "result",
+                    "key": key,
+                    "label": variant["label"],
+                    "wavBase64": base64.b64encode(buf.getvalue()).decode("ascii"),
+                    "wallMs": wall_ms,
+                    "outputSeconds": round(converted.size / SAMPLE_RATE, 2),
+                }) + "\n"
+            yield json.dumps({"type": "done"}) + "\n"
+
+        return StreamingResponse(stream(), media_type="application/x-ndjson")
 
     static_dir = __import__("pathlib").Path(__file__).resolve().parent.parent / "web-rt"
     if static_dir.exists():
