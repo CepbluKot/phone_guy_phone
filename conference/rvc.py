@@ -1,4 +1,7 @@
-"""Single native client of the unchanged version-1 RVC protocol."""
+"""Single native client of the RVC protocol, version 2 (LOW_LATENCY_PROFILE:
+1 s hops instead of version 1's 2 s -- see docs/GPT_LIVE_VERDICT_SONNET_
+2026-09-07.md for why and what this changes; version 1 stays deployed at
+/ws/rvc and untouched, this client just no longer talks to it)."""
 
 import asyncio
 from contextlib import suppress
@@ -15,19 +18,19 @@ ORIGIN = "https://voice.lan.awesomeio.ru"
 ALLOWED_ORIGINS = {ORIGIN, "https://vm-voice-1.lan.awesomeio.ru"}
 START = {
     "type": "start",
-    "version": 1,
+    "version": 2,
     "sampleRate": 48000,
     "channels": 1,
     "sampleFormat": "s16le",
 }
 READY = {
     "type": "ready",
-    "version": 1,
+    "version": 2,
     "sampleRate": 48000,
     "channels": 1,
     "sampleFormat": "s16le",
     "frameBytes": FRAME_BYTES,
-    "outputSamples": 96000,
+    "outputSamples": BLOCK_BYTES // 2,
 }
 KNOWN_ERRORS = {
     "busy",
@@ -166,8 +169,8 @@ class RvcStream:
                     metadata = _control(await self.socket.recv())
                     expected = {
                         "outputStart": self.output_start,
-                        "outputSamples": 96000,
-                        "consumedSamples": self.output_start + 96000,
+                        "outputSamples": BLOCK_BYTES // 2,
+                        "consumedSamples": self.output_start + BLOCK_BYTES // 2,
                     }
                     if metadata.get("type") != "metrics" or not _matches(
                         metadata, expected
@@ -186,7 +189,7 @@ class RvcStream:
                 if not self.ready:
                     return
                 self.metrics = metadata
-                self.output_start += 96000
+                self.output_start += BLOCK_BYTES // 2
                 yield block
         except (Exception, asyncio.CancelledError):
             await finish_cleanup(self.close())

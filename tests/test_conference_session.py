@@ -133,7 +133,7 @@ def test_only_converted_c_reaches_asterisk_and_mix_fans_out():
         await until(lambda: models[0].sent)
         assert models[0].sent[0] == b"C" * 1920
         assert rooms[0].channels["C"].sent == []
-        models[0].incoming.put_nowait(b"V" * 192000)
+        models[0].incoming.put_nowait(b"V" * 96000)
         await until(lambda: rooms[0].channels["C"].sent)
         assert rooms[0].channels["C"].sent[0] == b"V" * 1920
         rooms[0].channels["listener"].incoming.put_nowait(b"M" * 1920)
@@ -264,8 +264,12 @@ def test_model_overload_cannot_accumulate_unbounded_converted_audio():
     async def check():
         session, rooms, models = setup_session()
         listener = await session.join()
-        for _ in range(4):
-            models[0].incoming.put_nowait(b"V" * 192000)
+        # 8 blocks * 50 frames/block (96000-byte block / 1920-byte frame) =
+        # 400 frames into a maxsize=200 queue -- same 2x-over-capacity
+        # margin the original 4*100-frame version had before BLOCK_BYTES
+        # halved from a 2s to a 1s RVC hop.
+        for _ in range(8):
+            models[0].incoming.put_nowait(b"V" * 96000)
         await asyncio.wait_for(listener.done.wait(), 1)
         await session.close()
         assert listener.terminal == {"type": "error", "code": "overloaded"}

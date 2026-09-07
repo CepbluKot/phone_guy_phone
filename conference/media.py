@@ -4,7 +4,13 @@ import asyncio
 import time
 
 FRAME_BYTES = 1920
-BLOCK_BYTES = 192000
+# One converted RVC output block, in bytes. Tied to whichever RVC protocol
+# version conference/rvc.py's RvcStream speaks -- see that module's
+# START/READY/outputs() for the version-2 (LOW_LATENCY_PROFILE, 1 s hops)
+# numbers this now matches. DemoSession only ever treats this as an
+# opaque validate-then-split unit (see session.py's _outputs), so keeping
+# the two in sync here is the only place size actually matters.
+BLOCK_BYTES = 96000
 FRAME_SECONDS = 0.020
 
 
