@@ -28,11 +28,12 @@ import itertools
 import json
 import time
 
-from fastapi import FastAPI, Request, Response, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .rt_chunks import FRAME_BYTES, RtFramer, RtStitcher, SAMPLE_RATE
+from .rt_jobs import JobStore
 
 CROSSFADE_S = 0.05
 SEARCH_S = 0.02
@@ -152,6 +153,8 @@ def create_app(engine_factory):
         state.gpu_lock = asyncio.Lock()
         state.last_session_id = None
         state.active_sessions = 0
+        state.compare_jobs = JobStore()
+        state.tts_jobs = JobStore()
         state.status = "warming"
         state.engine = None
         loop = asyncio.get_running_loop()
@@ -318,10 +321,43 @@ def create_app(engine_factory):
             status_code=405,
         )
 
-    @app.post("/api/tts")
-    async def tts(request: Request):
+    @app.get("/api/tts/{job_id}")
+    async def tts_status(job_id: str):
+        job = app.state.tts_jobs.get(job_id)
+        if job is None:
+            return JSONResponse({"code": "not_found"}, status_code=404)
+        return JSONResponse({
+            "status": job["status"],
+            "text": job.get("text"),
+            "lang": job.get("lang"),
+            "wavBase64": job.get("wavBase64"),
+            "error": job.get("error"),
+        })
+
+    async def _run_tts_job(job_id: str, text: str, lang: str) -> None:
+        import base64
+
         from .rt_tts import TtsError, text_to_phone_guy
 
+        job = app.state.tts_jobs.get(job_id)
+        try:
+            wav_bytes = await text_to_phone_guy(app.state, text, lang, next(_ids))
+            job["wavBase64"] = base64.b64encode(wav_bytes).decode("ascii")
+            job["status"] = "done"
+        except TtsError as exc:
+            job["status"] = "error"
+            job["error"] = str(exc).split(":", 1)[0]
+        except Exception:
+            job["status"] = "error"
+            job["error"] = "internal_error"
+
+    @app.post("/api/tts")
+    async def tts(request: Request):
+        """Kicks off Piper + RVC synthesis as a background job and returns
+        its id immediately -- see rt_jobs.py for why (the same reasoning as
+        /api/compare, even though a single tts job is usually quick: a
+        dropped connection shouldn't lose work that already started, and a
+        job id in the URL means the result can be reopened later)."""
         if getattr(app.state, "engine", None) is None:
             return JSONResponse({"code": "model_unavailable"}, status_code=503)
         try:
@@ -332,12 +368,9 @@ def create_app(engine_factory):
         lang = body.get("lang") if isinstance(body, dict) else None
         if not isinstance(text, str) or lang not in ("ru", "en"):
             return JSONResponse({"code": "invalid_request"}, status_code=400)
-        try:
-            wav_bytes = await text_to_phone_guy(app.state, text, lang, next(_ids))
-        except TtsError as exc:
-            code = str(exc).split(":", 1)[0]
-            return JSONResponse({"code": code, "message": str(exc)}, status_code=422)
-        return Response(content=wav_bytes, media_type="audio/wav")
+        job_id = app.state.tts_jobs.create(status="running", text=text, lang=lang)
+        asyncio.create_task(_run_tts_job(job_id, text, lang))
+        return JSONResponse({"jobId": job_id})
 
     async def _decode_upload_to_pcm16_48k(raw: bytes, max_seconds: int) -> bytes:
         """Any container/codec ffmpeg understands -> raw PCM16 48kHz mono,
@@ -357,24 +390,64 @@ def create_app(engine_factory):
             raise ValueError((lines[-1] if lines else "decode failed")[:300])
         return stdout
 
+    @app.get("/api/compare/{job_id}")
+    async def compare_status(job_id: str):
+        job = app.state.compare_jobs.get(job_id)
+        if job is None:
+            return JSONResponse({"code": "not_found"}, status_code=404)
+        return JSONResponse({
+            "status": job["status"],
+            "inputSeconds": job["inputSeconds"],
+            "order": job["order"],
+            "results": job["results"],
+            "error": job.get("error"),
+        })
+
+    async def _run_compare_job(job_id: str, audio_48k) -> None:
+        import base64
+        import io
+        import time
+
+        import soundfile as sf
+
+        from .rt_batch import convert_utterance
+
+        job = app.state.compare_jobs.get(job_id)
+        try:
+            for key, variant in VARIANTS.items():
+                begun = time.perf_counter()
+                converted = await convert_utterance(
+                    app.state, audio_48k, next(_ids),
+                    block_s=variant["block_s"], extra_s=variant["extra_s"], f0method=variant["f0method"],
+                )
+                wall_ms = round((time.perf_counter() - begun) * 1000, 1)
+                buf = io.BytesIO()
+                sf.write(buf, converted, SAMPLE_RATE, format="WAV", subtype="PCM_16")
+                job["results"][key] = {
+                    "label": variant["label"],
+                    "wavBase64": base64.b64encode(buf.getvalue()).decode("ascii"),
+                    "wallMs": wall_ms,
+                    "outputSeconds": round(converted.size / SAMPLE_RATE, 2),
+                }
+            job["status"] = "done"
+        except Exception as exc:
+            job["status"] = "error"
+            job["error"] = str(exc)[:300]
+
     @app.post("/api/compare")
     async def compare(request: Request):
         """One recording -- either raw PCM16 48kHz mono in the request body
         (the mic-recording page) or an uploaded audio file of any format
         the server's ffmpeg understands (multipart field "audio") -- run
-        through every VARIANT in turn, streamed back as one JSON line per
-        finished variant so the page can render results as they land
-        instead of waiting for all four. Sequential, not parallel -- all
-        variants share the one GPU-resident engine and its lock, and only
-        one variant's audio is ever held in memory at a time."""
-        import base64
-        import io
-        import time
-
+        through every VARIANT in turn as a background job (see rt_jobs.py):
+        this returns a job id immediately, the page polls
+        GET /api/compare/<job_id> for progress instead of holding one HTTP
+        response open for the whole multi-minute conversion. Sequential,
+        not parallel -- all variants share the one GPU-resident engine and
+        its lock, and only one variant's audio is ever held in memory at a
+        time."""
         import numpy as np
-        import soundfile as sf
 
-        from .rt_batch import convert_utterance
         from .rt_chunks import FRAME_SAMPLES
 
         if getattr(app.state, "engine", None) is None:
@@ -409,28 +482,12 @@ def create_app(engine_factory):
         audio_48k = pcm16.astype(np.float32) / 32768.0
         input_seconds = round(pcm16.size / SAMPLE_RATE, 2)
 
-        async def stream():
-            yield json.dumps({"type": "start", "inputSeconds": input_seconds}) + "\n"
-            for key, variant in VARIANTS.items():
-                begun = time.perf_counter()
-                converted = await convert_utterance(
-                    app.state, audio_48k, next(_ids),
-                    block_s=variant["block_s"], extra_s=variant["extra_s"], f0method=variant["f0method"],
-                )
-                wall_ms = round((time.perf_counter() - begun) * 1000, 1)
-                buf = io.BytesIO()
-                sf.write(buf, converted, SAMPLE_RATE, format="WAV", subtype="PCM_16")
-                yield json.dumps({
-                    "type": "result",
-                    "key": key,
-                    "label": variant["label"],
-                    "wavBase64": base64.b64encode(buf.getvalue()).decode("ascii"),
-                    "wallMs": wall_ms,
-                    "outputSeconds": round(converted.size / SAMPLE_RATE, 2),
-                }) + "\n"
-            yield json.dumps({"type": "done"}) + "\n"
-
-        return StreamingResponse(stream(), media_type="application/x-ndjson")
+        job_id = app.state.compare_jobs.create(
+            status="running", inputSeconds=input_seconds,
+            order=list(VARIANTS.keys()), results={},
+        )
+        asyncio.create_task(_run_compare_job(job_id, audio_48k))
+        return JSONResponse({"jobId": job_id, "inputSeconds": input_seconds, "order": list(VARIANTS.keys())})
 
     static_dir = __import__("pathlib").Path(__file__).resolve().parent.parent / "web-rt"
     if static_dir.exists():

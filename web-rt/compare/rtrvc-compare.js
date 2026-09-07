@@ -2,13 +2,14 @@
 
 const SAMPLE_RATE = 48000;
 const MAX_SECONDS = 12;
-const VARIANT_ORDER = ['v1-rmvpe', 'v2-fcpe', 'v3-rmvpe-fast', 'v4-fcpe-fast'];
+const POLL_MS = 1000;
 const el = id => document.getElementById(id);
 const recordButton = el('record'), stopButton = el('stop');
 const statusEl = el('status'), timerEl = el('timer'), resultsEl = el('results');
 const fileInput = el('fileInput'), fileGoButton = el('fileGo');
 let rec = null;
 let busy = false;
+let pollTimer = null;
 
 function level(pcm) {
   if (!pcm.length) return 0;
@@ -59,11 +60,67 @@ function fillResult(info) {
     '<p class="meta">обработка всей записи: ' + info.wallMs + ' мс · выход: ' + info.outputSeconds + 'с</p>';
 }
 
-// Reads the /api/compare NDJSON stream (one line per finished variant, sent
-// as soon as it's ready) rather than one big JSON blob at the end -- so
-// results appear one by one and only one variant's audio is ever decoded
-// server-side at a time (see rvc_service/rt_server.py's /api/compare).
-async function runCompare(body, headers) {
+function renderPlaceholders(order) {
+  resultsEl.innerHTML = '';
+  for (const key of order) appendPlaceholder(key, '…');
+}
+
+function stopPolling() {
+  if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+}
+
+function applyJobSnapshot(data) {
+  if (data.order && data.order.length && !resultsEl.children.length) renderPlaceholders(data.order);
+  for (const key of (data.order || [])) {
+    const info = data.results && data.results[key];
+    if (info) fillResult({...info, key});
+  }
+  if (data.status === 'running') {
+    statusEl.textContent = 'Обрабатываю запись ' + data.inputSeconds + 'с через все 4 варианта — по одному, результаты появятся ниже. Ссылка на этот результат сохранена в адресной строке.';
+  } else if (data.status === 'done') {
+    statusEl.textContent = 'Готово — все 4 варианта обработаны. Эту ссылку можно сохранить, чтобы вернуться к результату позже.';
+    stopPolling();
+    setControlsDisabled(false);
+  } else if (data.status === 'error') {
+    statusEl.textContent = 'Ошибка обработки: ' + (data.error || 'unknown');
+    for (const key of (data.order || [])) {
+      if (data.results && data.results[key]) continue;
+      const div = el('result-' + key);
+      const meta = div?.querySelector('.meta');
+      if (meta) meta.textContent = 'не обработано (ошибка)';
+    }
+    stopPolling();
+    setControlsDisabled(false);
+  }
+}
+
+// Polls GET /api/compare/<jobId> instead of holding one HTTP response open
+// for the whole multi-minute conversion (see rvc_service/rt_jobs.py) -- a
+// dropped connection just fails one poll tick, not the whole comparison,
+// and the job id in the URL means this same page reopened later (or on
+// another device) picks the result back up.
+async function pollJob(jobId) {
+  stopPolling();
+  setControlsDisabled(true);
+  const tick = async () => {
+    try {
+      const response = await fetch('/api/compare/' + jobId, {cache: 'no-store'});
+      if (response.status === 404) {
+        statusEl.textContent = 'Результат не найден (сервер перезапускался или прошло много времени) — начните новое сравнение.';
+        setControlsDisabled(false);
+        return;
+      }
+      const data = await response.json();
+      applyJobSnapshot(data);
+      if (data.status === 'running') pollTimer = setTimeout(tick, POLL_MS);
+    } catch {
+      pollTimer = setTimeout(tick, POLL_MS);
+    }
+  };
+  await tick();
+}
+
+async function startCompareJob(body, headers) {
   resultsEl.innerHTML = '';
   statusEl.textContent = 'Отправляю…';
   setControlsDisabled(true);
@@ -74,36 +131,14 @@ async function runCompare(body, headers) {
       try { code = (await response.json()).code || code; } catch {}
       throw new Error('Ошибка: ' + code);
     }
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let placeholdersReady = false;
-    while (true) {
-      const {value, done} = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, {stream: true});
-      let newlineAt;
-      while ((newlineAt = buffer.indexOf('\n')) >= 0) {
-        const line = buffer.slice(0, newlineAt);
-        buffer = buffer.slice(newlineAt + 1);
-        if (!line) continue;
-        const msg = JSON.parse(line);
-        if (msg.type === 'start') {
-          if (!placeholdersReady) {
-            for (const key of VARIANT_ORDER) appendPlaceholder(key, '…');
-            placeholdersReady = true;
-          }
-          statusEl.textContent = 'Обрабатываю запись ' + msg.inputSeconds + 'с через все 4 варианта — по одному, результаты появятся ниже…';
-        } else if (msg.type === 'result') {
-          fillResult(msg);
-        } else if (msg.type === 'done') {
-          statusEl.textContent = 'Готово — все 4 варианта обработаны.';
-        }
-      }
-    }
+    const data = await response.json();
+    const url = new URL(location.href);
+    url.searchParams.set('job', data.jobId);
+    history.pushState({job: data.jobId}, '', url);
+    renderPlaceholders(data.order);
+    pollJob(data.jobId);
   } catch (error) {
-    statusEl.textContent = error.message || 'Ошибка обработки.';
-  } finally {
+    statusEl.textContent = error.message || 'Ошибка отправки.';
     setControlsDisabled(false);
   }
 }
@@ -114,7 +149,7 @@ async function process(r) {
   const merged = new Int16Array(totalSamples);
   let offset = 0;
   for (const chunk of r.chunks) { merged.set(chunk, offset); offset += chunk.length; }
-  await runCompare(merged.buffer, {'Content-Type': 'application/octet-stream'});
+  await startCompareJob(merged.buffer, {'Content-Type': 'application/octet-stream'});
 }
 
 async function processFile() {
@@ -122,7 +157,7 @@ async function processFile() {
   if (!file || busy) return;
   const form = new FormData();
   form.append('audio', file, file.name);
-  await runCompare(form, undefined);
+  await startCompareJob(form, undefined);
 }
 
 recordButton.onclick = async () => {
@@ -175,3 +210,11 @@ window.addEventListener('pagehide', () => stopRecording('discard'));
 
 fileInput.onchange = () => { fileGoButton.disabled = busy || !fileInput.files.length; };
 fileGoButton.onclick = () => processFile();
+
+(function resumeFromUrl() {
+  const jobId = new URLSearchParams(location.search).get('job');
+  if (jobId) {
+    statusEl.textContent = 'Загружаю сохранённый результат…';
+    pollJob(jobId);
+  }
+})();
