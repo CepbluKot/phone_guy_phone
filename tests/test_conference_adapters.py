@@ -26,20 +26,20 @@ class Socket:
         self.closed = True
 
 
-READY = dict(type="ready", version=1, sampleRate=48000, channels=1,
-             sampleFormat="s16le", frameBytes=1920, outputSamples=96000)
+READY = dict(type="ready", version=2, sampleRate=48000, channels=1,
+             sampleFormat="s16le", frameBytes=1920, outputSamples=48000)
 
 
 def metrics(start=0, **changes):
-    return json.dumps(dict(type="metrics", outputStart=start, outputSamples=96000,
-                           consumedSamples=start + 96000, processingMs=120.5) | changes)
+    return json.dumps(dict(type="metrics", outputStart=start, outputSamples=48000,
+                           consumedSamples=start + 48000, processingMs=120.5) | changes)
 
 
 def test_rvc_handshake_pacing_output_and_stop():
     from conference.rvc import RvcStream
 
     async def check():
-        socket = Socket(json.dumps(READY), metrics(), bytes(192000), metrics(96000), bytes(192000))
+        socket = Socket(json.dumps(READY), metrics(), bytes(96000), metrics(48000), bytes(96000))
         connections = []
         now = [10.0]
         sleeps = []
@@ -52,16 +52,16 @@ def test_rvc_handshake_pacing_output_and_stop():
             sleeps.append(delay)
             now[0] += delay
 
-        async with RvcStream("ws://rvc/ws/rvc", connect=connect, clock=lambda: now[0], sleep=sleep) as stream:
+        async with RvcStream("ws://rvc/ws/rvc-v2", connect=connect, clock=lambda: now[0], sleep=sleep) as stream:
             for _ in range(3):
                 await stream.send(bytes(1920))
             output = stream.outputs()
-            assert len(await anext(output)) == 192000
-            assert len(await anext(output)) == 192000
-            assert stream.metrics["outputStart"] == 96000
+            assert len(await anext(output)) == 96000
+            assert len(await anext(output)) == 96000
+            assert stream.metrics["outputStart"] == 48000
         assert len(connections) == 1
         assert connections[0][1]["origin"] == "https://voice.lan.awesomeio.ru"
-        assert json.loads(socket.sent[0]) == dict(type="start", version=1, sampleRate=48000, channels=1, sampleFormat="s16le")
+        assert json.loads(socket.sent[0]) == dict(type="start", version=2, sampleRate=48000, channels=1, sampleFormat="s16le")
         assert sleeps == pytest.approx([.02, .02])
         assert json.loads(socket.sent[-1]) == {"type": "stop"}
         assert socket.closed

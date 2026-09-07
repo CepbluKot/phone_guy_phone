@@ -26,7 +26,7 @@ def default_session():
             os.environ.get("CONFERENCE_ARI_USERNAME", "phoneguy"),
             os.environ.get("CONFERENCE_ARI_PASSWORD", ""),
         ),
-        lambda: RvcStream(os.environ.get("CONFERENCE_RVC_URL", "ws://127.0.0.1:8090/ws/rvc")),
+        lambda: RvcStream(os.environ.get("CONFERENCE_RVC_URL", "ws://127.0.0.1:8090/ws/rvc-v2")),
     )
 
 
