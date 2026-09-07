@@ -114,29 +114,27 @@ class RtEngine:
         self._rvc.cache_pitch.zero_()
         self._rvc.cache_pitchf.zero_()
 
-    def warmup(self, block_16k: int, skip_head_frames: int, return_length_frames: int) -> None:
-        zeros = self._torch.zeros(
-            skip_head_frames * 160 + return_length_frames * 160 // 2 + block_16k,
-            device=self._device,
-            dtype=self._torch.float32,
-        )
-        self.convert_block(zeros.cpu().numpy(), block_16k, skip_head_frames, return_length_frames)
-
     def convert_block(
         self,
         window_16k: np.ndarray,
         block_16k: int,
         skip_head_frames: int,
         return_length_frames: int,
+        f0method: str | None = None,
     ) -> np.ndarray:
         """Run one rtrvc.py inference call; returns target-sample-rate audio
-        covering the new crossfade+search+block portion (see RtStitcher)."""
+        covering the new crossfade+search+block portion (see RtStitcher).
+        `f0method` overrides the instance default for this call only, so one
+        loaded engine (one set of GPU-resident weights) can serve sessions
+        that each picked a different pitch method -- see rt_server.py's
+        VARIANTS, compared side by side in docs/LATENCY_VERDICT_SONNET_2026-09-07.md."""
         audio = np.asarray(window_16k, dtype=np.float32)
         if not np.isfinite(audio).all():
             raise ValueError("RtEngine input window must contain only finite samples")
         chunk = self._torch.from_numpy(audio).to(self._device)
+        method = f0method or self.f0method
         with _working_directory(self._upstream), self._torch.no_grad():
-            out = self._rvc.infer(chunk, block_16k, skip_head_frames, return_length_frames, self.f0method)
+            out = self._rvc.infer(chunk, block_16k, skip_head_frames, return_length_frames, method)
         result = out.detach().cpu().numpy().astype(np.float32)
         if not np.isfinite(result).all():
             raise RuntimeError("rtrvc.py returned non-finite audio")
@@ -148,6 +146,7 @@ class RtEngine:
         block_16k: int,
         skip_head_frames: int,
         return_length_frames: int,
+        f0method: str | None = None,
     ) -> np.ndarray:
-        out = self.convert_block(window_16k, block_16k, skip_head_frames, return_length_frames)
+        out = self.convert_block(window_16k, block_16k, skip_head_frames, return_length_frames, f0method)
         return resample_to(out, self.tgt_sr, SAMPLE_RATE)

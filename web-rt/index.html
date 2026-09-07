@@ -3,14 +3,18 @@
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>RTRVC demo</title><link rel="stylesheet" href="/style.css"></head>
 <body><main>
-<p class="eyebrow">EXPERIMENTAL RTRVC.PY ENGINE</p><h1>Голос, как было</h1>
-<p>Тот же голос, тот же микрофон, но конвейер на <code>infer/rtrvc.py</code>
-вместо офлайн-пайплайна — блок 0.3с вместо 2с. Наденьте наушники.</p>
-<p id="status" role="status">Готов к подключению микрофона</p>
-<div class="controls"><button id="start">Начать</button><button id="stop" disabled>Остановить</button></div>
-<label>Микрофон <meter id="input" min="0" max="1" value="0"></meter></label>
-<label>Обработанный звук <meter id="output" min="0" max="1" value="0"></meter></label>
-<p id="latency">Задержка: —</p><p id="diagnostics">Отправлено / получено: 0 / 0</p>
-<p>Это research-демо (ветка research/latency-sonnet), не продакшен Phone Guy.
+<p class="eyebrow">EXPERIMENTAL RTRVC.PY ENGINE</p><h1>Варианты голоса</h1>
+<p>Четыре варианта одного и того же движка (<code>infer/rtrvc.py</code>,
+подробности — в research-ветке), отличаются только скоростью питч-модели и
+размером блока. Микрофон и наушники нужны для каждого. Откройте по очереди
+и сравните сами — какой звучит лучше и какой уже начинает "спотыкаться".</p>
+<ul>
+<li><a href="/v1-rmvpe/">Вариант 1 — RMVPE, блок 0.3с</a> (сегодняшний по умолчанию)</li>
+<li><a href="/v2-fcpe/">Вариант 2 — FCPE, блок 0.3с</a> (~28% быстрее питч)</li>
+<li><a href="/v3-rmvpe-fast/">Вариант 3 — RMVPE, блок 0.15с</a> (агрессивно)</li>
+<li><a href="/v4-fcpe-fast/">Вариант 4 — FCPE, блок 0.15с</a> (самый агрессивный)</li>
+</ul>
+<p><a href="/bots/">Комната ботов</a> — отдельная демка, слушать без микрофона.</p>
+<p>Research-демо (ветка research/latency-sonnet), не продакшен Phone Guy.
 Голос не сохраняется.</p>
-</main><script src="/app.js"></script></body></html>
+</main></body></html>
