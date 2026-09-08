@@ -35,6 +35,7 @@ def test_module_allowlist_is_exact_and_contains_release_dependencies():
 
     assert loaded == {
         "app_confbridge",
+        "app_dial",
         "app_stasis",
         "bridge_softmix",
         "chan_pjsip",

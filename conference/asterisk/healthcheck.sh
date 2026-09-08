@@ -5,6 +5,7 @@ asterisk -rx "core waitfullybooted" >/dev/null 2>&1
 
 for required_module in \
     app_confbridge \
+    app_dial \
     app_stasis \
     bridge_softmix \
     chan_pjsip \

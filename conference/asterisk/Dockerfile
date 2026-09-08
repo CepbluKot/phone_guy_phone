@@ -42,6 +42,7 @@ RUN ./configure \
         --disable-category MENUSELECT_MOH \
         --disable-category MENUSELECT_EXTRA_SOUNDS \
         --enable app_confbridge \
+        --enable app_dial \
         --enable app_stasis \
         --enable bridge_softmix \
         --enable chan_pjsip \
