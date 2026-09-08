@@ -7,6 +7,7 @@ for required_module in \
     app_confbridge \
     app_stasis \
     bridge_softmix \
+    chan_pjsip \
     chan_websocket \
     pbx_config \
     res_ari \
@@ -15,7 +16,19 @@ for required_module in \
     res_ari_events \
     res_ari_model \
     res_http_websocket \
+    res_pjproject \
+    res_pjsip \
+    res_pjsip_authenticator_digest \
+    res_pjsip_endpoint_identifier_user \
+    res_pjsip_nat \
+    res_pjsip_pubsub \
+    res_pjsip_registrar \
+    res_pjsip_sdp_rtp \
+    res_pjsip_session \
+    res_rtp_asterisk \
+    res_sorcery_astdb \
     res_sorcery_config \
+    res_sorcery_memory \
     res_stasis \
     res_stasis_answer \
     res_stasis_playback \

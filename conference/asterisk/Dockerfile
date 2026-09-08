@@ -28,11 +28,13 @@ RUN curl --fail --location --silent --show-error "${ASTERISK_ARCHIVE}" \
     && echo "${ASTERISK_SHA256}  /tmp/asterisk.tar.gz" | sha256sum -c - \
     && tar --extract --gzip --file /tmp/asterisk.tar.gz --strip-components=1
 
+# Debian keeps /var/run as a compatibility symlink to /run; remove Asterisk's
+# staged directory before copying the installation into the final image.
 RUN ./configure \
         --prefix=/usr \
         --sysconfdir=/etc \
         --localstatedir=/var \
-        --without-pjproject-bundled \
+        --with-pjproject-bundled \
     && make menuselect.makeopts \
     && menuselect/menuselect \
         --disable BUILD_NATIVE \
@@ -42,6 +44,7 @@ RUN ./configure \
         --enable app_confbridge \
         --enable app_stasis \
         --enable bridge_softmix \
+        --enable chan_pjsip \
         --enable chan_websocket \
         --enable pbx_config \
         --enable res_ari \
@@ -50,6 +53,12 @@ RUN ./configure \
         --enable res_ari_events \
         --enable res_ari_model \
         --enable res_http_websocket \
+        --enable res_pjsip \
+        --enable res_pjsip_authenticator_digest \
+        --enable res_pjsip_endpoint_identifier_user \
+        --enable res_pjsip_registrar \
+        --enable res_pjsip_session \
+        --enable res_rtp_asterisk \
         --enable res_sorcery_config \
         --enable res_stasis \
         --enable res_stasis_answer \
@@ -60,7 +69,8 @@ RUN ./configure \
         --enable res_websocket_client \
         menuselect.makeopts \
     && make -j1 \
-    && make DESTDIR=/opt/asterisk-root install
+    && make DESTDIR=/opt/asterisk-root install \
+    && rm -rf /opt/asterisk-root/var/run
 
 FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171
 
@@ -82,8 +92,9 @@ RUN apt-get update \
         --no-create-home --shell /usr/sbin/nologin asterisk
 
 COPY --from=build /opt/asterisk-root/ /
-COPY asterisk.conf cdr.conf cel.conf confbridge.conf extensions.conf http.conf modules.conf stasis.conf /etc/asterisk/
+COPY asterisk.conf cdr.conf cel.conf confbridge.conf extensions.conf http.conf modules.conf rtp.conf stasis.conf /etc/asterisk/
 COPY ari.conf.template /usr/share/asterisk/config/ari.conf.template
+COPY pjsip.conf.template /usr/share/asterisk/config/pjsip.conf.template
 COPY healthcheck.sh /usr/local/bin/asterisk-healthcheck
 
 RUN install -d -o asterisk -g asterisk \
@@ -91,7 +102,7 @@ RUN install -d -o asterisk -g asterisk \
         /var/log/asterisk \
         /var/run/asterisk \
     && install -d -o root -g root -m 0555 /var/spool/asterisk \
-    && chmod 0444 /etc/asterisk/*.conf /usr/share/asterisk/config/ari.conf.template \
+    && chmod 0444 /etc/asterisk/*.conf /usr/share/asterisk/config/*.template \
     && chmod 0555 /usr/local/bin/asterisk-healthcheck
 
 USER asterisk:asterisk

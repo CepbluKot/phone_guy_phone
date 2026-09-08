@@ -12,7 +12,7 @@ def read(name: str) -> str:
 def test_conference_configuration_is_private_and_wideband():
     assert "internal_sample_rate=48000" in read("confbridge.conf")
     assert "autoload=no" in read("modules.conf")
-    assert "chan_pjsip" not in read("modules.conf")
+    assert "chan_pjsip" in read("modules.conf")
     assert "ConfBridge(phoneguy-demo" in read("extensions.conf")
 
 
@@ -37,6 +37,7 @@ def test_module_allowlist_is_exact_and_contains_release_dependencies():
         "app_confbridge",
         "app_stasis",
         "bridge_softmix",
+        "chan_pjsip",
         "chan_websocket",
         "pbx_config",
         "res_ari",
@@ -45,7 +46,19 @@ def test_module_allowlist_is_exact_and_contains_release_dependencies():
         "res_ari_events",
         "res_ari_model",
         "res_http_websocket",
+        "res_pjproject",
+        "res_pjsip",
+        "res_pjsip_authenticator_digest",
+        "res_pjsip_endpoint_identifier_user",
+        "res_pjsip_nat",
+        "res_pjsip_pubsub",
+        "res_pjsip_registrar",
+        "res_pjsip_sdp_rtp",
+        "res_pjsip_session",
+        "res_rtp_asterisk",
+        "res_sorcery_astdb",
         "res_sorcery_config",
+        "res_sorcery_memory",
         "res_stasis",
         "res_stasis_answer",
         "res_stasis_playback",
@@ -54,7 +67,13 @@ def test_module_allowlist_is_exact_and_contains_release_dependencies():
         "res_timing_timerfd",
         "res_websocket_client",
     }
-    assert "pjsip" not in modules.lower()
+    assert {
+        "chan_pjsip", "res_pjproject", "res_pjsip", "res_pjsip_session",
+        "res_pjsip_authenticator_digest", "res_pjsip_registrar",
+        "res_pjsip_endpoint_identifier_user", "res_pjsip_nat",
+        "res_pjsip_pubsub", "res_pjsip_sdp_rtp", "res_rtp_asterisk", "res_sorcery_astdb",
+        "res_sorcery_memory",
+    } <= loaded
     assert "cdr_" not in modules.lower()
     assert "cel_" not in modules.lower()
     assert "res_ari_recordings" not in modules
@@ -98,14 +117,32 @@ def test_dialplan_profile_and_accounting_are_bounded_and_non_recording():
     assert "enable=no" in read("cel.conf")
 
 
+def test_pjsip_template_has_only_runtime_password_placeholders_and_private_media():
+    pjsip = read("pjsip.conf.template")
+
+    for extension in ("1983", "1987", "2014"):
+        assert f"[{extension}]" in pjsip
+        assert f"__SIP_{extension}_PASSWORD__" in pjsip
+    assert "direct_media=no" in pjsip
+    assert "allow=alaw" in pjsip
+    assert "password=" not in pjsip.replace("password=__SIP_1983_PASSWORD__", "").replace(
+        "password=__SIP_1987_PASSWORD__", "").replace("password=__SIP_2014_PASSWORD__", "")
+    rtp = read("rtp.conf")
+    assert "rtpstart=10000" in rtp
+    assert "rtpend=10019" in rtp
+
+
 def test_source_build_is_reproducible_non_root_and_health_checked():
     dockerfile = read("Dockerfile")
 
+    assert "--with-pjproject-bundled" in dockerfile
+    assert "libpjproject-dev" not in dockerfile
     assert "asterisk-22.11.0.tar.gz" in dockerfile
     assert "3bd5ee040509a3d3cd9b1ba9520c18e6ec0a7e7981ca68c457dcd36ba3c54d94" in dockerfile
     assert re.search(r"^FROM debian:bookworm-slim@sha256:[0-9a-f]{64}", dockerfile, re.MULTILINE)
     assert "sha256sum -c" in dockerfile
     assert "make -j1" in dockerfile
+    assert "rm -rf /opt/asterisk-root/var/run" in dockerfile
     assert "make samples" not in dockerfile
     assert "CORE-SOUNDS" not in dockerfile
     assert "USER asterisk:asterisk" in dockerfile
