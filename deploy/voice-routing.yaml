@@ -1,8 +1,8 @@
 schema_version: 1
 extensions:
-  "201": original
-  "202": phone-guy
-  "203": original
+  "1983": original
+  "1987": phone-guy
+  "2014": original
 profiles:
   original:
     pipeline: passthrough

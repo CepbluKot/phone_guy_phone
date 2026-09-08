@@ -6,7 +6,7 @@ import yaml
 
 
 RVC_V2_ENDPOINT = "ws://127.0.0.1:8090/ws/rvc-v2"
-ALLOWED_EXTENSIONS = {"201", "202", "203"}
+ALLOWED_EXTENSIONS = {"1983", "1987", "2014"}
 
 
 class RoutingError(ValueError):
@@ -42,7 +42,7 @@ def load_routing(path: Path) -> RoutingTable:
     if not isinstance(extensions, dict) or not isinstance(profiles, dict):
         raise RoutingError("routing sections are required")
     if set(extensions) != ALLOWED_EXTENSIONS or any(type(key) is not str for key in extensions):
-        raise RoutingError("extensions must be exactly 201, 202, 203")
+        raise RoutingError("extensions must be exactly 1983, 1987, 2014")
 
     result = {}
     for extension, profile_name in extensions.items():
