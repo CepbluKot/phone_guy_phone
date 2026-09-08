@@ -18,10 +18,8 @@ https://vm-voice-1.lan.awesomeio.ru {
     }
 }
 
-# Research demo stack (rvc_service.rt_server on 8093 + isolated GPT v2 copy on
-# 8098). Not production; this block must stay in the template because every
-# deploy regenerates /etc/caddy/Caddyfile from it (see
-# docs/RT_DEMO_SONNET_2026-09-07.md, "shared Caddyfile" section).
+# FCPE canary. This stays in the shared template so a future production RVC
+# rollout cannot accidentally delete the private route.
 https://voice-claude.lan.awesomeio.ru {
     bind 192.168.20.70
     tls /etc/voice-certs/fullchain.pem /etc/voice-certs/key.pem
