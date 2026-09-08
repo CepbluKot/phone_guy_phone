@@ -42,49 +42,16 @@ STALL_SECONDS = 15.0
 MAX_COMPARE_SECONDS = 60
 MAX_UPLOAD_BYTES = 30 * 1024 * 1024
 
-# Down to the one variant listening picked as best (see
-# docs/LATENCY_VERDICT_SONNET_2026-09-07.md and the user's own A/B result:
-# "FCPE, блок 0.3с - топ"). RMVPE is no longer loaded anywhere in this
-# process as a result -- rt_tts.py and rt_bots.py were switched to fcpe too
-# so nothing lazy-loads it, freeing that memory for the cross-agent GPT
-# comparison in /api/compare (see _run_gpt_variant below).
+# FCPE stays available solely as the managed canary. The accepted production
+# path is GPT v2 on voice-rvc.service; this process must not load a duplicate
+# GPT model or depend on an ad-hoc comparison directory.
 VARIANTS = {
     "v2-fcpe": {
-        "label": "Sonnet: FCPE, блок 0.3с",
+        "label": "FCPE canary, block 0.3 s",
         "block_s": 0.3, "extra_s": 1.5, "f0method": "fcpe",
     },
 }
 DEFAULT_VARIANT = "v2-fcpe"
-
-# Cross-agent comparison entries for /api/compare -- see
-# experiments/latency-sonnet/scripts/run_gpt_variant.py and run_glm_variant.py
-# for what each actually runs. Both accept --transpose (via a monkeypatch on
-# their pipeline.pipeline() call, see _apply_transpose in each script) and
-# get the same value (auto-computed or manual) as our own v2-fcpe entry --
-# they still don't accept formant/index_rate, only transpose. GLM toggled
-# off per user request; code and its isolated runner stay in place.
-RUN_GPT_VARIANT = True
-RUN_GLM_VARIANT = False
-GPT_LABEL = ("GPT (research/latency-optimization): их v2-профиль, hop 1.0с / "
-             "context 0.5с — прогнано через вашу запись в изоляции (их deployed "
-             "release, скопирован read-only), не через живой прод-канарейку")
-GLM_LABEL = ("GLM (research/latency-glm): их рекомендованный профиль, hop 1.0с / "
-             "context 0.5с — прогнано через вашу запись в изоляции (их собственная "
-             "бенчмарк-копия, скопирована read-only)")
-GPT_ROOT = "/tmp/rt_demo_gpt"
-GPT_PYTHON = "/opt/voice-rvc/venv/bin/python3"
-GPT_TIMEOUT_S = 150.0
-GLM_ROOT = "/tmp/rt_demo_glm"
-GLM_PYTHON = "/opt/voice-rvc/venv/bin/python3"
-GLM_TIMEOUT_S = 150.0
-
-# Isolated persistent GPT live-streaming server (see gpt_live_server.py) --
-# a separate OS process on its own port, holding its own GPU-resident
-# engine copy for real-time use (unlike the transient per-job subprocess
-# above). Relayed via /ws/rvc-gpt rather than proxied at the Caddy layer;
-# see that route's docstring for why.
-GPT_LIVE_WS_URL = "ws://127.0.0.1:8098/ws/rvc-v2"
-GPT_LIVE_ORIGIN = "https://voice-claude.lan.awesomeio.ru"
 
 # Median F0 (YIN, see pitch.py) measured from the Voicemod-made reference
 # clip the user originally provided. Briefly changed to 152.9Hz (measured
@@ -244,15 +211,6 @@ def create_app(engine_factory):
 
         state.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="rtrvc")
         state.gpu_lock = asyncio.Lock()
-        # Separate from gpu_lock on purpose: holding gpu_lock for an entire
-        # GPT/GLM subprocess run (can be tens of seconds for a long
-        # recording) would starve every live v2-fcpe/bots/tts caller's
-        # per-block calls long enough to trip their own STALL_SECONDS
-        # watchdog. This only needs to stop two of these transient ~1-1.5GB
-        # copies (GPT and/or GLM, from one or two concurrent compare jobs)
-        # from being resident at once -- see the VRAM budget note on
-        # _run_gpt_variant below.
-        state.external_lock = asyncio.Lock()
         state.last_session_id = None
         state.active_sessions = 0
         state.compare_jobs = JobStore()
@@ -405,62 +363,6 @@ def create_app(engine_factory):
             return
         await room.handle_listener(socket)
 
-    @app.websocket("/ws/rvc-gpt")
-    async def gpt_live_proxy(socket: WebSocket):
-        """Transparent relay to the isolated GPT live server on GPT_LIVE_PORT
-        (its own process, its own copy of research/latency-optimization's
-        server.py/chunks.py/engine.py -- see experiments/latency-sonnet/
-        scripts/gpt_live_server.py) so the browser only ever talks to this
-        one already-working domain/port.
-
-        Not routing this through Caddy directly: adding a second path-based
-        route (or a second reverse_proxy target) to the voice-claude site
-        block reproducibly 403s the websocket upgrade before it reaches any
-        backend -- reproduced with completely unrelated ports/paths/syntax
-        (handle blocks, named matchers, multiple reverse_proxy directives),
-        while the *exact* same target works immediately from a fresh,
-        single-target site block on its own hostname. Never root-caused
-        (not worth more time on a research demo's Caddy oddity); relaying
-        inside our own already-proxied FastAPI app sidesteps it entirely
-        and needs no Caddy or DNS changes."""
-        await socket.accept()
-        import websockets as ws_client
-
-        try:
-            async with ws_client.connect(
-                GPT_LIVE_WS_URL, origin=GPT_LIVE_ORIGIN, max_size=None,
-            ) as upstream:
-                async def browser_to_upstream():
-                    while True:
-                        message = await socket.receive()
-                        if message["type"] == "websocket.disconnect":
-                            return
-                        if message.get("text") is not None:
-                            await upstream.send(message["text"])
-                        elif message.get("bytes") is not None:
-                            await upstream.send(message["bytes"])
-
-                async def upstream_to_browser():
-                    async for message in upstream:
-                        if isinstance(message, (bytes, bytearray)):
-                            await socket.send_bytes(message)
-                        else:
-                            await socket.send_text(message)
-
-                tasks = [asyncio.create_task(browser_to_upstream()),
-                         asyncio.create_task(upstream_to_browser())]
-                try:
-                    await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-                finally:
-                    for task in tasks:
-                        task.cancel()
-                    await asyncio.gather(*tasks, return_exceptions=True)
-        except Exception:
-            pass
-        finally:
-            with suppress(RuntimeError, WebSocketDisconnect):
-                await socket.close()
-
     @app.get("/api/tts")
     async def tts_get_hint():
         # Browsers land here directly (typed/pasted URL, not the page's own
@@ -588,62 +490,6 @@ def create_app(engine_factory):
             "error": job.get("error"),
         })
 
-    async def _run_external_variant(
-        *, name: str, script: str, root: str, python: str, timeout_s: float,
-        label: str, input_wav_bytes: bytes, transpose: float = 0.0,
-    ) -> dict:
-        """Runs the recording through another agent's own chunks.py/engine.py
-        -- copied read-only into an isolated directory on VM209, never a
-        live process of theirs -- as its own subprocess with its own CUDA
-        context. Serialized behind external_lock (its own lock, not the
-        real-time engine's gpu_lock -- see that field's comment) so two
-        compare jobs can't have two of these transient ~1-1.5GB copies
-        resident at once on top of production (~1.0GB) and our own engine
-        (~0.8GB, trimmed to fcpe-only; see VARIANTS above)."""
-        import base64
-        import tempfile
-        from pathlib import Path
-
-        import soundfile as sf
-
-        with tempfile.TemporaryDirectory(prefix=f"rt_compare_{name}_") as tmp:
-            in_path = Path(tmp) / "in.wav"
-            out_path = Path(tmp) / "out.wav"
-            in_path.write_bytes(input_wav_bytes)
-
-            cmd = [python, script, "--input", str(in_path), "--output", str(out_path)]
-            if transpose:
-                cmd += ["--transpose", str(transpose)]
-
-            async with app.state.external_lock:
-                begun = time.perf_counter()
-                proc = await asyncio.create_subprocess_exec(
-                    *cmd,
-                    cwd=root,
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                )
-                try:
-                    _, stderr = await asyncio.wait_for(proc.communicate(), timeout_s)
-                except asyncio.TimeoutError:
-                    proc.kill()
-                    raise RuntimeError(f"{name}_timeout: превышено время ожидания") from None
-                wall_ms = round((time.perf_counter() - begun) * 1000, 1)
-
-            if proc.returncode != 0 or not out_path.exists():
-                tail = stderr.decode("utf-8", "replace").strip().splitlines()
-                raise RuntimeError(f"{name}_failed: " + (tail[-1] if tail else "unknown error")[:250])
-
-            info = sf.info(str(out_path))
-            wav_bytes = out_path.read_bytes()
-            if transpose:
-                label += f" · транспонирование {transpose:+.2f} полутонов"
-            return {
-                "label": label,
-                "wavBase64": base64.b64encode(wav_bytes).decode("ascii"),
-                "wallMs": wall_ms,
-                "outputSeconds": round(info.frames / info.samplerate, 2),
-            }
-
     async def _run_compare_job(
         job_id: str, audio_48k, input_wav_bytes: bytes,
         transpose: float = 0.0, index_rate: float | None = None, formant_shift: float = 0.0,
@@ -686,28 +532,6 @@ def create_app(engine_factory):
                     "outputSeconds": round(converted.size / SAMPLE_RATE, 2),
                 }
                 app.state.compare_jobs.notify(job_id)
-
-            # Cross-agent entries are best-effort and run one at a time (see
-            # external_lock): a failure here (an isolated copy OOMing,
-            # timing out, etc.) shows up as an error on just that one card,
-            # not as a failure of the whole job -- our own result above
-            # already landed regardless. Each skipped while its
-            # RUN_*_VARIANT flag is off (see those constants).
-            external_variants = [
-                *([("gpt", "run_gpt_variant.py", GPT_ROOT, GPT_PYTHON, GPT_TIMEOUT_S, GPT_LABEL)] if RUN_GPT_VARIANT else []),
-                *([("glm", "run_glm_variant.py", GLM_ROOT, GLM_PYTHON, GLM_TIMEOUT_S, GLM_LABEL)] if RUN_GLM_VARIANT else []),
-            ]
-            if external_variants:
-                for name, script, root, python, timeout_s, label in external_variants:
-                    try:
-                        job["results"][name] = await _run_external_variant(
-                            name=name, script=script, root=root, python=python,
-                            timeout_s=timeout_s, label=label, input_wav_bytes=input_wav_bytes,
-                            transpose=transpose,
-                        )
-                    except Exception as exc:
-                        job["results"][name] = {"label": label, "error": str(exc)[:300]}
-                    app.state.compare_jobs.notify(job_id)
 
             job["status"] = "done"
         except Exception as exc:
@@ -856,11 +680,7 @@ def create_app(engine_factory):
         wav_buf = io.BytesIO()
         sf.write(wav_buf, audio_48k, SAMPLE_RATE, format="WAV", subtype="PCM_16")
 
-        order = [
-            *VARIANTS.keys(),
-            *(["gpt"] if RUN_GPT_VARIANT else []),
-            *(["glm"] if RUN_GLM_VARIANT else []),
-        ]
+        order = list(VARIANTS)
         job_id = app.state.compare_jobs.create(
             status="running", inputSeconds=input_seconds, order=order, results={},
         )
