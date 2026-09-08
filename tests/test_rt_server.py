@@ -53,3 +53,16 @@ def test_canary_no_longer_serves_the_removed_gpt_live_page() -> None:
         response = client.get("/gpt-live/")
 
     assert response.status_code == 404
+
+
+def test_canary_exposes_only_live_fcpe_and_not_auxiliary_demo_routes() -> None:
+    app = create_app(FakeRtEngine)
+
+    with TestClient(app) as client:
+        for path in ("/bots/", "/tts/", "/compare/", "/api/tts", "/api/compare"):
+            assert client.get(path).status_code == 404
+        landing = client.get("/")
+
+    assert landing.status_code == 200
+    for removed_path in ("/bots/", "/tts/", "/compare/", "low-latency"):
+        assert removed_path not in landing.text

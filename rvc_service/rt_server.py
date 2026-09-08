@@ -33,14 +33,11 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .rt_chunks import FRAME_BYTES, RtFramer, RtStitcher, SAMPLE_RATE
-from .rt_jobs import JobStore
 
 CROSSFADE_S = 0.05
 SEARCH_S = 0.02
 MAX_SESSIONS = 4
 STALL_SECONDS = 15.0
-MAX_COMPARE_SECONDS = 60
-MAX_UPLOAD_BYTES = 30 * 1024 * 1024
 
 # FCPE stays available solely as the managed canary. The accepted production
 # path is GPT v2 on voice-rvc.service; this process must not load a duplicate
@@ -213,8 +210,6 @@ def create_app(engine_factory):
         state.gpu_lock = asyncio.Lock()
         state.last_session_id = None
         state.active_sessions = 0
-        state.compare_jobs = JobStore()
-        state.tts_jobs = JobStore()
         state.status = "warming"
         state.engine = None
         loop = asyncio.get_running_loop()
@@ -247,22 +242,20 @@ def create_app(engine_factory):
         except Exception:
             state.status = "model_unavailable"
 
-        state.bot_room = None
-        if state.status == "ready":
-            from pathlib import Path
-
-            from .rt_bots import BotRoom
-
-            samples_dir = Path(__file__).resolve().parent.parent / "samples-rt"
-            wav_paths = [samples_dir / "ru.wav", samples_dir / "en.wav"]
-            state.bot_room = BotRoom(state, wav_paths)
-            state.bot_room.start()
         try:
             yield
         finally:
             state.executor.shutdown(wait=False, cancel_futures=True)
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None)
+
+    @app.middleware("http")
+    async def remove_auxiliary_demo_routes(request: Request, call_next):
+        if request.url.path == "/api/tts" or request.url.path.startswith("/api/tts/"):
+            return JSONResponse({"detail": "Not Found"}, status_code=404)
+        if request.url.path == "/api/compare" or request.url.path.startswith("/api/compare/"):
+            return JSONResponse({"detail": "Not Found"}, status_code=404)
+        return await call_next(request)
 
     @app.get("/healthz")
     async def healthz():
