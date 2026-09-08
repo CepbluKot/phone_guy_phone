@@ -55,10 +55,10 @@
 - PJSIP transports listen on the container port 5060/UDP and RTP `10000-10019/UDP`; host publishes only `192.168.20.70` and VPN-gateway source policy permits only WireGuard/LAN traffic.
 - Dialing `600` enters `phoneguy-sip` Stasis; no raw PJSIP channel joins `phoneguy-main` directly.
 
-- [ ] Write configuration tests for every required PJSIP module, template placeholders, `allow=alaw`, `direct_media=no`, restricted RTP interval and absence of passwords in Git.
-- [ ] Run focused configuration tests; expected failure.
-- [ ] Enable `chan_pjsip`, `res_pjsip*`, `res_rtp_asterisk` in the source build and exact allowlist/healthcheck.
-- [ ] Add a template with three auth/aor/endpoint sections; use `max_contacts=1`, `rewrite_contact=yes`, `rtp_symmetric=yes`, `force_rport=yes`, `direct_media=no`, `context=phoneguy-sip` and `allow=alaw`.
+- [x] Write configuration tests for every required PJSIP module, template placeholders, `allow=alaw`, `direct_media=no`, restricted RTP interval and absence of passwords in Git.
+- [x] Run focused configuration tests; expected failure.
+- [x] Enable `chan_pjsip`, `res_pjsip*`, `res_rtp_asterisk` in the source build and exact allowlist/healthcheck.
+- [x] Add a template with three auth/aor/endpoint sections; use `max_contacts=1`, `rewrite_contact=yes`, `rtp_symmetric=yes`, `force_rport=yes`, `direct_media=no`, `context=phoneguy-sip` and `allow=alaw`.
 - [ ] Add a PJSIP dialplan which sends `600` to `Stasis(phoneguy-sip)` and terminates on any unknown extension.
 - [ ] Run focused config tests and `docker build` for the Asterisk image; expected pass.
 - [ ] Commit `feat: add private PJSIP endpoint configuration`.
