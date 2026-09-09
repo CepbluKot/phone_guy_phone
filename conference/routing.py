@@ -1,8 +1,7 @@
 """Strict, secret-free SIP extension to voice-profile routing."""
 from dataclasses import dataclass
+import json
 from pathlib import Path
-
-import yaml
 
 
 RVC_V2_ENDPOINT = "ws://127.0.0.1:8090/ws/rvc-v2"
@@ -32,8 +31,11 @@ class RoutingTable:
 
 def load_routing(path: Path) -> RoutingTable:
     try:
-        document = yaml.safe_load(path.read_text())
-    except (OSError, yaml.YAMLError) as error:
+        # JSON is a strict subset of YAML.  Keeping the deploy-time YAML file
+        # in this subset removes a second runtime parser from the tiny
+        # controller image while retaining its documented .yaml contract.
+        document = json.loads(path.read_text())
+    except (OSError, ValueError) as error:
         raise RoutingError("invalid routing file") from error
     if not isinstance(document, dict) or document.get("schema_version") != 1:
         raise RoutingError("unsupported routing schema")
