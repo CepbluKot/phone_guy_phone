@@ -133,6 +133,15 @@ def test_pjsip_template_has_only_runtime_password_placeholders_and_private_media
     assert "rtpend=10019" in rtp
 
 
+def test_sip_dialplan_enters_the_dedicated_stasis_app_and_rejects_unknown_numbers():
+    extensions = read("extensions.conf")
+
+    assert "[phoneguy-sip]" in extensions
+    assert "exten => 600,1,Stasis(phoneguy-sip)" in extensions
+    assert "same => n,Hangup()" in extensions
+    assert "exten => _X.,1,Hangup(1)" in extensions
+
+
 def test_source_build_is_reproducible_non_root_and_health_checked():
     dockerfile = read("Dockerfile")
 

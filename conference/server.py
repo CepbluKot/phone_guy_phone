@@ -4,6 +4,7 @@ import asyncio
 from contextlib import asynccontextmanager, suppress
 import json
 import os
+from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
@@ -12,7 +13,9 @@ import httpx
 from .asterisk import AsteriskRoom
 from .media import FRAME_BYTES, finish_cleanup
 from .rvc import ALLOWED_ORIGINS, RvcStream
+from .routing import load_routing
 from .session import DemoSession, Listener, SessionError, public_error
+from .sip_controller import SipController
 
 
 READY = dict(type="ready", version=1, sampleRate=48000, channels=1,
@@ -27,6 +30,25 @@ def default_session():
             os.environ.get("CONFERENCE_ARI_PASSWORD", ""),
         ),
         lambda: RvcStream(os.environ.get("CONFERENCE_RVC_URL", "ws://127.0.0.1:8090/ws/rvc-v2")),
+    )
+
+
+def default_sip_controller():
+    routing = load_routing(Path(os.environ.get(
+        "CONFERENCE_ROUTING_FILE", "/run/conference/voice-routing.yaml"
+    )))
+    return SipController(
+        lambda **handlers: AsteriskRoom(
+            os.environ.get("CONFERENCE_ARI_URL", "http://127.0.0.1:8092/ari"),
+            os.environ.get("CONFERENCE_ARI_USERNAME", "phoneguy"),
+            os.environ.get("CONFERENCE_ARI_PASSWORD", ""),
+            app_name="phoneguy-sip",
+            **handlers,
+        ),
+        routing,
+        model_factory=lambda: RvcStream(
+            os.environ.get("CONFERENCE_RVC_URL", "ws://127.0.0.1:8090/ws/rvc-v2")
+        ),
     )
 
 
@@ -86,14 +108,21 @@ async def send_audio(socket, listener, timeout):
 
 
 def create_app(session_factory=default_session, *, health_check=asterisk_available,
-               control_timeout=10, send_timeout=10):
+               sip_controller_factory=None, control_timeout=10, send_timeout=10):
     session = session_factory()
 
     @asynccontextmanager
     async def lifespan(app):
+        controller = None
         try:
+            if sip_controller_factory is not None:
+                controller = sip_controller_factory()
+                await controller.start()
+                app.state.sip_controller = controller
             yield
         finally:
+            if controller is not None:
+                await finish_cleanup(controller.close())
             await finish_cleanup(session.close())
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
@@ -169,4 +198,4 @@ def create_app(session_factory=default_session, *, health_check=asterisk_availab
     return app
 
 
-app = create_app()
+app = create_app(sip_controller_factory=default_sip_controller)

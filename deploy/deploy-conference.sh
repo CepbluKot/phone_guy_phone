@@ -143,7 +143,7 @@ trap rollback_on_error EXIT
 
 required=(
   .dockerignore Dockerfile compose.yaml requirements.txt requirements.lock app web
-  conference deploy/Caddyfile deploy/compose.conference.yaml deploy/deploy-conference.sh
+  conference deploy/Caddyfile deploy/compose.conference.yaml deploy/deploy-conference.sh deploy/voice-routing.yaml
   tests/live-conference.py
 )
 for item in "${required[@]}"; do
@@ -158,7 +158,7 @@ fi
 ssh "$target" "rm -rf '$stage' && mkdir -p '$stage'"
 rsync -a --relative --exclude='__pycache__' --exclude='*.pyc' \
   .dockerignore Dockerfile compose.yaml requirements.txt requirements.lock app web conference \
-  deploy/Caddyfile deploy/compose.conference.yaml deploy/deploy-conference.sh \
+  deploy/Caddyfile deploy/compose.conference.yaml deploy/deploy-conference.sh deploy/voice-routing.yaml \
   tests/live-conference.py "$target:$stage/"
 
 # run_rollback first checks for the snapshot, so this is harmless for an early
@@ -220,8 +220,15 @@ password=$(openssl rand -hex 32)
 printf '%s\n' "$password" > "$runtime/asterisk/ari-password"
 sed "s/__ARI_PASSWORD__/$password/" "$release/conference/asterisk/ari.conf.template" > "$runtime/asterisk/ari.conf"
 sed 's/^bindaddr=.*/bindaddr=0.0.0.0/' "$release/conference/asterisk/http.conf" > "$runtime/asterisk/http.conf"
+cp "$release/conference/asterisk/pjsip.conf.template" "$runtime/asterisk/pjsip.conf"
+for extension in 1983 1987 2014; do
+  password=$(openssl rand -hex 32)
+  printf '%s\n' "$password" > "$runtime/asterisk/sip-$extension-password"
+  sed -i "s/__SIP_${extension}_PASSWORD__/$password/" "$runtime/asterisk/pjsip.conf"
+done
+install -m 0644 "$release/deploy/voice-routing.yaml" "$runtime/voice-routing.yaml"
 chown -R 10001:10001 "$runtime/asterisk"
-chmod 0600 "$runtime/asterisk/ari.conf" "$runtime/asterisk/ari-password"
+chmod 0600 "$runtime/asterisk/ari.conf" "$runtime/asterisk/ari-password" "$runtime/asterisk/pjsip.conf" "$runtime/asterisk"/sip-*-password
 chmod 0644 "$runtime/asterisk/http.conf"
 
 monitor="$backup/asterisk-build-mem-kib"
