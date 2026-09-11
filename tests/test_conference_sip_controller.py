@@ -18,6 +18,9 @@ class Room:
     async def create_bridge(self, name):
         return name
 
+    async def answer_channel(self, channel):
+        self.answered = channel
+
     async def add_to_bridge(self, bridge, channel):
         self.last_add = (bridge, channel)
 
@@ -47,6 +50,7 @@ def test_sip_controller_connects_ari_events_to_a_lifecycle_managed_session_manag
         assert rooms[0].entered
 
         await rooms[0].stasis_handler("sip-1983", "1983")
+        assert rooms[0].answered == "sip-1983"
         assert rooms[0].last_add == ("phoneguy-main", "sip-1983")
         await rooms[0].destroyed_handler("sip-1983")
         assert controller.sessions.sessions == {}

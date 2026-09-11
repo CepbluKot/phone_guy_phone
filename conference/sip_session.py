@@ -62,6 +62,7 @@ class SipSessionManager:
             session = _Session(channel_id, profile.pipeline)
             self.sessions[channel_id] = session
         try:
+            await self.ari.answer_channel(channel_id)
             if profile.pipeline == "passthrough":
                 await self.ari.add_to_bridge(self.main_bridge, channel_id)
                 return

@@ -407,6 +407,13 @@ class AsteriskRoom:
         )
         return bridge_id
 
+    async def answer_channel(self, channel_id):
+        if not isinstance(channel_id, str) or not channel_id:
+            raise ValueError("invalid_asterisk_channel")
+        await self.request(
+            "POST", "/channels/" + quote(channel_id, safe="") + "/answer"
+        )
+
     async def add_to_bridge(self, bridge_id, channel_id):
         if not isinstance(bridge_id, str) or not isinstance(channel_id, str):
             raise ValueError("invalid_asterisk_bridge_member")

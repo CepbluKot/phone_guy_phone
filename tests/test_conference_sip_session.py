@@ -45,6 +45,9 @@ class Ari:
         self.actions.append(("create_bridge", name))
         return name
 
+    async def answer_channel(self, channel):
+        self.actions.append(("answer", channel))
+
     async def add_to_bridge(self, bridge, channel):
         self.actions.append(("add", bridge, channel))
 
@@ -88,6 +91,7 @@ def test_original_sip_endpoint_joins_main_bridge_directly():
 
         await manager.handle_stasis_start("sip-1983", "1983")
 
+        assert ("answer", "sip-1983") in ari.actions
         assert ("add", "phoneguy-main", "sip-1983") in ari.actions
         assert not ari.media
         await manager.close("sip-1983")
@@ -111,6 +115,7 @@ def test_phone_guy_raw_channel_never_joins_main_and_only_converted_frames_are_in
         await manager.handle_stasis_start("sip-1987", "1987")
         source, injection = ari.media
 
+        assert ("answer", "sip-1987") in ari.actions
         raw_main_adds = [item for item in ari.actions if item == ("add", "phoneguy-main", "sip-1987")]
         assert raw_main_adds == []
         assert ("add", "phoneguy-source-sip-1987", "sip-1987") in ari.actions
