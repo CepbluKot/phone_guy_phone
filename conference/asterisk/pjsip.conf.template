@@ -18,6 +18,8 @@ rtp_symmetric=yes
 force_rport=yes
 rewrite_contact=yes
 ice_support=no
+# Release abandoned calls when a handset/client disappears without SIP BYE.
+rtp_timeout=30
 
 [1983](phone-endpoint)
 auth=1983-auth

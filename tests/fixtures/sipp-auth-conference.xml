@@ -67,7 +67,7 @@ Content-Length: 0
   <nop>
     <action><exec play_pcap_audio="/usr/share/sip-tester/g711a.pcap"/></action>
   </nop>
-  <pause milliseconds="6000"/>
+  <pause milliseconds="9000"/>
   <send retrans="500">
     <![CDATA[
 BYE sip:600@[remote_ip]:[remote_port] SIP/2.0

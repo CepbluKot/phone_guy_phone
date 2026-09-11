@@ -414,6 +414,16 @@ class AsteriskRoom:
             "POST", "/channels/" + quote(channel_id, safe="") + "/answer"
         )
 
+    async def hangup_channel(self, channel_id):
+        if not isinstance(channel_id, str) or not channel_id:
+            return
+        try:
+            await self.request("DELETE", "/channels/" + quote(channel_id, safe=""))
+        except httpx.HTTPStatusError as error:
+            # ChannelDestroyed can race a rejection or cleanup.
+            if error.response.status_code != 404:
+                raise
+
     async def add_to_bridge(self, bridge_id, channel_id):
         if not isinstance(bridge_id, str) or not isinstance(channel_id, str):
             raise ValueError("invalid_asterisk_bridge_member")

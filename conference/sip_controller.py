@@ -1,6 +1,11 @@
 """Lifecycle glue between ARI Stasis events and the protected SIP mixer."""
 
+import logging
+
 from .sip_session import SipSessionManager
+
+
+log = logging.getLogger(__name__)
 
 
 class SipController:
@@ -18,7 +23,14 @@ class SipController:
             raise ValueError("sip_controller_already_started")
 
         async def started(channel_id, endpoint):
-            await self.sessions.handle_stasis_start(channel_id, endpoint)
+            try:
+                await self.sessions.handle_stasis_start(channel_id, endpoint)
+            except Exception:
+                # Stasis owns the channel after the dialplan hands it to us.
+                # Reject it explicitly; otherwise busy/invalid calls remain in
+                # Ring and can survive long after the SIP client disappears.
+                log.exception("Rejected SIP channel %s for endpoint %s", channel_id, endpoint)
+                await self.room.hangup_channel(channel_id)
 
         async def destroyed(channel_id):
             await self.sessions.close(channel_id)

@@ -8,6 +8,7 @@ import subprocess
 ROOT = Path(__file__).parents[1]
 SCRIPT = ROOT / "deploy" / "deploy-conference.sh"
 ASTERISK_HEALTHCHECK = ROOT / "conference" / "asterisk" / "healthcheck.sh"
+PHONE_SETUP = ROOT / "deploy" / "show-sip-phone-setup.sh"
 STAMP = "20260906T180000Z"
 
 
@@ -213,3 +214,15 @@ def test_preflight_allows_only_the_idle_owned_conference_to_hold_its_ports():
     assert 'voice-conference-asterisk-1' in source
     assert 'voice-conference-controller-1' in source
     assert '"status":"idle"' in source
+
+
+def test_phone_setup_helper_is_vm209_only_and_reveals_one_requested_account():
+    source = PHONE_SETUP.read_text()
+
+    assert "ubuntu@192.168.20.70" in source
+    assert "1983|1987|2014" in source
+    assert "sip-$extension-password" in source
+    assert "docker inspect voice-conference-asterisk-1" in source
+    assert "Password:" in source
+    assert "Dial: 600" in source
+    assert "cat /etc/asterisk/pjsip.conf" not in source

@@ -137,6 +137,7 @@ def test_pjsip_template_has_only_runtime_password_placeholders_and_private_media
         assert f"__SIP_{extension}_PASSWORD__" in pjsip
     assert "direct_media=no" in pjsip
     assert "allow=alaw" in pjsip
+    assert "rtp_timeout=30" in pjsip
     assert "password=" not in pjsip.replace("password=__SIP_1983_PASSWORD__", "").replace(
         "password=__SIP_1987_PASSWORD__", "").replace("password=__SIP_2014_PASSWORD__", "")
     rtp = read("rtp.conf")

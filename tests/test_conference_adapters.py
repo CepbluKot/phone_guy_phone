@@ -356,6 +356,7 @@ def test_ari_private_bridge_and_media_channels_do_not_enter_demo_dialplan():
         async with room(ari) as instance:
             await instance.create_bridge("phoneguy-main")
             await instance.answer_channel("sip-1983")
+            await instance.hangup_channel("sip-rejected")
             await instance.add_to_bridge("phoneguy-main", "sip-1983")
             source = await instance.open_media("source-sip-1987", receive=True)
             injection = await instance.open_media("injection-sip-1987")
@@ -373,6 +374,7 @@ def test_ari_private_bridge_and_media_channels_do_not_enter_demo_dialplan():
             ]
             assert ("POST", "/bridges", {"bridgeId": "phoneguy-main", "type": "mixing"}) in ari.requests
             assert ("POST", "/channels/sip-1983/answer", {}) in ari.requests
+            assert ("DELETE", "/channels/sip-rejected", {}) in ari.requests
             assert ("POST", "/bridges/phoneguy-main/addChannel", {"channel": "sip-1983"}) in ari.requests
             assert ("DELETE", "/bridges/phoneguy-main", {}) in ari.requests
     asyncio.run(check())
