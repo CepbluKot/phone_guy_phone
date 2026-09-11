@@ -33,11 +33,11 @@
 - `RoutingTable.profile_for(extension: str) -> VoiceProfile`
 - Unknown extension or duplicate mapping raises `RoutingError` before controller health is ready.
 
-- [ ] Write tests that accept exactly `1983/2014=original`, `1987=phone-guy`, reject unknown extensions, duplicate keys, unsupported profiles, non-string extensions, and endpoint values other than `ws://127.0.0.1:8090/ws/rvc-v2`.
-- [ ] Run `pytest -q tests/test_conference_routing.py`; expected failure: module and contract absent.
-- [ ] Implement immutable dataclasses and `yaml.safe_load`; validate every schema field before returning the table.
-- [ ] Run the focused tests; expected pass.
-- [ ] Commit `feat: add strict SIP voice routing contract`.
+- [x] Write tests that accept exactly `1983/2014=original`, `1987=phone-guy`, reject unknown extensions, duplicate keys, unsupported profiles, non-string extensions, and endpoint values other than `ws://127.0.0.1:8090/ws/rvc-v2`.
+- [x] Run `pytest -q tests/test_conference_routing.py`; expected failure: module and contract absent.
+- [x] Implement immutable dataclasses and `yaml.safe_load`; validate every schema field before returning the table.
+- [x] Run the focused tests; expected pass.
+- [x] Commit `feat: add strict SIP voice routing contract`.
 
 ### Task 2: Build a private PJSIP surface
 
@@ -59,9 +59,9 @@
 - [x] Run focused configuration tests; expected failure.
 - [x] Enable `chan_pjsip`, `res_pjsip*`, `res_rtp_asterisk` in the source build and exact allowlist/healthcheck.
 - [x] Add a template with three auth/aor/endpoint sections; use `max_contacts=1`, `rewrite_contact=yes`, `rtp_symmetric=yes`, `force_rport=yes`, `direct_media=no`, `context=phoneguy-sip` and `allow=alaw`.
-- [ ] Add a PJSIP dialplan which sends `600` to `Stasis(phoneguy-sip)` and terminates on any unknown extension.
-- [ ] Run focused config tests and `docker build` for the Asterisk image; expected pass.
-- [ ] Commit `feat: add private PJSIP endpoint configuration`.
+- [x] Add a PJSIP dialplan which sends `600` to `Stasis(phoneguy-sip)` and terminates on any unknown extension.
+- [x] Run focused config tests and `docker build` for the Asterisk image; expected pass.
+- [x] Commit `feat: add private PJSIP endpoint configuration`.
 
 ### Task 3: Own SIP sessions and structural raw isolation
 
@@ -77,12 +77,12 @@
 - `phone-guy`: create a private source bridge plus media pair, connect `RvcStream`, inject only converted frames into main ConfBridge.
 - `close(channel_id)` is idempotent and removes all owned channels/bridges/WebSockets.
 
-- [ ] Write fake-ARI tests that prove a 1987 raw channel is never added to the main bridge, valid converted frames are added via the injection channel, and 1983 joins main directly.
-- [ ] Write tests for unknown extension, second phone-guy session, malformed RVC block, RVC busy and disconnect: each returns a controlled failure and never adds raw audio.
-- [ ] Run focused tests; expected failure.
-- [ ] Implement narrow ARI bridge methods and the manager; keep all audio framing through the existing `RvcStream` validator.
-- [ ] Run focused tests; expected pass.
-- [ ] Commit `feat: route SIP Phone Guy calls through GPT v2`.
+- [x] Write fake-ARI tests that prove a 1987 raw channel is never added to the main bridge, valid converted frames are added via the injection channel, and 1983 joins main directly.
+- [x] Write tests for unknown extension, second phone-guy session, malformed RVC block, RVC busy and disconnect: each returns a controlled failure and never adds raw audio.
+- [x] Run focused tests; expected failure.
+- [x] Implement narrow ARI bridge methods and the manager; keep all audio framing through the existing `RvcStream` validator.
+- [x] Run focused tests; expected pass.
+- [x] Commit `feat: route SIP Phone Guy calls through GPT v2`.
 
 ### Task 4: Make deployment reversible and provision phone credentials
 
@@ -97,12 +97,12 @@
 - Credentials are retrievable locally only by an explicit root-owned `deploy/show-sip-phone-setup.sh 1987` command that prints one extension at a time.
 - Rollback restores previous Compose image, Caddy, conference release and no SIP listener if none existed before.
 
-- [ ] Write a controlled-root deploy test requiring a backup of PJSIP runtime/config, loopback health, Asterisk module check, and a proof that `voice-rvc.service` was not restarted.
-- [ ] Run test; expected failure.
-- [ ] Implement runtime-only secret generation and PJSIP template rendering. Do not log generated values.
-- [ ] Add live preflight that checks registration state and performs a synthetic 1983 ↔ 1987 call only after explicit credentials are supplied from the VM runtime.
-- [ ] Run tests and shell syntax checks; expected pass.
-- [ ] Commit `feat: provision private SIP phone deployment`.
+- [x] Write a controlled-root deploy test requiring a backup of PJSIP runtime/config, loopback health, Asterisk module check, and a proof that `voice-rvc.service` was not restarted.
+- [x] Run test; expected failure.
+- [x] Implement runtime-only secret generation and PJSIP template rendering. Do not log generated values.
+- [x] Add live preflight that performs a synthetic authenticated `1983` + `1987` call using credentials only inside the VM runtime.
+- [x] Run tests and shell syntax checks; expected pass.
+- [x] Commit `feat: provision private SIP phone deployment`.
 
 ### Task 5: Deploy and document the T21P E2 setup
 
@@ -111,11 +111,11 @@
 - Create: `docs/SIP_PHONE_T21P_E2_SETUP.md`
 - Modify: `docs/LIVE_STATUS.md`
 
-- [ ] Run the full test suite and take read-only VM209 baseline: active units, restart counts, free RAM/VRAM, Caddy and existing conference health.
-- [ ] Run the scoped conference deploy; verify no production RVC restart, only private SIP/RTP listeners, controller health and canary health.
-- [ ] Document exact manual T21P E2 fields: account 1, SIP server/VPN route, username 1987, generated password, transport UDP, codec preference G.711A, dialing 600, factory-reset procedure and the no-secret diagnostics commands.
+- [x] Run the full test suite and take read-only VM209 baseline: active units, restart counts, free RAM/VRAM, Caddy and existing conference health.
+- [x] Run the scoped conference deploy; verify no production RVC restart, only private SIP/RTP listeners and controller/RVC health.
+- [x] Document exact manual T21P E2 fields: account 1, SIP server/VPN route, username 1987, generated password, transport UDP, codec preference G.711A, dialing 600, factory-reset procedure and the no-secret diagnostics commands.
 - [ ] When the physical phone arrives, register it and run the two-party and three-party calls required by the spec before marking the target architecture complete.
-- [ ] Commit `docs: prepare Yealink SIP phone onboarding`.
+- [x] Commit `docs: prepare Yealink SIP phone onboarding` (final documentation commit in this branch supersedes the suggested message).
 
 ## Review checklist
 

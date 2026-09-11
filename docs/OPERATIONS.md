@@ -3,6 +3,35 @@
 Актуальная версия и доказательства: [LIVE_STATUS.md](LIVE_STATUS.md).
 Инструкция следующему агенту: [HANDOFF.md](HANDOFF.md).
 
+## Текущий режим: SIP/Asterisk
+
+Основной сценарий — телефоны и softphone набирают `600`; веб-демка остановлена.
+Аккаунты и голосовые профили описаны в [SIP_VOICE_ROUTING.md](SIP_VOICE_ROUTING.md),
+настройка заказанного Yealink — в
+[SIP_PHONE_T21P_E2_SETUP.md](SIP_PHONE_T21P_E2_SETUP.md).
+
+Проверить текущий контур без секретов:
+
+```bash
+ssh ubuntu@192.168.20.70 'sudo docker ps --filter name=voice-conference --format "{{.Names}} {{.Status}}"; systemctl is-active voice-rvc; curl -fsS http://127.0.0.1:8090/healthz'
+```
+
+Показать настройки только одного намеренно выбранного SIP-аккаунта:
+
+```bash
+./deploy/show-sip-phone-setup.sh 1987
+```
+
+Развёртывание SIP-контура выполняется только из текущего worktree командой
+`./deploy/deploy-conference.sh`. Оно не перезапускает `voice-rvc.service`, не
+трогает VM208/Frigate и имеет release-specific backup. После доставки повторить
+live SIP preflight из инструкции Yealink и убедиться, что веб-контейнер остаётся
+остановленным.
+
+---
+
+Ниже сохранена эксплуатация исторической браузерной версии.
+
 Код: /home/oleg/Documents/voice-changer/.worktrees/rvc-streaming на ноутбуке.
 Выполнение: VM209, ubuntu@192.168.20.70.
 UI: https://voice.lan.awesomeio.ru/ через VPN. Наушники → обновить страницу →

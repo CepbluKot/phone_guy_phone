@@ -58,6 +58,8 @@ def test_rollout_uploads_only_conference_and_http_sources_without_mutating_venv_
     assert "rsync " in commands
     assert "conference" in commands
     assert "app" in commands and "web" in commands
+    assert "live-sip-preflight.py" in commands
+    assert "sipp-auth-conference.xml" in commands
     assert "rvc_service" not in commands
     assert "experiments" not in commands
     for prohibited in ("ufw", "iptables", "nft", "netplan", "voice-rvc/venv", "VM208", "frigate"):
@@ -214,6 +216,19 @@ def test_preflight_allows_only_the_idle_owned_conference_to_hold_its_ports():
     assert 'voice-conference-asterisk-1' in source
     assert 'voice-conference-controller-1' in source
     assert '"status":"idle"' in source
+
+
+def test_successful_sip_deploy_stops_legacy_web_and_proves_rvc_was_not_restarted():
+    source = SCRIPT.read_text()
+
+    live_gate = source.index('tests/live-conference.py --seconds 10')
+    web_stop = source.index('docker stop voice-changer-voice-1')
+    success = source.index('echo "DEPLOY_COMPLETE', web_stop)
+    assert live_gate < web_stop < success
+    assert "voice-rvc-service-state-before" in source
+    assert "voice-rvc.service changed during conference deploy" in source
+    assert "voice-conference-asterisk-1" in source[web_stop:success]
+    assert "voice-conference-controller-1" in source[web_stop:success]
 
 
 def test_phone_setup_helper_is_vm209_only_and_reveals_one_requested_account():

@@ -154,7 +154,7 @@ trap rollback_on_error EXIT
 required=(
   .dockerignore Dockerfile compose.yaml requirements.txt requirements.lock app web
   conference deploy/Caddyfile deploy/compose.conference.yaml deploy/deploy-conference.sh deploy/voice-routing.yaml
-  tests/live-conference.py
+  tests/live-conference.py tests/live-sip-preflight.py tests/fixtures/sipp-auth-conference.xml
 )
 for item in "${required[@]}"; do
   test -e "$item" || { echo "Missing rollout input: $item" >&2; exit 2; }
@@ -169,7 +169,7 @@ ssh "$target" "rm -rf '$stage' && mkdir -p '$stage'"
 rsync -a --relative --exclude='__pycache__' --exclude='*.pyc' \
   .dockerignore Dockerfile compose.yaml requirements.txt requirements.lock app web conference \
   deploy/Caddyfile deploy/compose.conference.yaml deploy/deploy-conference.sh deploy/voice-routing.yaml \
-  tests/live-conference.py "$target:$stage/"
+  tests/live-conference.py tests/live-sip-preflight.py tests/fixtures/sipp-auth-conference.xml "$target:$stage/"
 
 # run_rollback first checks for the snapshot, so this is harmless for an early
 # preflight failure and protects failures after the remote snapshot is made.
@@ -210,6 +210,9 @@ assert v.get("status") == "ready" and not v.get("active") and not v.get("running
 '
 
 install -d -m 0750 "$backup" "$release" "$runtime/asterisk" "$fixtures"
+systemctl show voice-rvc.service \
+  -p NRestarts -p ExecMainStartTimestampMonotonic \
+  > "$backup/voice-rvc-service-state-before"
 cp /etc/caddy/Caddyfile "$backup/Caddyfile"
 cp /opt/voice-changer/deploy/Caddyfile "$backup/source-Caddyfile"
 docker image inspect voice-changer:current --format '{{.Id}}' > "$backup/prior-http-image-id"
@@ -335,4 +338,25 @@ if [ -n "${DEPLOY_CONFERENCE_LIVE_CLIENT:-}" ]; then
 else
   "$python_bin" tests/live-conference.py --seconds 10
 fi
+ssh "$target" sudo bash -s -- "$stamp" <<'REMOTE_SIP_ONLY'
+set -euo pipefail
+stamp=$1
+before=/opt/voice-conference/backups/$stamp/voice-rvc-service-state-before
+after=$(mktemp)
+trap 'rm -f "$after"' EXIT
+systemctl show voice-rvc.service \
+  -p NRestarts -p ExecMainStartTimestampMonotonic > "$after"
+cmp -s "$before" "$after" || {
+  echo "voice-rvc.service changed during conference deploy" >&2
+  exit 1
+}
+docker stop voice-changer-voice-1 >/dev/null
+test "$(docker inspect voice-conference-asterisk-1 --format '{{.State.Health.Status}}')" = healthy
+test "$(docker inspect voice-conference-controller-1 --format '{{.State.Health.Status}}')" = healthy
+curl -fsS http://127.0.0.1:8090/healthz | python3 -c '
+import json, sys
+value = json.load(sys.stdin)
+assert value == {"status": "ready", "active": False, "running": False, "queuedWindows": 0}
+'
+REMOTE_SIP_ONLY
 echo "DEPLOY_COMPLETE stamp=$stamp backup=$backup"

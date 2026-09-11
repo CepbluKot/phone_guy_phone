@@ -1,7 +1,8 @@
 # Phone Line
 
-**Для продолжения RVC-разработки сначала прочитайте [HANDOFF](docs/HANDOFF.md).**
-На 2026-09-06 AI-only версия развёрнута и проверена через сайт.
+**Для продолжения сначала прочитайте [HANDOFF](docs/HANDOFF.md).**
+На 2026-09-11 целевой приватный SIP-контур развёрнут на VM209 и проверен
+двумя авторизованными виртуальными абонентами с настоящим GPT v2 inference.
 Версия, результаты и откат: [LIVE_STATUS](docs/LIVE_STATUS.md).
 
 Приватная демка изменения голоса: https://voice.lan.awesomeio.ru через VPN.
@@ -14,6 +15,7 @@
 - [Эксплуатация и диагностика](docs/OPERATIONS.md)
 - [Аудит и проверка](docs/AUDIT_2026-09-06.md)
 - [Как SIP-участнику назначается голос](docs/SIP_VOICE_ROUTING.md)
+- [Подключение Yealink SIP-T21P E2](docs/SIP_PHONE_T21P_E2_SETUP.md)
 - [FCPE canary: отдельная демка, доставка и откат](docs/FCPE_CANARY_OPERATIONS_2026-09-08.md)
 - [Исходная спецификация](docs/superpowers/specs/2026-09-06-phone-guy-voice-demo-design.md)
 
