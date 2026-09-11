@@ -3,8 +3,8 @@
 ## Целевой SIP-контур — 2026-09-11
 
 Основной продукт теперь работает как приватная IP-телефония на VM209. Активный
-релиз Asterisk/controller: `20260911T190435Z`; ветка
-`feature/fcpe-canary-productization`, доставленный коммит `49e06fb`. SIP слушает только
+релиз Asterisk/controller: `20260911T190952Z`; ветка
+`feature/fcpe-canary-productization`, доставленный коммит `e878f74`. SIP слушает только
 `192.168.20.70:5060/udp`, RTP — только `192.168.20.70:10000-10019/udp`.
 
 Маршрутизация: `1983` и `2014` передают исходный голос, `1987` входит в GPT v2
@@ -24,6 +24,20 @@ healthy, веб-контейнер `Exited (0)`, `voice-rvc.service` active/enab
 `NRestarts=0` и работает с `2026-09-11 06:47:05 UTC` без перезапуска во время
 доставки. Доставленный `live-sip-preflight.py` повторно прошёл из каталога
 релиза с `rvcInferenceObserved=true`.
+
+### Проверка после настоящего reboot VM209
+
+11 сентября 2026 VM209 была штатно перезагружена; новый boot начался в
+`19:11:12 UTC`. После холодного старта Docker, Caddy и `voice-rvc.service`
+активны, Asterisk/controller автоматически поднялись и стали healthy. RVC
+загрузил модель, стал ready и имеет `NRestarts=0` в текущем boot.
+
+Доставленный SIP preflight повторён **после reboot**: `sip1983Exit=0`,
+`sip1987Exit=0`, `rvcInferenceObserved=true`, `channelsAfter=0`,
+`privateBridgeAfter=false`, ошибок controller нет. Старый веб-контейнер остался
+остановленным с `restart=no`, поэтому при следующих перезагрузках он не должен
+возвращаться. Известный upstream traceback пустого F0 может появиться один раз
+при нулевом прогреве; в этом прогоне он не помешал переходу RVC в ready и звонку.
 
 Физический Yealink SIP-T21P E2 ещё не приезжал, поэтому реальная трубка честно
 не отмечена проверенной. Инструкция: [SIP_PHONE_T21P_E2_SETUP.md](SIP_PHONE_T21P_E2_SETUP.md).

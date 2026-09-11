@@ -28,6 +28,12 @@ ssh ubuntu@192.168.20.70 'sudo docker ps --filter name=voice-conference --format
 live SIP preflight из инструкции Yealink и убедиться, что веб-контейнер остаётся
 остановленным.
 
+Автозапуск проверен настоящим reboot VM209 11 сентября 2026. Ожидаемое состояние
+после загрузки: `voice-rvc`, Docker и Caddy active; Asterisk/controller healthy;
+`voice-changer-voice-1` exited с `restart=no`. Первый холодный прогрев модели
+занимает некоторое время, поэтому ориентироваться на `/healthz: status=ready`,
+а не только на наличие процесса Python.
+
 ---
 
 Ниже сохранена эксплуатация исторической браузерной версии.
