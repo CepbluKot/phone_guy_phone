@@ -184,6 +184,7 @@ class AsteriskRoom:
         self.destroyed_handler = destroyed_handler
         self.owned = set()
         self.channels = {}
+        self.sip_channels = set()
         self.up = {}
         self.events = None
         self.events_task = None
@@ -247,8 +248,13 @@ class AsteriskRoom:
                     self.channels[channel_id].fail(
                         ConnectionError("asterisk_channel_destroyed")
                     )
-                if event.get("type") == "ChannelDestroyed" and self.destroyed_handler:
-                    self._dispatch(self.destroyed_handler, channel_id)
+                if (
+                    event.get("type") in {"StasisEnd", "ChannelDestroyed"}
+                    and channel_id in self.sip_channels
+                ):
+                    self.sip_channels.discard(channel_id)
+                    if self.destroyed_handler:
+                        self._dispatch(self.destroyed_handler, channel_id)
         except asyncio.CancelledError:
             raise
         except Exception as error:
@@ -271,6 +277,7 @@ class AsteriskRoom:
         endpoint = name[len(prefix):].partition("-")[0]
         if not endpoint:
             return
+        self.sip_channels.add(channel_id)
         self._dispatch(self.stasis_handler, channel_id, endpoint)
 
     def _dispatch(self, handler, *args):

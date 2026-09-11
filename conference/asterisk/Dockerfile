@@ -47,6 +47,8 @@ RUN ./configure \
         --enable bridge_softmix \
         --enable chan_pjsip \
         --enable chan_websocket \
+        --enable codec_alaw \
+        --enable codec_resample \
         --enable pbx_config \
         --enable res_ari \
         --enable res_ari_asterisk \

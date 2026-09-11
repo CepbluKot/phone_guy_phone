@@ -407,12 +407,20 @@ def test_sip_stasis_events_are_dispatched_only_for_real_pjsip_channels():
                 "channel": {"id": "media", "name": "WebSocket/INCOMING-00000002"},
             }))
             ari.events.incoming.put_nowait(json.dumps({
-                "type": "ChannelDestroyed", "channel": {"id": "sip-1987"},
+                "type": "StasisEnd", "application": "phoneguy-sip",
+                "channel": {"id": "sip-1987"},
             }))
             for _ in range(10):
                 if started and destroyed:
                     break
                 await asyncio.sleep(0)
+            assert destroyed == ["sip-1987"]
+            # Asterisk normally follows StasisEnd with ChannelDestroyed.  The
+            # lifecycle callback is emitted once, at the first terminal event.
+            ari.events.incoming.put_nowait(json.dumps({
+                "type": "ChannelDestroyed", "channel": {"id": "sip-1987"},
+            }))
+            await asyncio.sleep(0)
         assert started == [("sip-1987", "1987")]
         assert destroyed == ["sip-1987"]
     asyncio.run(check())

@@ -10,6 +10,8 @@ for required_module in \
     bridge_softmix \
     chan_pjsip \
     chan_websocket \
+    codec_alaw \
+    codec_resample \
     pbx_config \
     res_ari \
     res_ari_asterisk \

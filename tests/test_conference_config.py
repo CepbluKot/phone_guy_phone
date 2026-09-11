@@ -40,6 +40,8 @@ def test_module_allowlist_is_exact_and_contains_release_dependencies():
         "bridge_softmix",
         "chan_pjsip",
         "chan_websocket",
+        "codec_alaw",
+        "codec_resample",
         "pbx_config",
         "res_ari",
         "res_ari_asterisk",
@@ -111,6 +113,17 @@ def test_ari_bridge_api_is_built_allowlisted_and_health_checked():
     assert "--enable res_ari_bridges" in dockerfile
     assert "load => res_ari_bridges.so" in modules
     assert re.search(r"^    res_ari_bridges \\$", healthcheck, re.MULTILINE)
+
+
+def test_sip_audio_translators_are_built_allowlisted_and_health_checked():
+    dockerfile = read("Dockerfile")
+    modules = read("modules.conf")
+    healthcheck = read("healthcheck.sh")
+
+    for module in ("codec_alaw", "codec_resample"):
+        assert f"--enable {module}" in dockerfile
+        assert f"load => {module}.so" in modules
+        assert re.search(rf"^    {module} \\$", healthcheck, re.MULTILINE)
 
 
 def test_dialplan_profile_and_accounting_are_bounded_and_non_recording():
