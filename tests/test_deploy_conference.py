@@ -63,6 +63,20 @@ def test_rollout_uploads_only_conference_and_http_sources_without_mutating_venv_
         assert prohibited not in commands
 
 
+def test_worktree_deploy_uses_the_shared_repository_python_environment(tmp_path):
+    """The feature worktree has no .venv; its parent repository owns one."""
+    source = SCRIPT.read_text()
+    common_dir = subprocess.run(
+        ["git", "-C", ROOT, "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        text=True, capture_output=True, check=True,
+    ).stdout.strip()
+
+    assert (Path(common_dir).parent / ".venv" / "bin" / "python").is_file()
+    assert 'git -C "$repo" rev-parse --path-format=absolute --git-common-dir' in source
+    assert 'python_bin="$main_repo/.venv/bin/python"' in source
+    assert '"$python_bin" tests/live-conference.py' in source
+
+
 def test_failed_health_gate_runs_scoped_rollback_and_never_reports_success(tmp_path):
     env, log = fake_commands(tmp_path, healthy=False)
 

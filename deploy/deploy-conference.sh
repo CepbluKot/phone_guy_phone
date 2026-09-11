@@ -102,6 +102,16 @@ if [ "$#" -ne 0 ]; then
   echo "Usage: $0" >&2
   exit 2
 fi
+git_common_dir=$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir)
+main_repo=$(dirname "$git_common_dir")
+if [ -x "$repo/.venv/bin/python" ]; then
+  python_bin="$repo/.venv/bin/python"
+elif [ -x "$main_repo/.venv/bin/python" ]; then
+  python_bin="$main_repo/.venv/bin/python"
+else
+  echo "No project Python environment found for conference checks" >&2
+  exit 2
+fi
 
 stamp=${DEPLOY_CONFERENCE_STAMP:-$(date -u +%Y%m%dT%H%M%SZ)}
 validate_stamp "$stamp"
@@ -150,7 +160,7 @@ for item in "${required[@]}"; do
   test -e "$item" || { echo "Missing rollout input: $item" >&2; exit 2; }
 done
 if [ "${DEPLOY_CONFERENCE_SKIP_CHECKS:-0}" != 1 ]; then
-  .venv/bin/pytest -q
+  "$python_bin" -m pytest -q
   node --test tests/*.test.cjs
   git diff --check
 fi
@@ -323,6 +333,6 @@ test "$healthy" -eq 1
 if [ -n "${DEPLOY_CONFERENCE_LIVE_CLIENT:-}" ]; then
   "$DEPLOY_CONFERENCE_LIVE_CLIENT"
 else
-  .venv/bin/python tests/live-conference.py --seconds 10
+  "$python_bin" tests/live-conference.py --seconds 10
 fi
 echo "DEPLOY_COMPLETE stamp=$stamp backup=$backup"
