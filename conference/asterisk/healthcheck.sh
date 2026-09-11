@@ -13,6 +13,7 @@ for required_module in \
     pbx_config \
     res_ari \
     res_ari_asterisk \
+    res_ari_bridges \
     res_ari_channels \
     res_ari_events \
     res_ari_model \

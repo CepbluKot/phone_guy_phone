@@ -43,6 +43,7 @@ def test_module_allowlist_is_exact_and_contains_release_dependencies():
         "pbx_config",
         "res_ari",
         "res_ari_asterisk",
+        "res_ari_bridges",
         "res_ari_channels",
         "res_ari_events",
         "res_ari_model",
@@ -100,6 +101,16 @@ def test_ari_channel_creation_builds_allowlists_and_health_checks_app_stasis():
     assert "--enable app_stasis" in dockerfile
     assert "load => app_stasis.so" in modules
     assert re.search(r"^    app_stasis \\$", healthcheck, re.MULTILINE)
+
+
+def test_ari_bridge_api_is_built_allowlisted_and_health_checked():
+    dockerfile = read("Dockerfile")
+    modules = read("modules.conf")
+    healthcheck = read("healthcheck.sh")
+
+    assert "--enable res_ari_bridges" in dockerfile
+    assert "load => res_ari_bridges.so" in modules
+    assert re.search(r"^    res_ari_bridges \\$", healthcheck, re.MULTILINE)
 
 
 def test_dialplan_profile_and_accounting_are_bounded_and_non_recording():

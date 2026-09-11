@@ -50,6 +50,7 @@ RUN ./configure \
         --enable pbx_config \
         --enable res_ari \
         --enable res_ari_asterisk \
+        --enable res_ari_bridges \
         --enable res_ari_channels \
         --enable res_ari_events \
         --enable res_ari_model \
