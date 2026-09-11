@@ -350,6 +350,7 @@ cmp -s "$before" "$after" || {
   echo "voice-rvc.service changed during conference deploy" >&2
   exit 1
 }
+docker update --restart=no voice-changer-voice-1 >/dev/null
 docker stop voice-changer-voice-1 >/dev/null
 test "$(docker inspect voice-conference-asterisk-1 --format '{{.State.Health.Status}}')" = healthy
 test "$(docker inspect voice-conference-controller-1 --format '{{.State.Health.Status}}')" = healthy

@@ -220,11 +220,14 @@ def test_preflight_allows_only_the_idle_owned_conference_to_hold_its_ports():
 
 def test_successful_sip_deploy_stops_legacy_web_and_proves_rvc_was_not_restarted():
     source = SCRIPT.read_text()
+    compose = (ROOT / "compose.yaml").read_text()
 
     live_gate = source.index('tests/live-conference.py --seconds 10')
+    web_disable = source.index('docker update --restart=no voice-changer-voice-1')
     web_stop = source.index('docker stop voice-changer-voice-1')
     success = source.index('echo "DEPLOY_COMPLETE', web_stop)
-    assert live_gate < web_stop < success
+    assert live_gate < web_disable < web_stop < success
+    assert 'restart: "no"' in compose
     assert "voice-rvc-service-state-before" in source
     assert "voice-rvc.service changed during conference deploy" in source
     assert "voice-conference-asterisk-1" in source[web_stop:success]
