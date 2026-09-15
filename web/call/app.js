@@ -2,6 +2,7 @@
 
 const ENDPOINT = 'wss://vm-voice-1.lan.awesomeio.ru/ws/call';
 const READY = {type: 'start', version: 1, sampleRate: 48000, channels: 1, sampleFormat: 's16le'};
+const MAX_BUFFERED_AUDIO_BYTES = 1920 * 4;
 const el = id => document.getElementById(id);
 let call = null;
 
@@ -37,13 +38,28 @@ async function start() {
     current.context = new AudioContext({latencyHint: 'interactive', sampleRate: 48000});
     await current.context.resume();
     if (call !== current) return;
+    current.context.onstatechange = async () => {
+      if (call !== current || current.context.state !== 'suspended') return;
+      try {
+        await current.context.resume();
+      } catch {
+        finish(current, 'Браузер остановил микрофон. Запусти звонок снова.');
+      }
+    };
     await current.context.audioWorklet.addModule('audio-worklet.js');
     current.source = current.context.createMediaStreamSource(current.stream);
     current.node = new AudioWorkletNode(current.context, 'phoneguy-microphone', {numberOfInputs: 1, numberOfOutputs: 0, channelCount: 1});
     current.node.port.onmessage = ({data}) => {
       if (call !== current || !data) return;
       if (data.type === 'level') el('input').value = data.value;
-      if (data.type === 'frame' && current.ready && current.socket.readyState === WebSocket.OPEN) current.socket.send(data.pcm);
+      if (data.type === 'frame' && current.ready && current.socket.readyState === WebSocket.OPEN &&
+          current.socket.bufferedAmount + data.pcm.byteLength <= MAX_BUFFERED_AUDIO_BYTES) {
+        try {
+          current.socket.send(data.pcm);
+        } catch {
+          finish(current, 'Поток микрофона оборвался. Запусти звонок снова.');
+        }
+      }
     };
     current.source.connect(current.node);
     current.socket = new WebSocket(ENDPOINT);
