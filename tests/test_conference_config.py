@@ -156,6 +156,10 @@ def test_pjsip_template_has_only_runtime_password_placeholders_and_private_media
     physical_phone = re.search(r"^\[1983\]\(phone-endpoint\)$(.*?)(?=^\[)", pjsip,
                                re.MULTILINE | re.DOTALL).group(1)
     assert "rtp_timeout=0" in physical_phone
+    physical_aor = re.search(r"^\[1983\]$\n(type=aor.*?)(?=^\[)", pjsip,
+                            re.MULTILINE | re.DOTALL).group(1)
+    assert "contact=sip:1983@192.168.20.134:5062" in physical_aor
+    assert "qualify_frequency=30" in physical_aor
     assert "password=" not in pjsip.replace("password=__SIP_1983_PASSWORD__", "").replace(
         "password=__SIP_1987_PASSWORD__", "").replace("password=__SIP_2014_PASSWORD__", "")
     rtp = read("rtp.conf")
