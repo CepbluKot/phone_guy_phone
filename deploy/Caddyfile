@@ -10,6 +10,11 @@ https://vm-voice-1.lan.awesomeio.ru {
     handle /ws/call {
         reverse_proxy 127.0.0.1:8091
     }
+    redir /call /call/ 308
+    handle_path /call/* {
+        root * /opt/voice-changer/web/call
+        file_server
+    }
     handle /ws/rvc-v2 {
         reverse_proxy 127.0.0.1:8090
     }

@@ -175,6 +175,8 @@ def test_browser_phone_microphone_route_is_private_native_websocket_only():
 
     assert "handle /ws/call" in caddy
     assert "reverse_proxy 127.0.0.1:8091" in caddy
+    assert "handle_path /call/*" in caddy
+    assert "/opt/voice-changer/web/call" in caddy
     assert "--ws-max-size 4096" in compose
 
 
