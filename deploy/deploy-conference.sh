@@ -244,8 +244,20 @@ install -m 0644 "$release/conference/asterisk/sounds/mr-beast-phoneguy.wav" "$ru
 install -m 0644 "$release/conference/asterisk/sounds/fnaf1-night1-original.wav" "$runtime/asterisk/sounds/fnaf1-night1-original.wav"
 install -m 0750 "$release/deploy/start-fnaf-video-sequence.py" /usr/local/sbin/start-fnaf-video-sequence
 for extension in 1983 1987 2014; do
-  password=$(openssl rand -hex 32)
-  printf '%s\n' "$password" > "$runtime/asterisk/sip-$extension-password"
+  existing_sip_password=
+  if docker inspect voice-conference-asterisk-1 >/dev/null 2>&1; then
+    existing_pjsip=$(docker inspect voice-conference-asterisk-1 --format '{{range .Mounts}}{{if eq .Destination "/etc/asterisk/pjsip.conf"}}{{.Source}}{{end}}{{end}}')
+    if [ -n "$existing_pjsip" ]; then
+      existing_sip_password="$(dirname "$existing_pjsip")/sip-$extension-password"
+    fi
+  fi
+  if [ -n "$existing_sip_password" ] && [ -s "$existing_sip_password" ]; then
+    cp "$existing_sip_password" "$runtime/asterisk/sip-$extension-password"
+  else
+    password=$(openssl rand -hex 32)
+    printf '%s\n' "$password" > "$runtime/asterisk/sip-$extension-password"
+  fi
+  password=$(cat "$runtime/asterisk/sip-$extension-password")
   sed -i "s/__SIP_${extension}_PASSWORD__/$password/" "$runtime/asterisk/pjsip.conf"
 done
 install -m 0644 "$release/deploy/voice-routing.yaml" "$runtime/voice-routing.yaml"

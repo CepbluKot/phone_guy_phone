@@ -187,7 +187,7 @@ def test_fnaf_callback_sequence_uses_the_new_montage_after_the_first_hangup():
 
     assert "exten => 1900,1,NoOp(FNaF callback sequence)" in extensions
     assert "Dial(PJSIP/1983,30,gA(phoneguy-bot/fnaf1-night1-original))" in extensions
-    assert "same => n,Wait(3)" in extensions
+    assert "same => n,Wait(1)" in extensions
     assert "Dial(PJSIP/1983,40,A(phoneguy-bot/night5-then-scary))" in extensions
     assert "start-fnaf-video-sequence.py" in deploy
     assert launcher.exists()

@@ -245,3 +245,12 @@ def test_phone_setup_helper_is_vm209_only_and_reveals_one_requested_account():
     assert "Password:" in source
     assert "Dial: 600" in source
     assert "cat /etc/asterisk/pjsip.conf" not in source
+
+
+def test_deploy_preserves_existing_sip_account_credentials():
+    """A routine rollout must not silently de-register physical SIP phones."""
+    source = SCRIPT.read_text()
+
+    assert "existing_sip_password" in source
+    assert 'cp "$existing_sip_password" "$runtime/asterisk/sip-$extension-password"' in source
+    assert 'password=$(openssl rand -hex 32)' in source
