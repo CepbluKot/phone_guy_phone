@@ -179,6 +179,20 @@ def test_spooky_service_number_plays_the_night5_then_scary_montage():
     assert 'sounds/night5-then-scary.wav' in deploy
 
 
+def test_fnaf_callback_sequence_uses_the_new_montage_after_the_first_hangup():
+    """The durable 1900 scenario must re-ring 1983 after the Night 1 bite."""
+    extensions = read("extensions.conf")
+    deploy = Path("deploy/deploy-conference.sh").read_text()
+    launcher = Path("deploy/start-fnaf-video-sequence.py")
+
+    assert "exten => 1900,1,NoOp(FNaF callback sequence)" in extensions
+    assert "Dial(PJSIP/1983,30,gA(phoneguy-bot/fnaf1-night1-original))" in extensions
+    assert "same => n,Wait(3)" in extensions
+    assert "Dial(PJSIP/1983,40,A(phoneguy-bot/night5-then-scary))" in extensions
+    assert "start-fnaf-video-sequence.py" in deploy
+    assert launcher.exists()
+
+
 def test_source_build_is_reproducible_non_root_and_health_checked():
     dockerfile = read("Dockerfile")
 

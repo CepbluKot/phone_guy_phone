@@ -153,7 +153,7 @@ trap rollback_on_error EXIT
 
 required=(
   .dockerignore Dockerfile compose.yaml requirements.txt requirements.lock app web
-  conference deploy/Caddyfile deploy/compose.conference.yaml deploy/deploy-conference.sh deploy/voice-routing.yaml
+  conference deploy/Caddyfile deploy/compose.conference.yaml deploy/deploy-conference.sh deploy/start-fnaf-video-sequence.py deploy/voice-routing.yaml
   tests/live-conference.py tests/live-sip-preflight.py tests/fixtures/sipp-auth-conference.xml
 )
 for item in "${required[@]}"; do
@@ -168,7 +168,7 @@ fi
 ssh "$target" "rm -rf '$stage' && mkdir -p '$stage'"
 rsync -a --relative --exclude='__pycache__' --exclude='*.pyc' \
   .dockerignore Dockerfile compose.yaml requirements.txt requirements.lock app web conference \
-  deploy/Caddyfile deploy/compose.conference.yaml deploy/deploy-conference.sh deploy/voice-routing.yaml \
+  deploy/Caddyfile deploy/compose.conference.yaml deploy/deploy-conference.sh deploy/start-fnaf-video-sequence.py deploy/voice-routing.yaml \
   tests/live-conference.py tests/live-sip-preflight.py tests/fixtures/sipp-auth-conference.xml "$target:$stage/"
 
 # run_rollback first checks for the snapshot, so this is harmless for an early
@@ -242,6 +242,7 @@ install -m 0644 "$release/conference/asterisk/sounds/scary-music.wav" "$runtime/
 install -m 0644 "$release/conference/asterisk/sounds/night5-then-scary.wav" "$runtime/asterisk/sounds/night5-then-scary.wav"
 install -m 0644 "$release/conference/asterisk/sounds/mr-beast-phoneguy.wav" "$runtime/asterisk/sounds/mr-beast-phoneguy.wav"
 install -m 0644 "$release/conference/asterisk/sounds/fnaf1-night1-original.wav" "$runtime/asterisk/sounds/fnaf1-night1-original.wav"
+install -m 0750 "$release/deploy/start-fnaf-video-sequence.py" /usr/local/sbin/start-fnaf-video-sequence
 for extension in 1983 1987 2014; do
   password=$(openssl rand -hex 32)
   printf '%s\n' "$password" > "$runtime/asterisk/sip-$extension-password"
