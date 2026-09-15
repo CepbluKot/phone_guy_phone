@@ -234,6 +234,13 @@ printf '%s\n' "$password" > "$runtime/asterisk/ari-password"
 sed "s/__ARI_PASSWORD__/$password/" "$release/conference/asterisk/ari.conf.template" > "$runtime/asterisk/ari.conf"
 sed 's/^bindaddr=.*/bindaddr=0.0.0.0/' "$release/conference/asterisk/http.conf" > "$runtime/asterisk/http.conf"
 cp "$release/conference/asterisk/pjsip.conf.template" "$runtime/asterisk/pjsip.conf"
+install -m 0644 "$release/conference/asterisk/extensions.conf" "$runtime/asterisk/extensions.conf"
+install -m 0644 "$release/conference/asterisk/modules.conf" "$runtime/asterisk/modules.conf"
+install -d -m 0755 "$runtime/asterisk/sounds"
+install -m 0644 "$release/conference/asterisk/sounds/phoneguy.wav" "$runtime/asterisk/sounds/phoneguy.wav"
+install -m 0644 "$release/conference/asterisk/sounds/scary-music.wav" "$runtime/asterisk/sounds/scary-music.wav"
+install -m 0644 "$release/conference/asterisk/sounds/mr-beast-phoneguy.wav" "$runtime/asterisk/sounds/mr-beast-phoneguy.wav"
+install -m 0644 "$release/conference/asterisk/sounds/fnaf1-night1-original.wav" "$runtime/asterisk/sounds/fnaf1-night1-original.wav"
 for extension in 1983 1987 2014; do
   password=$(openssl rand -hex 32)
   printf '%s\n' "$password" > "$runtime/asterisk/sip-$extension-password"

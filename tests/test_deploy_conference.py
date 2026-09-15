@@ -142,7 +142,8 @@ def test_asterisk_read_only_root_keeps_bundled_docs_and_moves_only_astdb_to_tmpf
 
     assert "read_only: true" in compose
     assert "/var/run/asterisk" in compose
-    assert "/var/lib/asterisk" not in compose
+    assert "/var/lib/asterisk/sounds/phoneguy-bot:ro" in compose
+    assert "/var/lib/asterisk/sounds:/" not in compose
     assert "/var/log/asterisk" in compose
     assert "astdbdir => /var/run/asterisk/astdb" in asterisk
 

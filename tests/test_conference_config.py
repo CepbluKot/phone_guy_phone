@@ -41,6 +41,8 @@ def test_module_allowlist_is_exact_and_contains_release_dependencies():
         "chan_pjsip",
         "chan_websocket",
         "codec_alaw",
+        "format_wav",
+        "app_playback",
         "codec_resample",
         "pbx_config",
         "res_ari",

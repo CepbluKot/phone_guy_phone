@@ -15,6 +15,9 @@ services:
       # port publication; the host-visible ARI socket remains 127.0.0.1:8092.
       - "${CONFERENCE_RUNTIME}/asterisk/http.conf:/etc/asterisk/http.conf:ro"
       - "${CONFERENCE_RUNTIME}/asterisk/pjsip.conf:/etc/asterisk/pjsip.conf:ro"
+      - "${CONFERENCE_RUNTIME}/asterisk/extensions.conf:/etc/asterisk/extensions.conf:ro"
+      - "${CONFERENCE_RUNTIME}/asterisk/modules.conf:/etc/asterisk/modules.conf:ro"
+      - "${CONFERENCE_RUNTIME}/asterisk/sounds:/var/lib/asterisk/sounds/phoneguy-bot:ro"
     read_only: true
     tmpfs:
       - /tmp
