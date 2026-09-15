@@ -60,6 +60,13 @@ class Ari:
         self.actions.append(("open_media", role, receive))
         return media
 
+    async def originate(self, endpoint, *, app, caller_id, timeout=30):
+        self.actions.append(("originate", endpoint, app, caller_id, timeout))
+        return "sip-outbound-" + endpoint
+
+    async def hangup_channel(self, channel):
+        self.actions.append(("hangup", channel))
+
 
 class Model:
     def __init__(self, outputs=(BLOCK,)):
@@ -148,5 +155,41 @@ def test_second_phone_guy_and_unknown_extension_fail_without_adding_raw_audio():
         assert not [item for item in ari.actions if item == ("add", "phoneguy-main", "sip-1987")]
         assert not [item for item in ari.actions if item == ("add", "phoneguy-main", "second")]
         await manager.close("sip-1987")
+
+    asyncio.run(check())
+
+
+def test_browser_phone_call_injects_only_converted_microphone_audio_and_hangs_up_phone():
+    """The browser is an RVC source, never a raw member of the SIP bridge."""
+    from conference.sip_session import SipSessionManager
+
+    async def check():
+        ari = Ari()
+        models = []
+
+        def model_factory():
+            model = Model()
+            models.append(model)
+            return model
+
+        manager = SipSessionManager(ari, Routing(), model_factory=model_factory)
+        call_id = await manager.start_browser_call("1983")
+        injection = ari.media[0]
+
+        assert ("originate", "1983", "phoneguy-sip", "Phone Guy Browser", 30) in ari.actions
+        assert ("add", "phoneguy-main", injection.channel_id) in ari.actions
+        assert not [item for item in ari.actions if item == ("add", "phoneguy-main", call_id)]
+
+        await manager.send_browser_audio(call_id, FRAME)
+        for _ in range(50):
+            if len(injection.sent) == 50:
+                break
+            await asyncio.sleep(0)
+        assert models[0].input == [FRAME]
+        assert injection.sent == [FRAME] * 50
+
+        await manager.close_browser_call(call_id)
+        assert injection.closed
+        assert ("hangup", "sip-outbound-1983") in ari.actions
 
     asyncio.run(check())

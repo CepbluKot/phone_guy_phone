@@ -431,6 +431,35 @@ class AsteriskRoom:
             if error.response.status_code != 404:
                 raise
 
+    async def originate(self, endpoint, *, app, caller_id, timeout=30):
+        """Call one private PJSIP endpoint and hand its answered leg to Stasis."""
+        if (
+            not isinstance(endpoint, str)
+            or not endpoint
+            or not isinstance(app, str)
+            or not app
+            or not isinstance(caller_id, str)
+            or not caller_id
+            or type(timeout) is not int
+            or not 1 <= timeout <= 60
+        ):
+            raise ValueError("invalid_asterisk_originate")
+        response = await self.request(
+            "POST",
+            "/channels",
+            params={
+                "endpoint": "PJSIP/" + endpoint,
+                "app": app,
+                "callerId": caller_id,
+                "timeout": timeout,
+                "formats": "alaw",
+            },
+        )
+        channel_id = response.json().get("id")
+        if not isinstance(channel_id, str) or not channel_id:
+            raise ValueError("invalid_asterisk_originate_response")
+        return channel_id
+
     async def add_to_bridge(self, bridge_id, channel_id):
         if not isinstance(bridge_id, str) or not isinstance(channel_id, str):
             raise ValueError("invalid_asterisk_bridge_member")

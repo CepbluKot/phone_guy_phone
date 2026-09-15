@@ -7,6 +7,9 @@ https://vm-voice-1.lan.awesomeio.ru {
     handle /ws/conference {
         reverse_proxy 127.0.0.1:8091
     }
+    handle /ws/call {
+        reverse_proxy 127.0.0.1:8091
+    }
     handle /ws/rvc-v2 {
         reverse_proxy 127.0.0.1:8090
     }

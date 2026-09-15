@@ -2,6 +2,7 @@
 
 import asyncio
 from dataclasses import dataclass, field
+import uuid
 
 from .media import BLOCK_BYTES, split_pcm
 
@@ -18,6 +19,7 @@ class _Session:
     source: object | None = None
     injection: object | None = None
     model: object | None = None
+    outbound_channel_id: str | None = None
     tasks: list[asyncio.Task] = field(default_factory=list)
 
 
@@ -91,6 +93,52 @@ class SipSessionManager:
             asyncio.create_task(self._inject(session), name="sip-rvc-output-" + channel_id),
         ]
 
+    async def start_browser_call(self, endpoint):
+        """Bridge one browser microphone to a private phone through RVC.
+
+        The browser itself is not an Asterisk participant.  Its PCM is sent
+        only to the model, and the generated injection channel is the only
+        audio source added to the shared phone bridge.
+        """
+        if not isinstance(endpoint, str) or not endpoint.isdigit():
+            raise SipSessionError("invalid_endpoint")
+        channel_id = "browser-" + uuid.uuid4().hex
+        async with self._lock:
+            if self.sessions:
+                raise SipSessionError("busy")
+            await self._ensure_main_bridge()
+            session = _Session(channel_id, "rvc")
+            self.sessions[channel_id] = session
+        try:
+            session.injection = await self.ari.open_media("browser-injection-" + channel_id)
+            await self.ari.add_to_bridge(self.main_bridge, session.injection.channel_id)
+            session.model = self.model_factory()
+            await session.model.__aenter__()
+            session.tasks = [
+                asyncio.create_task(self._inject(session), name="browser-rvc-output-" + channel_id),
+            ]
+            session.outbound_channel_id = await self.ari.originate(
+                endpoint, app="phoneguy-sip", caller_id="Phone Guy Browser"
+            )
+            return channel_id
+        except BaseException:
+            await self.close(channel_id)
+            raise
+
+    async def send_browser_audio(self, channel_id, frame):
+        if not isinstance(frame, bytes) or len(frame) != 1920:
+            raise SipSessionError("invalid_browser_frame")
+        async with self._lock:
+            session = self.sessions.get(channel_id)
+        if session is None or session.pipeline != "rvc" or session.model is None:
+            raise SipSessionError("browser_call_stopped")
+        await session.model.send(frame)
+
+    async def close_browser_call(self, channel_id):
+        if not isinstance(channel_id, str) or not channel_id.startswith("browser-"):
+            return
+        await self.close(channel_id)
+
     async def _forward(self, session):
         while True:
             await session.model.send(await session.source.receive_pcm())
@@ -112,6 +160,8 @@ class SipSessionManager:
         await asyncio.gather(*session.tasks, return_exceptions=True)
         if session.model is not None:
             await session.model.__aexit__(None, None, None)
+        if session.outbound_channel_id is not None:
+            await self.ari.hangup_channel(session.outbound_channel_id)
         for media in (session.source, session.injection):
             if media is not None:
                 await media.close()

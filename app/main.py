@@ -41,6 +41,12 @@ def conference_index():
                         headers={'Permissions-Policy': 'microphone=()'})
 
 
+@app.get('/call/')
+def call_index():
+    """Browser microphone page for the private Phone Guy phone bridge."""
+    return FileResponse(web / 'call' / 'index.html')
+
+
 @app.websocket('/ws/audio')
 async def audio(socket: WebSocket):
     origin = socket.headers.get('origin')

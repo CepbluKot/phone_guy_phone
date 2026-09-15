@@ -169,6 +169,15 @@ def test_sip_dialplan_enters_the_dedicated_stasis_app_and_rejects_unknown_number
     assert "exten => _X.,1,Hangup(1)" in extensions
 
 
+def test_browser_phone_microphone_route_is_private_native_websocket_only():
+    caddy = Path("deploy/Caddyfile").read_text()
+    compose = Path("deploy/compose.conference.yaml").read_text()
+
+    assert "handle /ws/call" in caddy
+    assert "reverse_proxy 127.0.0.1:8091" in caddy
+    assert "--ws-max-size 4096" in compose
+
+
 def test_spooky_service_number_plays_the_night5_then_scary_montage():
     """1983 must play the requested composite, not the old music-only track."""
     extensions = read("extensions.conf")
