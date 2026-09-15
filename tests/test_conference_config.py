@@ -169,6 +169,16 @@ def test_sip_dialplan_enters_the_dedicated_stasis_app_and_rejects_unknown_number
     assert "exten => _X.,1,Hangup(1)" in extensions
 
 
+def test_spooky_service_number_plays_the_night5_then_scary_montage():
+    """1983 must play the requested composite, not the old music-only track."""
+    extensions = read("extensions.conf")
+    deploy = Path("deploy/deploy-conference.sh").read_text()
+
+    assert "Playback(phoneguy-bot/night5-then-scary)" in extensions
+    assert "Playback(phoneguy-bot/scary-music)" not in extensions
+    assert 'sounds/night5-then-scary.wav' in deploy
+
+
 def test_source_build_is_reproducible_non_root_and_health_checked():
     dockerfile = read("Dockerfile")
 

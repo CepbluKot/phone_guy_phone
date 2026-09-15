@@ -239,6 +239,7 @@ install -m 0644 "$release/conference/asterisk/modules.conf" "$runtime/asterisk/m
 install -d -m 0755 "$runtime/asterisk/sounds"
 install -m 0644 "$release/conference/asterisk/sounds/phoneguy.wav" "$runtime/asterisk/sounds/phoneguy.wav"
 install -m 0644 "$release/conference/asterisk/sounds/scary-music.wav" "$runtime/asterisk/sounds/scary-music.wav"
+install -m 0644 "$release/conference/asterisk/sounds/night5-then-scary.wav" "$runtime/asterisk/sounds/night5-then-scary.wav"
 install -m 0644 "$release/conference/asterisk/sounds/mr-beast-phoneguy.wav" "$runtime/asterisk/sounds/mr-beast-phoneguy.wav"
 install -m 0644 "$release/conference/asterisk/sounds/fnaf1-night1-original.wav" "$runtime/asterisk/sounds/fnaf1-night1-original.wav"
 for extension in 1983 1987 2014; do
