@@ -35,6 +35,8 @@ async function start() {
     current.stream = await navigator.mediaDevices.getUserMedia({audio: {channelCount: 1, sampleRate: 48000}, video: false});
     if (call !== current) return;
     current.context = new AudioContext({latencyHint: 'interactive', sampleRate: 48000});
+    await current.context.resume();
+    if (call !== current) return;
     await current.context.audioWorklet.addModule('audio-worklet.js');
     current.source = current.context.createMediaStreamSource(current.stream);
     current.node = new AudioWorkletNode(current.context, 'phoneguy-microphone', {numberOfInputs: 1, numberOfOutputs: 0, channelCount: 1});
