@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 from contextlib import suppress
 import os
 
@@ -17,34 +18,45 @@ SILENCE_FRAME = bytes(FRAME_BYTES)
 
 
 class MirrorRelay:
-    """One publisher, one replaceable frame; never accumulate old speech."""
+    """One publisher and a small FIFO jitter buffer for rendered speech."""
 
-    def __init__(self):
+    def __init__(self, *, prebuffer_frames=8, max_frames=50):
+        if not 1 <= prebuffer_frames <= max_frames:
+            raise ValueError("invalid_mirror_buffer")
         self.publisher = None
-        self.current = None
+        self.prebuffer_frames = prebuffer_frames
+        self.frames = deque(maxlen=max_frames)
+        self.playing = False
 
     def claim(self, publisher):
         if self.publisher is not None:
             return False
         self.publisher = publisher
-        self.current = None
+        self.frames.clear()
+        self.playing = False
         return True
 
     def publish(self, publisher, frame):
         if self.publisher is not publisher or not isinstance(frame, bytes) or len(frame) != FRAME_BYTES:
             return False
-        self.current = frame
+        self.frames.append(frame)
         return True
 
     def release(self, publisher):
         if self.publisher is publisher:
             self.publisher = None
-            self.current = None
+            self.frames.clear()
+            self.playing = False
 
     def take_frame(self):
-        frame = self.current
-        self.current = None
-        return frame if frame is not None else SILENCE_FRAME
+        if not self.playing:
+            if len(self.frames) < self.prebuffer_frames:
+                return SILENCE_FRAME
+            self.playing = True
+        if self.frames:
+            return self.frames.popleft()
+        self.playing = False
+        return SILENCE_FRAME
 
 
 async def handle_publisher(socket, relay):
@@ -177,7 +189,10 @@ async def main():
         stasis_handler=on_stasis,
         destroyed_handler=on_destroyed,
     )
-    service = MirrorService(ari, relay)
+    def on_error(channel_id, error):
+        print(f"selfmonitor: session {channel_id} failed: {error!r}", flush=True)
+
+    service = MirrorService(ari, relay, on_error=on_error)
 
     health_port = int(os.environ.get("SELFMONITOR_HEALTH_PORT", "8096"))
     mirror_port = int(os.environ.get("SELFMONITOR_MIRROR_PORT", "8097"))

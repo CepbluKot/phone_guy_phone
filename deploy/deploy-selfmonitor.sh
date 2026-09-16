@@ -9,17 +9,17 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 STAGE="/tmp/voice-live-mirror-$STAMP"
 
-echo "==> 0/7 scoped backup"
+echo "==> 0/8 scoped backup"
 ssh "$TARGET" "sudo mkdir -p /opt/voice-selfmonitor/backups/$STAMP && sudo cp -a /etc/caddy/Caddyfile /opt/voice-selfmonitor/backups/$STAMP/Caddyfile && sudo cp -a /opt/voice-selfmonitor/app /opt/voice-selfmonitor/backups/$STAMP/app && sudo cp -a /opt/voice-changer/web/live /opt/voice-selfmonitor/backups/$STAMP/live && sudo cp -a /etc/systemd/system/voice-selfmonitor.service /opt/voice-selfmonitor/backups/$STAMP/voice-selfmonitor.service"
 
-echo "==> 1/7 sync code"
+echo "==> 1/8 sync code"
 ssh "$TARGET" 'mkdir -p /opt/voice-selfmonitor/app/selfmonitor /opt/voice-selfmonitor/app/conference'
 scp -q "$ROOT/selfmonitor/"*.py "$TARGET:/opt/voice-selfmonitor/app/selfmonitor/"
 scp -q "$ROOT/conference/__init__.py" "$ROOT/conference/media.py" \
   "$ROOT/conference/asterisk.py" \
   "$TARGET:/opt/voice-selfmonitor/app/conference/"
 
-echo "==> 2/7 python environment"
+echo "==> 2/8 python environment"
 ssh "$TARGET" '
 if [ ! -x /opt/voice-selfmonitor/venv/bin/python ]; then
   python3 -m venv /opt/voice-selfmonitor/venv
@@ -27,7 +27,7 @@ if [ ! -x /opt/voice-selfmonitor/venv/bin/python ]; then
 fi
 /opt/voice-selfmonitor/venv/bin/python -c "import httpx, websockets; print(\"deps ok\")"'
 
-echo "==> 3/7 credentials from the active conference runtime"
+echo "==> 3/8 credentials from the active conference runtime"
 ssh "$TARGET" '
 ARI_CONF=$(sudo docker inspect voice-conference-asterisk-1 --format "{{range .Mounts}}{{.Source}} -> {{.Destination}}{{println}}{{end}}" | grep "ari.conf" | cut -d" " -f1)
 sudo test -f "$ARI_CONF" || { echo "ari.conf not found"; exit 1; }
@@ -38,7 +38,7 @@ printf "SELFMONITOR_ARI_URL=http://127.0.0.1:8092/ari\nSELFMONITOR_ARI_USERNAME=
 sudo chmod 600 /etc/voice-selfmonitor.env
 echo "env written (password length ${#PASSWORD})"'
 
-echo "==> 4/7 systemd unit"
+echo "==> 4/8 systemd unit"
 scp -q "$ROOT/deploy/voice-selfmonitor.service" "$TARGET:/tmp/voice-selfmonitor.service"
 ssh "$TARGET" '
 sudo mv /tmp/voice-selfmonitor.service /etc/systemd/system/voice-selfmonitor.service
@@ -52,7 +52,7 @@ for i in $(seq 1 20); do
   [ "$i" = 20 ] && { echo "health timeout"; sudo journalctl -u voice-selfmonitor -n 20 --no-pager; exit 1; }
 done'
 
-echo "==> 5/7 dialplan extension 1999 (idempotent, with backup)"
+echo "==> 5/8 dialplan extension 1999 (idempotent, with backup)"
 ssh "$TARGET" '
 EXT=$(sudo docker inspect voice-conference-asterisk-1 --format "{{range .Mounts}}{{.Source}} -> {{.Destination}}{{println}}{{end}}" | grep "extensions.conf" | cut -d" " -f1)
 sudo test -f "$EXT" || { echo "extensions.conf not found"; exit 1; }
@@ -80,14 +80,18 @@ PYEOF
 fi
 sudo docker exec voice-conference-asterisk-1 asterisk -rx "dialplan show 1999@phoneguy-sip" | head -3'
 
-echo "==> 6/7 private Caddy route and live page"
+echo "==> 6/8 physical phone RTP keepalive"
+scp -q "$ROOT/deploy/patch-physical-phone-pjsip.py" "$TARGET:$STAGE-pjsip-patch.py"
+ssh "$TARGET" "PJSIP=\$(sudo docker inspect voice-conference-asterisk-1 --format '{{range .Mounts}}{{if eq .Destination \"/etc/asterisk/pjsip.conf\"}}{{.Source}}{{end}}{{end}}'); sudo test -f \"\$PJSIP\"; sudo cp -a \"\$PJSIP\" '/opt/voice-selfmonitor/backups/$STAMP/pjsip.conf'; sudo python3 '$STAGE-pjsip-patch.py' \"\$PJSIP\"; if ! sudo docker exec voice-conference-asterisk-1 asterisk -rx 'module reload res_pjsip.so' || ! sudo docker exec voice-conference-asterisk-1 asterisk -rx 'pjsip show endpoint 1983' | grep -E 'rtp_keepalive +: 1$'; then sudo cp -a '/opt/voice-selfmonitor/backups/$STAMP/pjsip.conf' \"\$PJSIP\"; sudo docker exec voice-conference-asterisk-1 asterisk -rx 'module reload res_pjsip.so'; exit 1; fi"
+
+echo "==> 7/8 private Caddy route and live page"
 ssh "$TARGET" "mkdir -p '$STAGE'"
 scp -q "$ROOT/deploy/patch-live-mirror-caddy.py" "$TARGET:$STAGE/patch-live-mirror-caddy.py"
 scp -q "$ROOT/web/live/index.html" "$ROOT/web/live/app.js" \
   "$ROOT/web/live/audio-worklet.js" "$TARGET:$STAGE/"
 ssh "$TARGET" "sudo cp -a /etc/caddy/Caddyfile '$STAGE/Caddyfile.candidate' && sudo python3 '$STAGE/patch-live-mirror-caddy.py' '$STAGE/Caddyfile.candidate' && sudo caddy validate --config '$STAGE/Caddyfile.candidate' && sudo install -m 0644 '$STAGE/Caddyfile.candidate' /etc/caddy/Caddyfile && { sudo systemctl reload caddy || { sudo cp -a '/opt/voice-selfmonitor/backups/$STAMP/Caddyfile' /etc/caddy/Caddyfile; sudo systemctl reload caddy; exit 1; }; } && sudo install -m 0644 '$STAGE/index.html' /opt/voice-changer/web/live/index.html && sudo install -m 0644 '$STAGE/app.js' /opt/voice-changer/web/live/app.js && sudo install -m 0644 '$STAGE/audio-worklet.js' /opt/voice-changer/web/live/audio-worklet.js"
 
-echo "==> 7/7 verify relay and ARI application registered"
+echo "==> 8/8 verify relay and ARI application registered"
 ssh "$TARGET" '
 sudo docker exec voice-conference-asterisk-1 asterisk -rx "ari show apps" | grep -q selfmonitor && echo "ARI app registered"
 curl -fsS -m 3 http://127.0.0.1:8096/healthz; echo

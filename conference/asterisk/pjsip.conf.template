@@ -29,6 +29,8 @@ aors=1983
 ; This physical handset is receive-only in browser-to-phone mode and may use
 ; silence suppression. Do not tear down a valid call just because it sends no RTP.
 rtp_timeout=0
+; Keep the handset's own media-inactivity watchdog from ending a receive-only call.
+rtp_keepalive=1
 [1983-auth]
 type=auth
 auth_type=userpass

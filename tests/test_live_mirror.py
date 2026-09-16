@@ -58,7 +58,7 @@ class Ari:
         self.actions.append(("hangup", channel))
 
 
-def test_relay_replaces_stale_frames_and_rejects_duplicate_publisher():
+def test_relay_buffers_short_network_bursts_in_order_and_rejects_duplicate_publisher():
     relay = MirrorRelay()
     first, second = object(), object()
     assert relay.take_frame() == SILENCE
@@ -66,10 +66,10 @@ def test_relay_replaces_stale_frames_and_rejects_duplicate_publisher():
     assert not relay.claim(second)
     assert not relay.publish(second, FRAME)
     assert not relay.publish(first, b"bad")
-    assert relay.publish(first, FRAME)
-    newer = b"\x40\x06" * 960
-    assert relay.publish(first, newer)
-    assert relay.take_frame() == newer
+    frames = [(index.to_bytes(2, "little") * 960) for index in range(1, 11)]
+    for frame in frames:
+        assert relay.publish(first, frame)
+    assert [relay.take_frame() for _ in frames] == frames
     assert relay.take_frame() == SILENCE
     relay.release(first)
     assert relay.take_frame() == SILENCE
@@ -88,7 +88,8 @@ def test_call_stays_up_through_silence_audio_silence_without_raw_path():
         assert ari.media.sent[:2] == [SILENCE, SILENCE]
         owner = object()
         assert relay.claim(owner)
-        assert relay.publish(owner, FRAME)
+        for _ in range(relay.prebuffer_frames):
+            assert relay.publish(owner, FRAME)
         for _ in range(50):
             if FRAME in ari.media.sent:
                 break
@@ -172,9 +173,10 @@ def test_publisher_websocket_requires_private_origin_and_releases_audio_on_close
                 async with connect(url, origin="https://wrong.example"):
                     pass
             async with connect(url, origin=ORIGIN) as socket:
-                await socket.send(FRAME)
+                for _ in range(relay.prebuffer_frames):
+                    await socket.send(FRAME)
                 for _ in range(50):
-                    if relay.current == FRAME:
+                    if len(relay.frames) == relay.prebuffer_frames:
                         break
                     await asyncio.sleep(.01)
                 assert relay.take_frame() == FRAME
