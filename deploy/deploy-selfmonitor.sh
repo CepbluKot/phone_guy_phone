@@ -1,21 +1,25 @@
 #!/usr/bin/env bash
-# Deploy the self-monitor echo line (dial 1999 -> hear yourself as Phone Guy).
-# Scoped: touches only /opt/voice-selfmonitor, /etc/voice-selfmonitor.env,
-# the voice-selfmonitor.service unit, and adds one extension to the ACTIVE
-# conference runtime extensions.conf (with backup + dialplan reload).
+# Deploy the private browser-to-1999 mirror without replacing the active
+# conference runtime, /call route, Yealink contact, or voice-rvc.service.
 # Never restarts asterisk/voice-rvc/conference containers.
 set -euo pipefail
 
 TARGET=${TARGET:-ubuntu@192.168.20.70}
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+STAMP=$(date -u +%Y%m%dT%H%M%SZ)
+STAGE="/tmp/voice-live-mirror-$STAMP"
 
-echo "==> 1/6 sync code"
+echo "==> 0/7 scoped backup"
+ssh "$TARGET" "sudo mkdir -p /opt/voice-selfmonitor/backups/$STAMP && sudo cp -a /etc/caddy/Caddyfile /opt/voice-selfmonitor/backups/$STAMP/Caddyfile && sudo cp -a /opt/voice-selfmonitor/app /opt/voice-selfmonitor/backups/$STAMP/app && sudo cp -a /opt/voice-changer/web/live /opt/voice-selfmonitor/backups/$STAMP/live && sudo cp -a /etc/systemd/system/voice-selfmonitor.service /opt/voice-selfmonitor/backups/$STAMP/voice-selfmonitor.service"
+
+echo "==> 1/7 sync code"
 ssh "$TARGET" 'mkdir -p /opt/voice-selfmonitor/app/selfmonitor /opt/voice-selfmonitor/app/conference'
 scp -q "$ROOT/selfmonitor/"*.py "$TARGET:/opt/voice-selfmonitor/app/selfmonitor/"
-scp -q "$ROOT/conference/__init__.py" "$ROOT/conference/media.py" "$ROOT/conference/rvc.py" \
+scp -q "$ROOT/conference/__init__.py" "$ROOT/conference/media.py" \
+  "$ROOT/conference/asterisk.py" \
   "$TARGET:/opt/voice-selfmonitor/app/conference/"
 
-echo "==> 2/6 python environment"
+echo "==> 2/7 python environment"
 ssh "$TARGET" '
 if [ ! -x /opt/voice-selfmonitor/venv/bin/python ]; then
   python3 -m venv /opt/voice-selfmonitor/venv
@@ -23,7 +27,7 @@ if [ ! -x /opt/voice-selfmonitor/venv/bin/python ]; then
 fi
 /opt/voice-selfmonitor/venv/bin/python -c "import httpx, websockets; print(\"deps ok\")"'
 
-echo "==> 3/6 credentials from the active conference runtime"
+echo "==> 3/7 credentials from the active conference runtime"
 ssh "$TARGET" '
 ARI_CONF=$(sudo docker inspect voice-conference-asterisk-1 --format "{{range .Mounts}}{{.Source}} -> {{.Destination}}{{println}}{{end}}" | grep "ari.conf" | cut -d" " -f1)
 sudo test -f "$ARI_CONF" || { echo "ari.conf not found"; exit 1; }
@@ -34,12 +38,13 @@ printf "SELFMONITOR_ARI_URL=http://127.0.0.1:8092/ari\nSELFMONITOR_ARI_USERNAME=
 sudo chmod 600 /etc/voice-selfmonitor.env
 echo "env written (password length ${#PASSWORD})"'
 
-echo "==> 4/6 systemd unit"
+echo "==> 4/7 systemd unit"
 scp -q "$ROOT/deploy/voice-selfmonitor.service" "$TARGET:/tmp/voice-selfmonitor.service"
 ssh "$TARGET" '
 sudo mv /tmp/voice-selfmonitor.service /etc/systemd/system/voice-selfmonitor.service
 sudo systemctl daemon-reload
-sudo systemctl enable --now voice-selfmonitor.service
+sudo systemctl enable voice-selfmonitor.service
+sudo systemctl restart voice-selfmonitor.service
 for i in $(seq 1 20); do
   sleep 1
   STATUS=$(curl -fsS -m 2 http://127.0.0.1:8096/healthz 2>/dev/null || true)
@@ -47,7 +52,7 @@ for i in $(seq 1 20); do
   [ "$i" = 20 ] && { echo "health timeout"; sudo journalctl -u voice-selfmonitor -n 20 --no-pager; exit 1; }
 done'
 
-echo "==> 5/6 dialplan extension 1999 (idempotent, with backup)"
+echo "==> 5/7 dialplan extension 1999 (idempotent, with backup)"
 ssh "$TARGET" '
 EXT=$(sudo docker inspect voice-conference-asterisk-1 --format "{{range .Mounts}}{{.Source}} -> {{.Destination}}{{println}}{{end}}" | grep "extensions.conf" | cut -d" " -f1)
 sudo test -f "$EXT" || { echo "extensions.conf not found"; exit 1; }
@@ -60,7 +65,7 @@ import sys
 path = sys.argv[1]
 text = open(path).read()
 anchor = "exten => _X.,1,Hangup(1)"
-route = """; Live self-monitor: hear your own voice as Phone Guy (voice-selfmonitor.service).
+route = """; Live browser audio mirror (voice-selfmonitor.service).
 exten => 1999,1,Stasis(selfmonitor)
  same => n,Hangup()
 
@@ -75,13 +80,18 @@ PYEOF
 fi
 sudo docker exec voice-conference-asterisk-1 asterisk -rx "dialplan show 1999@phoneguy-sip" | head -3'
 
-echo "==> 6/6 verify ARI application registered"
+echo "==> 6/7 private Caddy route and live page"
+ssh "$TARGET" "mkdir -p '$STAGE'"
+scp -q "$ROOT/deploy/patch-live-mirror-caddy.py" "$TARGET:$STAGE/patch-live-mirror-caddy.py"
+scp -q "$ROOT/web/live/index.html" "$ROOT/web/live/app.js" \
+  "$ROOT/web/live/audio-worklet.js" "$TARGET:$STAGE/"
+ssh "$TARGET" "sudo cp -a /etc/caddy/Caddyfile '$STAGE/Caddyfile.candidate' && sudo python3 '$STAGE/patch-live-mirror-caddy.py' '$STAGE/Caddyfile.candidate' && sudo caddy validate --config '$STAGE/Caddyfile.candidate' && sudo install -m 0644 '$STAGE/Caddyfile.candidate' /etc/caddy/Caddyfile && { sudo systemctl reload caddy || { sudo cp -a '/opt/voice-selfmonitor/backups/$STAMP/Caddyfile' /etc/caddy/Caddyfile; sudo systemctl reload caddy; exit 1; }; } && sudo install -m 0644 '$STAGE/index.html' /opt/voice-changer/web/live/index.html && sudo install -m 0644 '$STAGE/app.js' /opt/voice-changer/web/live/app.js && sudo install -m 0644 '$STAGE/audio-worklet.js' /opt/voice-changer/web/live/audio-worklet.js"
+
+echo "==> 7/7 verify relay and ARI application registered"
 ssh "$TARGET" '
-PASSWORD=$(sudo grep -oP "^SELFMONITOR_ARI_PASSWORD=\K.*" /etc/voice-selfmonitor.env)
 sudo docker exec voice-conference-asterisk-1 asterisk -rx "ari show apps" | grep -q selfmonitor && echo "ARI app registered"
 curl -fsS -m 3 http://127.0.0.1:8096/healthz; echo
-echo "DONE: dial 1999 from any registered phone"'
+curl -fsS -m 3 https://vm-voice-1.lan.awesomeio.ru/live/ | grep -q "app.js?v=2"
+echo "DONE: dial 1999, then start /live/"'
 
-echo "rollback:"
-echo "  ssh $TARGET \"sudo systemctl disable --now voice-selfmonitor && sudo rm /etc/voice-selfmonitor.env\""
-echo "  restore extensions.conf from its .backup-selfmonitor-* copy + asterisk -rx 'dialplan reload'"
+echo "backup: /opt/voice-selfmonitor/backups/$STAMP"

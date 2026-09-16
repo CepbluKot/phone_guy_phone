@@ -1,5 +1,5 @@
 [Unit]
-Description=Private Phone Guy self-monitor echo line (1999)
+Description=Private Phone Guy live browser audio mirror (1999)
 Wants=network-online.target docker.service
 After=network-online.target docker.service
 

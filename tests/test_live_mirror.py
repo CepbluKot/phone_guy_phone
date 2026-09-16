@@ -9,6 +9,7 @@ from websockets.exceptions import InvalidStatus
 
 from selfmonitor.service import MirrorRelay, MirrorService, ORIGIN, handle_publisher
 from selfmonitor.ari import SelfMonitorAri, parse_control
+from selfmonitor.live_check import rms
 
 
 FRAME = b"\x20\x03" * 960
@@ -173,3 +174,8 @@ def test_publisher_websocket_requires_private_origin_and_releases_audio_on_close
             assert relay.take_frame() == SILENCE
 
     asyncio.run(scenario())
+
+
+def test_live_check_distinguishes_synthetic_speech_from_silence():
+    assert rms(SILENCE) == 0
+    assert rms(FRAME) > .02

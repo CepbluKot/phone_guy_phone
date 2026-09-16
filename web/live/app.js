@@ -153,7 +153,7 @@ async function begin() {
     await s.ctx.resume();
     if (session !== s) return;
     if (s.ctx.sampleRate !== SAMPLE_RATE) throw new Error('Браузер не поддерживает аудио 48 кГц.');
-    await s.ctx.audioWorklet.addModule('audio-worklet.js?v=1');
+    await s.ctx.audioWorklet.addModule('audio-worklet.js?v=2');
     if (session !== s) return;
 
     s.node = new AudioWorkletNode(s.ctx, 'phone-audio', {
