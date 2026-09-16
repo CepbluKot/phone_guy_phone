@@ -1,22 +1,4 @@
-"""Echo line service: 1999 -> your live voice as Phone Guy in the earpiece.
-
-Wiring per call:
-
-    caller (PJSIP, Stasis selfmonitor)
-      + injection chan_websocket  -> mixing bridge "echo"  (caller hears only
-                                     the processed voice; mixing bridges never
-                                     feed a channel its own audio back)
-    snoop(spy=in) on the caller
-      + listener chan_websocket   -> mixing bridge "source" (listener receives
-                                     a pure copy of the caller's speech; the
-                                     injection audio is never visible here, so
-                                     there is no feedback loop)
-
-    listener --20 ms frames--> RvcStream (GPT v2) --1 s blocks--> injection
-
-Fail-closed: on any model or transport failure the call is torn down; the
-caller never hears the raw passthrough.
-"""
+"""SIP 1999 hears the browser's rendered `/live/` audio, never SIP input."""
 
 from __future__ import annotations
 
@@ -24,107 +6,118 @@ import asyncio
 from contextlib import suppress
 import os
 
-from conference.media import Pacer, split_pcm
-from conference.rvc import RvcStream
+from websockets.asyncio.server import serve
 
+from conference.media import FRAME_BYTES, Pacer
 from .ari import SelfMonitorAri
 
 
-DEFAULT_RVC_URL = "ws://127.0.0.1:8090/ws/rvc-v2"
+ORIGIN = "https://vm-voice-1.lan.awesomeio.ru"
+SILENCE_FRAME = bytes(FRAME_BYTES)
 
 
-class EchoSession:
+class MirrorRelay:
+    """One publisher, one replaceable frame; never accumulate old speech."""
+
+    def __init__(self):
+        self.publisher = None
+        self.current = None
+
+    def claim(self, publisher):
+        if self.publisher is not None:
+            return False
+        self.publisher = publisher
+        self.current = None
+        return True
+
+    def publish(self, publisher, frame):
+        if self.publisher is not publisher or not isinstance(frame, bytes) or len(frame) != FRAME_BYTES:
+            return False
+        self.current = frame
+        return True
+
+    def release(self, publisher):
+        if self.publisher is publisher:
+            self.publisher = None
+            self.current = None
+
+    def take_frame(self):
+        frame = self.current
+        self.current = None
+        return frame if frame is not None else SILENCE_FRAME
+
+
+async def handle_publisher(socket, relay):
+    if socket.request.path != "/ws/live-mirror":
+        await socket.close(code=1008)
+        return
+    owner = object()
+    if not relay.claim(owner):
+        await socket.close(code=1013)
+        return
+    try:
+        async for frame in socket:
+            if not relay.publish(owner, frame):
+                await socket.close(code=1003)
+                return
+    finally:
+        relay.release(owner)
+
+
+class MirrorSession:
+    """Answer a caller and pace browser-rendered PCM into one injection channel."""
+
     def __init__(self, service, channel_id):
         self.service = service
         self.channel_id = channel_id
-        self.echo_bridge = "selfmonitor-echo-" + channel_id
-        self.source_bridge = "selfmonitor-source-" + channel_id
+        self.bridge_id = "selfmonitor-mirror-" + channel_id
         self.injection = None
-        self.listener = None
-        self.model = None
-        self.tasks = []
+        self.task = None
         self.closed = False
 
     async def run(self):
-        service = self.service
-        ari = service.ari
+        self.task = asyncio.current_task()
+        ari = self.service.ari
         try:
-            print(f"selfmonitor: session start for {self.channel_id}", flush=True)
             await ari.answer(self.channel_id)
-            self.injection = await ari.open_media("echo-" + self.channel_id, receive=False)
-            await ari.create_bridge(self.echo_bridge)
-            await ari.add_to_bridge(self.echo_bridge, self.channel_id)
-            await ari.add_to_bridge(self.echo_bridge, self.injection.channel_id)
-
-            await ari.snoop(self.channel_id, "selfmonitor-snoop-" + self.channel_id)
-            self.listener = await ari.open_media("source-" + self.channel_id, receive=True)
-            await ari.create_bridge(self.source_bridge)
-            await ari.add_to_bridge(self.source_bridge, "selfmonitor-snoop-" + self.channel_id)
-            await ari.add_to_bridge(self.source_bridge, self.listener.channel_id)
-            print(f"selfmonitor: bridges ready for {self.channel_id}", flush=True)
-
-            self.model = await service.model_factory()
-            print(f"selfmonitor: model ready for {self.channel_id}", flush=True)
-            self.tasks = [
-                asyncio.create_task(self._forward(), name="echo-forward"),
-                asyncio.create_task(self._inject(), name="echo-inject"),
-            ]
-            await asyncio.gather(*self.tasks)
-        except asyncio.CancelledError:
-            raise
-        except Exception as error:
-            import traceback
-
-            traceback.print_exc()
-            await self.close()
-            raise
-        finally:
-            await self.close()
-
-    async def _forward(self):
-        while True:
-            frame = await self.listener.recv_pcm()
-            await self.model.send(frame)
-
-    async def _inject(self):
-        pacer = Pacer()
-        async for block in self.model.outputs():
-            for frame in split_pcm(block):
+            self.injection = await ari.open_media("mirror-" + self.channel_id, receive=False)
+            await ari.create_bridge(self.bridge_id)
+            await ari.add_to_bridge(self.bridge_id, self.channel_id)
+            await ari.add_to_bridge(self.bridge_id, self.injection.channel_id)
+            pacer = Pacer()
+            while True:
                 await pacer.wait()
-                await self.injection.send_pcm(frame)
+                await self.injection.send_pcm(self.service.relay.take_frame())
+        except asyncio.CancelledError:
+            pass
+        finally:
+            await self._cleanup()
 
     async def close(self):
+        if self.task is not None and self.task is not asyncio.current_task():
+            self.task.cancel()
+            await asyncio.gather(self.task, return_exceptions=True)
+        else:
+            await self._cleanup()
+
+    async def _cleanup(self):
         if self.closed:
             return
         self.closed = True
-        for task in self.tasks:
-            task.cancel()
-        if self.tasks:
-            await asyncio.gather(*self.tasks, return_exceptions=True)
-        if self.model is not None:
-            with suppress(Exception):
-                await self.model.close()
-        if self.listener is not None:
-            with suppress(Exception):
-                await self.listener.close()
         if self.injection is not None:
             with suppress(Exception):
                 await self.injection.close()
-        ari = self.service.ari
-        await ari.delete_bridge(self.source_bridge)
-        await ari.delete_bridge(self.echo_bridge)
+        await self.service.ari.delete_bridge(self.bridge_id)
         with suppress(Exception):
-            await ari.request("DELETE", "/channels/selfmonitor-snoop-" + self.channel_id)
-        with suppress(Exception):
-            await ari.hangup_busy(self.channel_id)
+            await self.service.ari.hangup(self.channel_id)
 
 
-class EchoService:
-    """One live echo call at a time: the RVC worker serves one session anyway."""
+class MirrorService:
+    """One SIP listener at a time; it does not own or start the RVC model."""
 
-    def __init__(self, ari, *, model_factory, on_error=None):
+    def __init__(self, ari, relay, *, on_error=None):
         self.ari = ari
-        self.model_factory = model_factory
+        self.relay = relay
         self.on_error = on_error
         self.session = None
         self.lock = asyncio.Lock()
@@ -134,20 +127,26 @@ class EchoService:
             if self.session is not None and not self.session.closed:
                 await self.ari.hangup_busy(channel_id)
                 return
-            self.session = EchoSession(self, channel_id)
-            session = self.session
+            session = MirrorSession(self, channel_id)
+            self.session = session
         try:
             await session.run()
         except Exception as error:
             if self.on_error is not None:
                 with suppress(Exception):
                     self.on_error(channel_id, error)
+        finally:
+            async with self.lock:
+                if self.session is session:
+                    self.session = None
 
     async def handle_destroyed(self, channel_id):
         async with self.lock:
             session = self.session
             if session is not None and session.channel_id == channel_id:
                 self.session = None
+            else:
+                session = None
         if session is not None:
             await session.close()
 
@@ -159,14 +158,9 @@ class EchoService:
             await session.close()
 
 
-async def default_model_factory():
-    model = RvcStream(os.environ.get("SELFMONITOR_RVC_URL", DEFAULT_RVC_URL))
-    return await model.__aenter__()
-
-
 async def main():
-    loop = asyncio.get_running_loop()
-    ready = loop.create_future()
+    ready = asyncio.get_running_loop().create_future()
+    relay = MirrorRelay()
 
     async def on_stasis(channel_id, endpoint):
         await service.handle_stasis_start(channel_id, endpoint)
@@ -180,18 +174,19 @@ async def main():
         os.environ.get("SELFMONITOR_ARI_PASSWORD", ""),
         stasis_handler=on_stasis,
         destroyed_handler=on_destroyed,
-        spy_direction=os.environ.get("SELFMONITOR_SPY", "in"),
     )
-    service = EchoService(ari, model_factory=default_model_factory)
+    service = MirrorService(ari, relay)
 
     health_port = int(os.environ.get("SELFMONITOR_HEALTH_PORT", "8096"))
+    mirror_port = int(os.environ.get("SELFMONITOR_MIRROR_PORT", "8097"))
     health = await asyncio.start_server(_health_handler(ready), "127.0.0.1", health_port)
-
     async with ari:
-        if not ready.done():
+        async with health, serve(
+            lambda socket: handle_publisher(socket, relay), "127.0.0.1", mirror_port,
+            origins=[ORIGIN], max_size=FRAME_BYTES, max_queue=4, compression=None,
+        ):
             ready.set_result(True)
-        print("selfmonitor: connected to ARI, listening for 1999", flush=True)
-        async with health:
+            print("selfmonitor: listening for browser mirror and SIP 1999", flush=True)
             await health.serve_forever()
 
 

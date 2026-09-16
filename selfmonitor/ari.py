@@ -300,6 +300,10 @@ class SelfMonitorAri:
             await self.request("POST", f"/channels/{channel_id}/hangup",
                                params={"cause": "17"})
 
+    async def hangup(self, channel_id):
+        with suppress(Exception):
+            await self.request("DELETE", "/channels/" + quote(channel_id, safe=""))
+
     async def create_bridge(self, bridge_id):
         await self.request("POST", "/bridges",
                            params={"bridgeId": bridge_id, "type": "mixing"})

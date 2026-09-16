@@ -44,14 +44,14 @@
 - [ ] Replace the old echo behavior tests with failing tests for: silence before publisher, nonzero mirror audio in an already active call, silence after publisher disconnect, stale frame replacement, duplicate publisher rejection, second SIP caller busy, and cleanup without raw passthrough.
 - [ ] Run `python -m pytest -q tests/test_selfmonitor.py`; confirm the new tests fail against `EchoService`.
 - [ ] Implement the relay and mirror-only SIP session in `selfmonitor/service.py`. Keep ARI creation/cleanup owned and release the bridge/channel on failure or hangup. Limit WebSocket frame size to 1920 bytes and enforce `Origin: https://vm-voice-1.lan.awesomeio.ru`.
-- [ ] Serve the relay WebSocket on loopback port 8096 alongside `/healthz`; keep one publisher and one SIP listener. On no publisher, emit zero PCM continuously at 20 ms pacing.
+- [ ] Serve the relay WebSocket on loopback port 8097, keeping the existing `/healthz` on 8096; keep one publisher and one SIP listener. On no publisher, emit zero PCM continuously at 20 ms pacing.
 - [ ] Run the focused pytest suite; commit the relay and SIP change.
 
 ### Task 3: Durable private deployment and acceptance
 
 **Files:** Modify `deploy/Caddyfile`, `deploy/deploy-selfmonitor.sh`, `deploy/voice-selfmonitor.service`, `docs/SELFMONITOR_2026-09-16.md`, deployment tests, and a live mirror check.
 
-**Interfaces:** Caddy routes only `/ws/live-mirror` to `127.0.0.1:8096`; `/live/`, `/call/`, `/ws/rvc-v2`, and `/ws/conference` remain unchanged. The deploy script updates only the selfmonitor app/service, its private route, and 1999 dialplan entry, with backups and rollback.
+**Interfaces:** Caddy routes only `/ws/live-mirror` to `127.0.0.1:8097`; `/live/`, `/call/`, `/ws/rvc-v2`, and `/ws/conference` remain unchanged. The deploy script updates only the selfmonitor app/service, its private route, and 1999 dialplan entry, with backups and rollback.
 
 - [ ] Add failing deployment tests that verify a private `/ws/live-mirror` route, a durable 1999 dialplan route, no Asterisk/RVC restart, and preservation of the active `/call/` route and phone contact.
 - [ ] Run those tests; confirm they fail on the current deployment files.
