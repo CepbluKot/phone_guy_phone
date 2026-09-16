@@ -17,6 +17,7 @@ import sys
 import time
 import uuid
 
+import httpx
 from websockets.asyncio.client import connect
 
 from conference.asterisk import AsteriskRoom
@@ -46,6 +47,20 @@ def credentials():
     return values
 
 
+async def add_when_stasis(room, bridge_id, channel_id):
+    deadline = asyncio.get_running_loop().time() + 5
+    while True:
+        try:
+            await room.add_to_bridge(bridge_id, channel_id)
+            return
+        except httpx.HTTPStatusError as error:
+            if (error.response.status_code != 422 or
+                    error.response.json().get("message") != "Channel not in Stasis application" or
+                    asyncio.get_running_loop().time() >= deadline):
+                raise
+            await asyncio.sleep(.1)
+
+
 async def check():
     config = credentials()
     room = AsteriskRoom(
@@ -67,7 +82,7 @@ async def check():
                 "endpoint": "Local/1999@phoneguy-sip", "app": room.app,
                 "channelId": call_id, "formats": "slin48",
             })
-            await room.add_to_bridge(bridge_id, call_id)
+            await add_when_stasis(room, bridge_id, call_id)
 
             async def collect():
                 while True:

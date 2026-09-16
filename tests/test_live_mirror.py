@@ -7,9 +7,9 @@ from websockets.asyncio.client import connect
 from websockets.asyncio.server import serve
 from websockets.exceptions import InvalidStatus
 
-from selfmonitor.service import MirrorRelay, MirrorService, ORIGIN, handle_publisher
+from selfmonitor.service import MirrorRelay, MirrorService, MirrorSession, ORIGIN, handle_publisher
 from selfmonitor.ari import SelfMonitorAri, parse_control
-from selfmonitor.live_check import rms
+from selfmonitor.live_check import add_when_stasis, rms
 
 
 FRAME = b"\x20\x03" * 960
@@ -126,6 +126,18 @@ def test_second_caller_is_busy_without_disrupting_first():
     asyncio.run(scenario())
 
 
+def test_call_destroyed_before_session_starts_never_reopens_bridge():
+    async def scenario():
+        ari, relay = Ari(), MirrorRelay()
+        session = MirrorSession(MirrorService(ari, relay), "gone")
+        await session.close()
+        await session.run()
+        assert not any(action[0] in {"answer", "open_media", "create_bridge", "add"}
+                       for action in ari.actions)
+
+    asyncio.run(scenario())
+
+
 def test_ari_hangup_targets_only_the_owned_call_channel():
     async def scenario():
         ari = SelfMonitorAri("http://127.0.0.1:8092/ari", "phoneguy", "unused",
@@ -179,3 +191,25 @@ def test_publisher_websocket_requires_private_origin_and_releases_audio_on_close
 def test_live_check_distinguishes_synthetic_speech_from_silence():
     assert rms(SILENCE) == 0
     assert rms(FRAME) > .02
+
+
+def test_live_check_waits_for_local_caller_to_enter_stasis():
+    import httpx
+
+    class Room:
+        def __init__(self):
+            self.attempts = 0
+
+        async def add_to_bridge(self, bridge, channel):
+            self.attempts += 1
+            if self.attempts == 1:
+                request = httpx.Request("POST", "http://ari/bridges/test/addChannel")
+                response = httpx.Response(422, text='{"message":"Channel not in Stasis application"}', request=request)
+                raise httpx.HTTPStatusError("not ready", request=request, response=response)
+
+    async def scenario():
+        room = Room()
+        await add_when_stasis(room, "bridge", "channel")
+        assert room.attempts == 2
+
+    asyncio.run(scenario())

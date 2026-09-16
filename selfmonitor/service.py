@@ -76,6 +76,8 @@ class MirrorSession:
         self.closed = False
 
     async def run(self):
+        if self.closed:
+            return
         self.task = asyncio.current_task()
         ari = self.service.ari
         try:
