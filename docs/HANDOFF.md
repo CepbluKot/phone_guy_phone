@@ -1,7 +1,28 @@
 # Phone Guy: начать здесь
 
-Обновлено **2026-09-06 после реального развёртывания**.
-**Проект уже работает. Не разрабатывать и не развёртывать заново без новой задачи.**
+## Актуальная точка входа: SIP, 2026-09-11
+
+Целевой контур находится в worktree
+`/home/oleg/Documents/voice-changer/.worktrees/fcpe-canary-productization`, ветка
+`feature/fcpe-canary-productization`. На VM209 работают только необходимые для
+телефонии `voice-rvc.service`, `voice-conference-asterisk-1` и
+`voice-conference-controller-1`; браузерный контейнер остановлен.
+
+Три SIP-аккаунта: `1983=original`, `1987=phone-guy GPT v2`, `2014=original`;
+комната `600`. Текущие секреты получать только командой
+`deploy/show-sip-phone-setup.sh <номер>`. Порядок подключения Yealink и
+виртуальный E2E: [SIP_PHONE_T21P_E2_SETUP.md](SIP_PHONE_T21P_E2_SETUP.md).
+Актуальные доказательства и release: [LIVE_STATUS.md](LIVE_STATUS.md).
+
+Не возвращаться к браузерным демкам и FCPE-canary без отдельной задачи. Не
+трогать VM208/Frigate, GPU passthrough, DNS, публичный firewall или ресурсы VM.
+
+Ниже — историческая документация исходной браузерной версии; она сохранена для
+объяснения RVC-протокола, но её пути и версии не являются текущим handoff.
+
+---
+
+Обновлено **2026-09-06 после реального развёртывания браузерной версии**.
 
 ## 1. Что сейчас работает
 

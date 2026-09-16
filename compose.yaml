@@ -2,7 +2,9 @@ services:
   voice:
     build: .
     image: voice-changer:current
-    restart: unless-stopped
+    # The browser demo is retained only as rollback material. SIP/Asterisk is
+    # the product, so this container must stay down across Docker/VM restarts.
+    restart: "no"
     ports: ["192.168.20.70:8080:8080"]
     mem_limit: 512m
     cpus: 2.0

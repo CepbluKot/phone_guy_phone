@@ -8,6 +8,7 @@ import subprocess
 ROOT = Path(__file__).parents[1]
 SCRIPT = ROOT / "deploy" / "deploy-conference.sh"
 ASTERISK_HEALTHCHECK = ROOT / "conference" / "asterisk" / "healthcheck.sh"
+PHONE_SETUP = ROOT / "deploy" / "show-sip-phone-setup.sh"
 STAMP = "20260906T180000Z"
 
 
@@ -57,10 +58,26 @@ def test_rollout_uploads_only_conference_and_http_sources_without_mutating_venv_
     assert "rsync " in commands
     assert "conference" in commands
     assert "app" in commands and "web" in commands
+    assert "live-sip-preflight.py" in commands
+    assert "sipp-auth-conference.xml" in commands
     assert "rvc_service" not in commands
     assert "experiments" not in commands
     for prohibited in ("ufw", "iptables", "nft", "netplan", "voice-rvc/venv", "VM208", "frigate"):
         assert prohibited not in commands
+
+
+def test_worktree_deploy_uses_the_shared_repository_python_environment(tmp_path):
+    """The feature worktree has no .venv; its parent repository owns one."""
+    source = SCRIPT.read_text()
+    common_dir = subprocess.run(
+        ["git", "-C", ROOT, "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        text=True, capture_output=True, check=True,
+    ).stdout.strip()
+
+    assert (Path(common_dir).parent / ".venv" / "bin" / "python").is_file()
+    assert 'git -C "$repo" rev-parse --path-format=absolute --git-common-dir' in source
+    assert 'python_bin="$main_repo/.venv/bin/python"' in source
+    assert '"$python_bin" tests/live-conference.py' in source
 
 
 def test_failed_health_gate_runs_scoped_rollback_and_never_reports_success(tmp_path):
@@ -125,7 +142,8 @@ def test_asterisk_read_only_root_keeps_bundled_docs_and_moves_only_astdb_to_tmpf
 
     assert "read_only: true" in compose
     assert "/var/run/asterisk" in compose
-    assert "/var/lib/asterisk" not in compose
+    assert "/var/lib/asterisk/sounds/phoneguy-bot:ro" in compose
+    assert "/var/lib/asterisk/sounds:/" not in compose
     assert "/var/log/asterisk" in compose
     assert "astdbdir => /var/run/asterisk/astdb" in asterisk
 
@@ -199,3 +217,40 @@ def test_preflight_allows_only_the_idle_owned_conference_to_hold_its_ports():
     assert 'voice-conference-asterisk-1' in source
     assert 'voice-conference-controller-1' in source
     assert '"status":"idle"' in source
+
+
+def test_successful_sip_deploy_stops_legacy_web_and_proves_rvc_was_not_restarted():
+    source = SCRIPT.read_text()
+    compose = (ROOT / "compose.yaml").read_text()
+
+    live_gate = source.index('tests/live-conference.py --seconds 10')
+    web_disable = source.index('docker update --restart=no voice-changer-voice-1')
+    web_stop = source.index('docker stop voice-changer-voice-1')
+    success = source.index('echo "DEPLOY_COMPLETE', web_stop)
+    assert live_gate < web_disable < web_stop < success
+    assert 'restart: "no"' in compose
+    assert "voice-rvc-service-state-before" in source
+    assert "voice-rvc.service changed during conference deploy" in source
+    assert "voice-conference-asterisk-1" in source[web_stop:success]
+    assert "voice-conference-controller-1" in source[web_stop:success]
+
+
+def test_phone_setup_helper_is_vm209_only_and_reveals_one_requested_account():
+    source = PHONE_SETUP.read_text()
+
+    assert "ubuntu@192.168.20.70" in source
+    assert "1983|1987|2014" in source
+    assert "sip-$extension-password" in source
+    assert "docker inspect voice-conference-asterisk-1" in source
+    assert "Password:" in source
+    assert "Dial: 600" in source
+    assert "cat /etc/asterisk/pjsip.conf" not in source
+
+
+def test_deploy_preserves_existing_sip_account_credentials():
+    """A routine rollout must not silently de-register physical SIP phones."""
+    source = SCRIPT.read_text()
+
+    assert "existing_sip_password" in source
+    assert 'cp "$existing_sip_password" "$runtime/asterisk/sip-$extension-password"' in source
+    assert 'password=$(openssl rand -hex 32)' in source

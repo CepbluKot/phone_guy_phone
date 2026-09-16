@@ -102,6 +102,16 @@ if [ "$#" -ne 0 ]; then
   echo "Usage: $0" >&2
   exit 2
 fi
+git_common_dir=$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir)
+main_repo=$(dirname "$git_common_dir")
+if [ -x "$repo/.venv/bin/python" ]; then
+  python_bin="$repo/.venv/bin/python"
+elif [ -x "$main_repo/.venv/bin/python" ]; then
+  python_bin="$main_repo/.venv/bin/python"
+else
+  echo "No project Python environment found for conference checks" >&2
+  exit 2
+fi
 
 stamp=${DEPLOY_CONFERENCE_STAMP:-$(date -u +%Y%m%dT%H%M%SZ)}
 validate_stamp "$stamp"
@@ -143,14 +153,14 @@ trap rollback_on_error EXIT
 
 required=(
   .dockerignore Dockerfile compose.yaml requirements.txt requirements.lock app web
-  conference deploy/Caddyfile deploy/compose.conference.yaml deploy/deploy-conference.sh
-  tests/live-conference.py
+  conference deploy/Caddyfile deploy/compose.conference.yaml deploy/deploy-conference.sh deploy/start-fnaf-video-sequence.py deploy/voice-routing.yaml
+  tests/live-conference.py tests/live-sip-preflight.py tests/fixtures/sipp-auth-conference.xml
 )
 for item in "${required[@]}"; do
   test -e "$item" || { echo "Missing rollout input: $item" >&2; exit 2; }
 done
 if [ "${DEPLOY_CONFERENCE_SKIP_CHECKS:-0}" != 1 ]; then
-  .venv/bin/pytest -q
+  "$python_bin" -m pytest -q
   node --test tests/*.test.cjs
   git diff --check
 fi
@@ -158,8 +168,8 @@ fi
 ssh "$target" "rm -rf '$stage' && mkdir -p '$stage'"
 rsync -a --relative --exclude='__pycache__' --exclude='*.pyc' \
   .dockerignore Dockerfile compose.yaml requirements.txt requirements.lock app web conference \
-  deploy/Caddyfile deploy/compose.conference.yaml deploy/deploy-conference.sh \
-  tests/live-conference.py "$target:$stage/"
+  deploy/Caddyfile deploy/compose.conference.yaml deploy/deploy-conference.sh deploy/start-fnaf-video-sequence.py deploy/voice-routing.yaml \
+  tests/live-conference.py tests/live-sip-preflight.py tests/fixtures/sipp-auth-conference.xml "$target:$stage/"
 
 # run_rollback first checks for the snapshot, so this is harmless for an early
 # preflight failure and protects failures after the remote snapshot is made.
@@ -200,6 +210,9 @@ assert v.get("status") == "ready" and not v.get("active") and not v.get("running
 '
 
 install -d -m 0750 "$backup" "$release" "$runtime/asterisk" "$fixtures"
+systemctl show voice-rvc.service \
+  -p NRestarts -p ExecMainStartTimestampMonotonic \
+  > "$backup/voice-rvc-service-state-before"
 cp /etc/caddy/Caddyfile "$backup/Caddyfile"
 cp /opt/voice-changer/deploy/Caddyfile "$backup/source-Caddyfile"
 docker image inspect voice-changer:current --format '{{.Id}}' > "$backup/prior-http-image-id"
@@ -220,8 +233,36 @@ password=$(openssl rand -hex 32)
 printf '%s\n' "$password" > "$runtime/asterisk/ari-password"
 sed "s/__ARI_PASSWORD__/$password/" "$release/conference/asterisk/ari.conf.template" > "$runtime/asterisk/ari.conf"
 sed 's/^bindaddr=.*/bindaddr=0.0.0.0/' "$release/conference/asterisk/http.conf" > "$runtime/asterisk/http.conf"
+cp "$release/conference/asterisk/pjsip.conf.template" "$runtime/asterisk/pjsip.conf"
+install -m 0644 "$release/conference/asterisk/extensions.conf" "$runtime/asterisk/extensions.conf"
+install -m 0644 "$release/conference/asterisk/modules.conf" "$runtime/asterisk/modules.conf"
+install -d -m 0755 "$runtime/asterisk/sounds"
+install -m 0644 "$release/conference/asterisk/sounds/phoneguy.wav" "$runtime/asterisk/sounds/phoneguy.wav"
+install -m 0644 "$release/conference/asterisk/sounds/scary-music.wav" "$runtime/asterisk/sounds/scary-music.wav"
+install -m 0644 "$release/conference/asterisk/sounds/night5-then-scary.wav" "$runtime/asterisk/sounds/night5-then-scary.wav"
+install -m 0644 "$release/conference/asterisk/sounds/mr-beast-phoneguy.wav" "$runtime/asterisk/sounds/mr-beast-phoneguy.wav"
+install -m 0644 "$release/conference/asterisk/sounds/fnaf1-night1-original.wav" "$runtime/asterisk/sounds/fnaf1-night1-original.wav"
+install -m 0750 "$release/deploy/start-fnaf-video-sequence.py" /usr/local/sbin/start-fnaf-video-sequence
+for extension in 1983 1987 2014; do
+  existing_sip_password=
+  if docker inspect voice-conference-asterisk-1 >/dev/null 2>&1; then
+    existing_pjsip=$(docker inspect voice-conference-asterisk-1 --format '{{range .Mounts}}{{if eq .Destination "/etc/asterisk/pjsip.conf"}}{{.Source}}{{end}}{{end}}')
+    if [ -n "$existing_pjsip" ]; then
+      existing_sip_password="$(dirname "$existing_pjsip")/sip-$extension-password"
+    fi
+  fi
+  if [ -n "$existing_sip_password" ] && [ -s "$existing_sip_password" ]; then
+    cp "$existing_sip_password" "$runtime/asterisk/sip-$extension-password"
+  else
+    password=$(openssl rand -hex 32)
+    printf '%s\n' "$password" > "$runtime/asterisk/sip-$extension-password"
+  fi
+  password=$(cat "$runtime/asterisk/sip-$extension-password")
+  sed -i "s/__SIP_${extension}_PASSWORD__/$password/" "$runtime/asterisk/pjsip.conf"
+done
+install -m 0644 "$release/deploy/voice-routing.yaml" "$runtime/voice-routing.yaml"
 chown -R 10001:10001 "$runtime/asterisk"
-chmod 0600 "$runtime/asterisk/ari.conf" "$runtime/asterisk/ari-password"
+chmod 0600 "$runtime/asterisk/ari.conf" "$runtime/asterisk/ari-password" "$runtime/asterisk/pjsip.conf" "$runtime/asterisk"/sip-*-password
 chmod 0644 "$runtime/asterisk/http.conf"
 
 monitor="$backup/asterisk-build-mem-kib"
@@ -316,6 +357,28 @@ test "$healthy" -eq 1
 if [ -n "${DEPLOY_CONFERENCE_LIVE_CLIENT:-}" ]; then
   "$DEPLOY_CONFERENCE_LIVE_CLIENT"
 else
-  .venv/bin/python tests/live-conference.py --seconds 10
+  "$python_bin" tests/live-conference.py --seconds 10
 fi
+ssh "$target" sudo bash -s -- "$stamp" <<'REMOTE_SIP_ONLY'
+set -euo pipefail
+stamp=$1
+before=/opt/voice-conference/backups/$stamp/voice-rvc-service-state-before
+after=$(mktemp)
+trap 'rm -f "$after"' EXIT
+systemctl show voice-rvc.service \
+  -p NRestarts -p ExecMainStartTimestampMonotonic > "$after"
+cmp -s "$before" "$after" || {
+  echo "voice-rvc.service changed during conference deploy" >&2
+  exit 1
+}
+docker update --restart=no voice-changer-voice-1 >/dev/null
+docker stop voice-changer-voice-1 >/dev/null
+test "$(docker inspect voice-conference-asterisk-1 --format '{{.State.Health.Status}}')" = healthy
+test "$(docker inspect voice-conference-controller-1 --format '{{.State.Health.Status}}')" = healthy
+curl -fsS http://127.0.0.1:8090/healthz | python3 -c '
+import json, sys
+value = json.load(sys.stdin)
+assert value == {"status": "ready", "active": False, "running": False, "queuedWindows": 0}
+'
+REMOTE_SIP_ONLY
 echo "DEPLOY_COMPLETE stamp=$stamp backup=$backup"

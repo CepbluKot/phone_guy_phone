@@ -5,12 +5,19 @@ services:
     mem_limit: 256m
     cpus: 0.5
     pids_limit: 128
-    ports: ["127.0.0.1:8092:8092"]
+    ports:
+      - "127.0.0.1:8092:8092"
+      - "192.168.20.70:5060:5060/udp"
+      - "192.168.20.70:10000-10019:10000-10019/udp"
     volumes:
       - "${CONFERENCE_RUNTIME:?CONFERENCE_RUNTIME is required}/asterisk/ari.conf:/etc/asterisk/ari.conf:ro"
       # The container must listen on its eth0 address for Docker's loopback-only
       # port publication; the host-visible ARI socket remains 127.0.0.1:8092.
       - "${CONFERENCE_RUNTIME}/asterisk/http.conf:/etc/asterisk/http.conf:ro"
+      - "${CONFERENCE_RUNTIME}/asterisk/pjsip.conf:/etc/asterisk/pjsip.conf:ro"
+      - "${CONFERENCE_RUNTIME}/asterisk/extensions.conf:/etc/asterisk/extensions.conf:ro"
+      - "${CONFERENCE_RUNTIME}/asterisk/modules.conf:/etc/asterisk/modules.conf:ro"
+      - "${CONFERENCE_RUNTIME}/asterisk/sounds:/var/lib/asterisk/sounds/phoneguy-bot:ro"
     read_only: true
     tmpfs:
       - /tmp
@@ -37,9 +44,11 @@ services:
       CONFERENCE_ARI_USERNAME: phoneguy
       CONFERENCE_FIXTURE_DIR: ${CONFERENCE_FIXTURES:?CONFERENCE_FIXTURES is required}
       CONFERENCE_RVC_URL: ws://127.0.0.1:8090/ws/rvc-v2
-    command: ["sh", "-c", "export CONFERENCE_ARI_PASSWORD=$(cat /run/conference/ari-password); exec uvicorn conference.server:app --host 127.0.0.1 --port 8091 --workers 1 --ws-max-size 1024 --ws-max-queue 4 --ws-per-message-deflate false"]
+      CONFERENCE_ROUTING_FILE: /run/conference/voice-routing.yaml
+    command: ["sh", "-c", "export CONFERENCE_ARI_PASSWORD=$(cat /run/conference/ari-password); exec uvicorn conference.server:app --host 127.0.0.1 --port 8091 --workers 1 --ws-max-size 4096 --ws-max-queue 4 --ws-per-message-deflate false"]
     volumes:
       - "${CONFERENCE_RUNTIME:?CONFERENCE_RUNTIME is required}/asterisk/ari-password:/run/conference/ari-password:ro"
+      - "${CONFERENCE_RUNTIME}/voice-routing.yaml:/run/conference/voice-routing.yaml:ro"
       - "${CONFERENCE_FIXTURES:?CONFERENCE_FIXTURES is required}:${CONFERENCE_FIXTURES}:ro"
     read_only: true
     tmpfs: [/tmp]

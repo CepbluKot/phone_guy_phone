@@ -1,5 +1,10 @@
 # Живая демка: `infer/rtrvc.py` на `voice-claude.lan.awesomeio.ru`
 
+> Архив RND от 2026-09-07. Описанные ниже четыре варианта и временные
+> `/tmp`-процессы больше не являются текущей системой. Актуальный managed
+> FCPE-only canary (один вариант, systemd, release/rollback, live acceptance)
+> описан в [FCPE_CANARY_OPERATIONS_2026-09-08.md](FCPE_CANARY_OPERATIONS_2026-09-08.md).
+
 Дата 2026-09-07. По запросу — реализовал на VM209 метод с лучшим результатом
 из [LATENCY_RESEARCH_SONNET_2026-09-07.md](LATENCY_RESEARCH_SONNET_2026-09-07.md)
 как настоящий работающий сервис, на собственном домене, с двумя демками:

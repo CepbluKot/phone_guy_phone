@@ -164,6 +164,9 @@ class AsteriskRoom:
         connect=websocket_connect,
         timeout=10,
         receive_queue_frames=100,
+        app_name="phoneguy-demo",
+        stasis_handler=None,
+        destroyed_handler=None,
     ):
         if receive_queue_frames < 1:
             raise ValueError("invalid_receive_queue_size")
@@ -174,12 +177,18 @@ class AsteriskRoom:
         self.connect = connect
         self.timeout = timeout
         self.receive_queue_frames = receive_queue_frames
-        self.app = "phoneguy-demo-" + uuid.uuid4().hex
+        if not isinstance(app_name, str) or not app_name:
+            raise ValueError("invalid_asterisk_app")
+        self.app = app_name if app_name == "phoneguy-sip" else app_name + "-" + uuid.uuid4().hex
+        self.stasis_handler = stasis_handler
+        self.destroyed_handler = destroyed_handler
         self.owned = set()
         self.channels = {}
+        self.sip_channels = set()
         self.up = {}
         self.events = None
         self.events_task = None
+        self.handler_tasks = set()
         self.error = None
         self.closed = False
 
@@ -230,6 +239,8 @@ class AsteriskRoom:
                 channel_id = channel.get("id")
                 if channel.get("state") == "Up" and channel_id in self.up:
                     self.up[channel_id].set()
+                if event.get("type") == "StasisStart":
+                    self._dispatch_stasis(event, channel)
                 if (
                     event.get("type") == "ChannelDestroyed"
                     and channel_id in self.channels
@@ -237,6 +248,13 @@ class AsteriskRoom:
                     self.channels[channel_id].fail(
                         ConnectionError("asterisk_channel_destroyed")
                     )
+                if (
+                    event.get("type") in {"StasisEnd", "ChannelDestroyed"}
+                    and channel_id in self.sip_channels
+                ):
+                    self.sip_channels.discard(channel_id)
+                    if self.destroyed_handler:
+                        self._dispatch(self.destroyed_handler, channel_id)
         except asyncio.CancelledError:
             raise
         except Exception as error:
@@ -246,13 +264,50 @@ class AsteriskRoom:
             for channel in self.channels.values():
                 channel.fail(error)
 
+    def _dispatch_stasis(self, event, channel):
+        if event.get("application") != self.app or self.stasis_handler is None:
+            return
+        channel_id = channel.get("id")
+        name = channel.get("name")
+        if not isinstance(channel_id, str) or not isinstance(name, str):
+            return
+        prefix = "PJSIP/"
+        if not name.startswith(prefix):
+            return
+        endpoint = name[len(prefix):].partition("-")[0]
+        if not endpoint:
+            return
+        self.sip_channels.add(channel_id)
+        self._dispatch(self.stasis_handler, channel_id, endpoint)
+
+    def _dispatch(self, handler, *args):
+        if not args or not isinstance(args[0], str):
+            return
+        task = asyncio.create_task(handler(*args), name="asterisk-event-handler")
+        self.handler_tasks.add(task)
+        task.add_done_callback(self.handler_tasks.discard)
+
     async def open_channel(self, role):
         if role not in {"A", "B", "C", "listener"}:
             raise ValueError("invalid_asterisk_role")
+        return await self._open_media(role, receive=role == "listener", continue_to_demo=True)
+
+    async def open_media(self, name, *, receive=False):
+        """Create a controller-owned chan_websocket channel.
+
+        Unlike browser-demo channels, this media endpoint remains under ARI
+        control and is placed by ``SipSessionManager`` in an explicit bridge.
+        It must never fall through to the demo ConfBridge dialplan.
+        """
+        if not isinstance(name, str) or not name or len(name) > 96:
+            raise ValueError("invalid_asterisk_media_name")
+        return await self._open_media(name, receive=receive, continue_to_demo=False)
+
+    async def _open_media(self, name, *, receive, continue_to_demo):
         if self.closed or self.events is None or self.error:
             raise ConnectionError("asterisk_room_unavailable")
 
-        channel_id = f"{self.app}-{role}-{uuid.uuid4().hex}"
+        channel_id = f"{self.app}-{name}-{uuid.uuid4().hex}"
         path = f"/channels/{channel_id}"
         self.owned.add(channel_id)
         self.up[channel_id] = asyncio.Event()
@@ -318,7 +373,9 @@ class AsteriskRoom:
             ):
                 raise ValueError("invalid_media_start")
 
-            channel = MediaChannel(self, channel_id, role, media_socket)
+            channel = MediaChannel(
+                self, channel_id, "listener" if receive else "injection", media_socket
+            )
             self.channels[channel_id] = channel
             channel.reader = asyncio.create_task(channel.read())
             await self.request("POST", path + "/dial", params={"timeout": 10})
@@ -328,11 +385,12 @@ class AsteriskRoom:
                 raise self.error
             if channel.error:
                 raise channel.error
-            await self.request(
-                "POST",
-                path + "/continue",
-                params={"context": "phoneguy", "extension": "demo", "priority": 1},
-            )
+            if continue_to_demo:
+                await self.request(
+                    "POST",
+                    path + "/continue",
+                    params={"context": "phoneguy", "extension": "demo", "priority": 1},
+                )
             return channel
         except BaseException:
             async def cleanup():
@@ -347,6 +405,78 @@ class AsteriskRoom:
 
             await finish_cleanup(cleanup())
             raise
+
+    async def create_bridge(self, bridge_id):
+        if not isinstance(bridge_id, str) or not bridge_id:
+            raise ValueError("invalid_asterisk_bridge")
+        await self.request(
+            "POST", "/bridges", params={"bridgeId": bridge_id, "type": "mixing"}
+        )
+        return bridge_id
+
+    async def answer_channel(self, channel_id):
+        if not isinstance(channel_id, str) or not channel_id:
+            raise ValueError("invalid_asterisk_channel")
+        await self.request(
+            "POST", "/channels/" + quote(channel_id, safe="") + "/answer"
+        )
+
+    async def hangup_channel(self, channel_id):
+        if not isinstance(channel_id, str) or not channel_id:
+            return
+        try:
+            await self.request("DELETE", "/channels/" + quote(channel_id, safe=""))
+        except httpx.HTTPStatusError as error:
+            # ChannelDestroyed can race a rejection or cleanup.
+            if error.response.status_code != 404:
+                raise
+
+    async def originate(self, endpoint, *, app, caller_id, timeout=30):
+        """Call one private PJSIP endpoint and hand its answered leg to Stasis."""
+        if (
+            not isinstance(endpoint, str)
+            or not endpoint
+            or not isinstance(app, str)
+            or not app
+            or not isinstance(caller_id, str)
+            or not caller_id
+            or type(timeout) is not int
+            or not 1 <= timeout <= 60
+        ):
+            raise ValueError("invalid_asterisk_originate")
+        response = await self.request(
+            "POST",
+            "/channels",
+            params={
+                "endpoint": "PJSIP/" + endpoint,
+                "app": app,
+                "callerId": caller_id,
+                "timeout": timeout,
+                "formats": "alaw",
+            },
+        )
+        channel_id = response.json().get("id")
+        if not isinstance(channel_id, str) or not channel_id:
+            raise ValueError("invalid_asterisk_originate_response")
+        return channel_id
+
+    async def add_to_bridge(self, bridge_id, channel_id):
+        if not isinstance(bridge_id, str) or not isinstance(channel_id, str):
+            raise ValueError("invalid_asterisk_bridge_member")
+        await self.request(
+            "POST",
+            "/bridges/" + quote(bridge_id, safe="") + "/addChannel",
+            params={"channel": channel_id},
+        )
+
+    async def delete_bridge(self, bridge_id):
+        if not isinstance(bridge_id, str) or not bridge_id:
+            return
+        try:
+            await self.request("DELETE", "/bridges/" + quote(bridge_id, safe=""))
+        except httpx.HTTPStatusError as error:
+            if error.response.status_code != 404:
+                raise
 
     async def delete(self, channel_id):
         if channel_id not in self.owned:
@@ -378,6 +508,9 @@ class AsteriskRoom:
         if self.events_task is not None:
             self.events_task.cancel()
             await asyncio.gather(self.events_task, return_exceptions=True)
+        for task in list(self.handler_tasks):
+            task.cancel()
+        await asyncio.gather(*self.handler_tasks, return_exceptions=True)
         try:
             if self.events is not None:
                 await self.events.close()

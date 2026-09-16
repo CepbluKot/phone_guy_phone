@@ -350,6 +350,82 @@ def test_listener_receives_only_binary_and_rejects_backlog():
     asyncio.run(check())
 
 
+def test_ari_private_bridge_and_media_channels_do_not_enter_demo_dialplan():
+    async def check():
+        ari = Ari()
+        async with room(ari) as instance:
+            await instance.create_bridge("phoneguy-main")
+            await instance.answer_channel("sip-1983")
+            await instance.hangup_channel("sip-rejected")
+            await instance.add_to_bridge("phoneguy-main", "sip-1983")
+            source = await instance.open_media("source-sip-1987", receive=True)
+            injection = await instance.open_media("injection-sip-1987")
+            await instance.delete_bridge("phoneguy-main")
+
+            assert source.role == "listener"
+            assert injection.role == "injection"
+            assert not [
+                request for request in ari.requests
+                if request[1].endswith("/continue")
+                and request[1] in {
+                    f"/channels/{source.channel_id}/continue",
+                    f"/channels/{injection.channel_id}/continue",
+                }
+            ]
+            assert ("POST", "/bridges", {"bridgeId": "phoneguy-main", "type": "mixing"}) in ari.requests
+            assert ("POST", "/channels/sip-1983/answer", {}) in ari.requests
+            assert ("DELETE", "/channels/sip-rejected", {}) in ari.requests
+            assert ("POST", "/bridges/phoneguy-main/addChannel", {"channel": "sip-1983"}) in ari.requests
+            assert ("DELETE", "/bridges/phoneguy-main", {}) in ari.requests
+    asyncio.run(check())
+
+
+def test_sip_stasis_events_are_dispatched_only_for_real_pjsip_channels():
+    async def check():
+        ari = Ari()
+        started = []
+        destroyed = []
+
+        async def stasis(channel_id, endpoint):
+            started.append((channel_id, endpoint))
+
+        async def destroyed_handler(channel_id):
+            destroyed.append(channel_id)
+
+        async with room(
+            ari,
+            app_name="phoneguy-sip",
+            stasis_handler=stasis,
+            destroyed_handler=destroyed_handler,
+        ):
+            ari.events.incoming.put_nowait(json.dumps({
+                "type": "StasisStart", "application": "phoneguy-sip",
+                "channel": {"id": "sip-1987", "name": "PJSIP/1987-00000001"},
+            }))
+            ari.events.incoming.put_nowait(json.dumps({
+                "type": "StasisStart", "application": "phoneguy-sip",
+                "channel": {"id": "media", "name": "WebSocket/INCOMING-00000002"},
+            }))
+            ari.events.incoming.put_nowait(json.dumps({
+                "type": "StasisEnd", "application": "phoneguy-sip",
+                "channel": {"id": "sip-1987"},
+            }))
+            for _ in range(10):
+                if started and destroyed:
+                    break
+                await asyncio.sleep(0)
+            assert destroyed == ["sip-1987"]
+            # Asterisk normally follows StasisEnd with ChannelDestroyed.  The
+            # lifecycle callback is emitted once, at the first terminal event.
+            ari.events.incoming.put_nowait(json.dumps({
+                "type": "ChannelDestroyed", "channel": {"id": "sip-1987"},
+            }))
+            await asyncio.sleep(0)
+        assert started == [("sip-1987", "1987")]
+        assert destroyed == ["sip-1987"]
+    asyncio.run(check())
+
+
 def test_asterisk_rejects_wrong_incoming_binary_frame():
     async def check():
         ari = Ari()

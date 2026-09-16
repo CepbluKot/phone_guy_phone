@@ -30,10 +30,9 @@
 | `web-rt/index.html` | Private canary landing page with FCPE and an explicit link to production GPT v2 on `voice.lan`. |
 | `web-rt/gpt-live/` | Removed from the canary runtime because it depended on `8098`; production GPT UI stays under `web/`. |
 | `deploy/voice-rtrvc-canary.service` | Hardened, restartable loopback systemd unit for `:8093`. |
-| `deploy/caddy.d/voice-claude.caddy` | One declarative Caddy site fragment owned by the canary. |
-| `deploy/Caddyfile` | Base Caddy template importing `conf.d/*.caddy`; retains existing production routes untouched. |
+| `deploy/Caddyfile` | Shared declarative Caddy template retaining the private canary route. |
 | `deploy/deploy-rtrvc-canary.sh` | Scoped release, canary health/audio gates, exact backup and rollback. |
-| `deploy/requirements-rtrvc.lock` | Fully pinned packages needed only by FCPE canary, installed into `/opt/voice-rtrvc/venv`. |
+| `deploy/requirements-rtrvc.lock` | Fully pinned packages needed only by FCPE canary, installed into `/opt/voice-rtrvc/fcpe_pkgs`. |
 | `tests/test_rt_server.py` | CPU-only FastAPI contract tests for the FCPE-only surface. |
 | `tests/test_deploy_rtrvc_canary.py` | Controlled-root test of install, health gate and rollback behavior. |
 | `tests/live-rtrvc.py` | Private live FCPE audio probe: protocol, non-silent PCM, bounded queue, restart count. |
@@ -161,9 +160,10 @@ Expected: FAIL because the unit does not exist.
 2. Write each requirement as `name==version` to
    `deploy/requirements-rtrvc.lock`; do not include Torch or CUDA packages
    already pinned by `rvc_service/requirements.lock`.
-3. Create a dedicated `/opt/voice-rtrvc/venv` from the existing known-good
-   Python environment. Verify both locks with `importlib.metadata` and
-   `pip check`; never mutate `/opt/voice-rvc/venv`.
+3. Create a dedicated `/opt/voice-rtrvc/venv` snapshot from the existing
+   known-good Python environment. Install the pinned FCPE-only packages with
+   `--target /opt/voice-rtrvc/fcpe_pkgs`, set that directory as `PYTHONPATH`
+   in the unit, and never mutate `/opt/voice-rvc/venv`.
 4. Implement the unit with `User=voice-rvc`, `Group=voice-rvc`,
    `SupplementaryGroups=video render`, `WorkingDirectory=/opt/voice-rtrvc/current`,
    `ExecStart=/opt/voice-rtrvc/venv/bin/python -m uvicorn rvc_service.rt_server:app --host 127.0.0.1 --port 8093 --workers 1 --ws-max-size 4096 --ws-max-queue 4 --no-access-log`,
@@ -172,7 +172,8 @@ Expected: FAIL because the unit does not exist.
    `voice-rvc.service`.
 5. Set `RVC_ASSETS_ROOT`, `HF_*_OFFLINE=1`, `TORCH_FORCE_WEIGHTS_ONLY_LOAD=1`,
    `RVC_CUDA_GRAPH=1`, thread limits and a canary-specific writable
-   `NUMBA_CACHE_DIR` under `/var/cache/voice-rtrvc`.
+   `NUMBA_CACHE_DIR` under `/var/cache/voice-rtrvc` and
+   `PYTHONPATH=/opt/voice-rtrvc/fcpe_pkgs`.
 
 - [ ] **Step 4: Run configuration and import verification**
 
@@ -192,72 +193,37 @@ git add deploy/requirements-rtrvc.lock deploy/voice-rtrvc-canary.service tests/t
 git commit -m "feat: add hardened FCPE canary service"
 ```
 
-## Task 3: Isolate Caddy ownership with a canary site fragment
+## Task 3: Keep the canary route in the shared Caddy template
 
 **Files:**
 - Modify: `deploy/Caddyfile`
-- Create: `deploy/caddy.d/voice-claude.caddy`
-- Create: `tests/test_caddy_fragments.py`
 
 **Interfaces:**
 - Consumes: Caddy base template and certificate paths already used by production.
-- Produces: Caddy imports `/etc/caddy/conf.d/*.caddy`; the canary fragment owns
-  the single `voice-claude.lan.awesomeio.ru → 127.0.0.1:8093` mapping.
 
-- [ ] **Step 1: Write failing Caddy adaptation test**
+- Produces: one declarative `voice-claude.lan.awesomeio.ru → 127.0.0.1:8093`
+  mapping in the same template that production RVC deploys, so a later normal
+  deploy cannot erase it.
 
-```python
-def test_canary_fragment_adapts_with_the_production_base(tmp_path: Path) -> None:
-    config = materialize_caddy_tree(ROOT / "deploy", tmp_path)
-    result = subprocess.run(
-        ["caddy", "adapt", "--config", str(config), "--adapter", "caddyfile"],
-        text=True, capture_output=True,
-    )
-    assert result.returncode == 0, result.stderr
-    assert "127.0.0.1:8093" in result.stdout
-```
+- [ ] **Step 1: Preserve the existing canary block exactly**
 
-`materialize_caddy_tree` copies the base and fragments into an isolated temp
-tree and rewrites only the absolute import directory for that tree.
+Keep the direct `voice-claude` site block in `deploy/Caddyfile`. It uses the
+same private bind and certificate paths as production and only proxies to
+`127.0.0.1:8093`. Do not introduce an imported fragment: existing production
+deploys do not provision a fragment directory, so an import could make a
+future unrelated RVC deploy fail before canary exists.
 
-- [ ] **Step 2: Run it and verify the expected failure**
-
-Run: `.venv/bin/pytest -q tests/test_caddy_fragments.py`
-
-Expected: FAIL because `deploy/caddy.d/voice-claude.caddy` and the import are
-absent.
-
-- [ ] **Step 3: Move only the canary site block to a fragment**
-
-1. Add `import /etc/caddy/conf.d/*.caddy` to `deploy/Caddyfile`.
-2. Remove the direct `voice-claude` block from that file.
-3. Create `deploy/caddy.d/voice-claude.caddy` with the existing private bind,
-   certificate paths and `reverse_proxy 127.0.0.1:8093`.
-4. Do not alter `vm-voice-1`, `/ws/rvc`, `/ws/rvc-v2`, `/ws/conference`, TLS
-   paths or Caddy global options.
-
-- [ ] **Step 4: Validate the actual assembled Caddy config**
+- [ ] **Step 2: Validate the source template on VM209 before any reload**
 
 Run:
 
 ```bash
-.venv/bin/pytest -q tests/test_caddy_fragments.py
-tmpdir=$(mktemp -d)
-cp deploy/Caddyfile "$tmpdir/Caddyfile"
-mkdir "$tmpdir/conf.d"
-cp deploy/caddy.d/voice-claude.caddy "$tmpdir/conf.d/"
-sed -i "s#/etc/caddy/conf.d/\*.caddy#$tmpdir/conf.d/*.caddy#" "$tmpdir/Caddyfile"
-caddy validate --config "$tmpdir/Caddyfile"
+rsync -a deploy/Caddyfile ubuntu@192.168.20.70:/tmp/voice-rtrvc-Caddyfile
+ssh ubuntu@192.168.20.70 'sudo caddy validate --config /tmp/voice-rtrvc-Caddyfile'
 ```
 
-Expected: the production and canary routes both adapt successfully.
-
-- [ ] **Step 5: Commit the ownership boundary**
-
-```bash
-git add deploy/Caddyfile deploy/caddy.d/voice-claude.caddy tests/test_caddy_fragments.py
-git commit -m "feat: isolate voice claude Caddy configuration"
-```
+Expected: validation succeeds without changing `/etc/caddy/Caddyfile`. The
+canary deploy in Task 4 is the only step allowed to install and reload it.
 
 ## Task 4: Build a scoped deploy and rollback path for the canary
 
@@ -267,7 +233,7 @@ git commit -m "feat: isolate voice claude Caddy configuration"
 - Create: `tests/live-rtrvc.py`
 
 **Interfaces:**
-- Consumes: source tree, locked canary venv, Caddy fragment and unit from Tasks 1–3.
+- Consumes: source tree, locked canary venv, shared Caddy template and unit from Tasks 1–3.
 - Produces: `/opt/voice-rtrvc/releases/<UTC stamp>`, `current` symlink,
   `/opt/voice-rtrvc/backups/<UTC stamp>`, enabled service and private live probe.
 
@@ -280,7 +246,7 @@ def test_failed_canary_health_gate_restores_prior_release_and_never_calls_voice_
     assert result.returncode != 0
     assert os.readlink(root / "opt/voice-rtrvc/current") == "/opt/voice-rtrvc/releases/old"
     assert read_calls(env)["systemctl"].count("restart voice-rvc.service") == 0
-    assert (root / "etc/caddy/conf.d/voice-claude.caddy").read_text() == "old fragment"
+    assert (root / "etc/caddy/Caddyfile").read_text() == "old Caddyfile"
 
 
 def test_live_probe_rejects_wrong_fcpe_contract_before_audio(tmp_path):
@@ -307,16 +273,16 @@ Expected: FAIL because neither the deploy script nor the live probe exists.
 2. Run all Python and Node tests before SSH.
 3. Create `stamp=$(date -u +%Y%m%dT%H%M%SZ)` and stage exactly
    `rvc_service`, `web-rt`, FCPE lock, canary unit and Caddy fragment.
-4. Back up the old current symlink, canary unit, canary fragment, enable/active
+4. Back up the old current symlink, canary unit, Caddyfile, enable/active
    state and bounded journals under `/opt/voice-rtrvc/backups/$stamp`.
 5. Create the immutable release, atomically update `current`, install only the
-   canary unit/fragment, run `systemctl daemon-reload`, validate Caddy, reload
+   canary unit and shared Caddy template, run `systemctl daemon-reload`, validate Caddy, reload
    Caddy and restart only `voice-rtrvc-canary.service`.
 6. Wait for `/healthz` to become `{status:"ready"}`; run `tests/live-rtrvc.py`
    first through `ws://127.0.0.1:8093/ws/rvc`, then through
    `wss://voice-claude.lan.awesomeio.ru/ws/rvc` with the approved Origin.
 7. Verify `voice-rvc.service` stayed active and its `NRestarts` did not change.
-8. On any nonzero gate, restore current/unit/fragment/enable/active state,
+8. On any nonzero gate, restore current/unit/Caddyfile/enable/active state,
    validate and reload Caddy, then verify production `:8090/healthz` is ready.
 
 `tests/live-rtrvc.py` sends paced 20-ms PCM16 frames until it receives at least

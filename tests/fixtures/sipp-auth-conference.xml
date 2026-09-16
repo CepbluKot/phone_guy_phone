@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<!DOCTYPE scenario SYSTEM "sipp.dtd">
+<scenario name="authenticated Phone Guy conference participant">
+  <send retrans="500">
+    <![CDATA[
+INVITE sip:600@[remote_ip]:[remote_port] SIP/2.0
+Via: SIP/2.0/UDP [local_ip]:[local_port];branch=[branch]
+From: <sip:[field0]@[remote_ip]>;tag=[call_number]
+To: <sip:600@[remote_ip]>
+Call-ID: [call_id]
+CSeq: 1 INVITE
+Contact: <sip:[field0]@[local_ip]:[local_port]>
+Max-Forwards: 70
+Subject: phoneguy-live-preflight
+Content-Type: application/sdp
+Content-Length: [len]
+
+v=0
+o=sipp 1 1 IN IP4 [local_ip]
+s=phoneguy-live-preflight
+c=IN IP4 [media_ip]
+t=0 0
+m=audio [media_port] RTP/AVP 8
+a=rtpmap:8 PCMA/8000
+    ]]>
+  </send>
+  <recv response="401" auth="true"/>
+  <send retrans="500">
+    <![CDATA[
+INVITE sip:600@[remote_ip]:[remote_port] SIP/2.0
+Via: SIP/2.0/UDP [local_ip]:[local_port];branch=[branch]
+From: <sip:[field0]@[remote_ip]>;tag=[call_number]
+To: <sip:600@[remote_ip]>
+Call-ID: [call_id]
+CSeq: 2 INVITE
+Contact: <sip:[field0]@[local_ip]:[local_port]>
+Max-Forwards: 70
+Subject: phoneguy-live-preflight
+[authentication username="[field0]" password="[field1]"]
+Content-Type: application/sdp
+Content-Length: [len]
+
+v=0
+o=sipp 1 1 IN IP4 [local_ip]
+s=phoneguy-live-preflight
+c=IN IP4 [media_ip]
+t=0 0
+m=audio [media_port] RTP/AVP 8
+a=rtpmap:8 PCMA/8000
+    ]]>
+  </send>
+  <recv response="100" optional="true"/>
+  <recv response="200" rtd="true"/>
+  <send>
+    <![CDATA[
+ACK sip:600@[remote_ip]:[remote_port] SIP/2.0
+Via: SIP/2.0/UDP [local_ip]:[local_port];branch=[branch]
+From: <sip:[field0]@[remote_ip]>;tag=[call_number]
+To: <sip:600@[remote_ip]>[peer_tag_param]
+Call-ID: [call_id]
+CSeq: 2 ACK
+Contact: <sip:[field0]@[local_ip]:[local_port]>
+Max-Forwards: 70
+Content-Length: 0
+    ]]>
+  </send>
+  <nop>
+    <action><exec play_pcap_audio="/usr/share/sip-tester/g711a.pcap"/></action>
+  </nop>
+  <pause milliseconds="9000"/>
+  <send retrans="500">
+    <![CDATA[
+BYE sip:600@[remote_ip]:[remote_port] SIP/2.0
+Via: SIP/2.0/UDP [local_ip]:[local_port];branch=[branch]
+From: <sip:[field0]@[remote_ip]>;tag=[call_number]
+To: <sip:600@[remote_ip]>[peer_tag_param]
+Call-ID: [call_id]
+CSeq: 3 BYE
+Contact: <sip:[field0]@[local_ip]:[local_port]>
+Max-Forwards: 70
+Content-Length: 0
+    ]]>
+  </send>
+  <recv response="200" crlf="true"/>
+  <ResponseTimeRepartition value="10,20,30,40,50,100,150,500,1000"/>
+  <CallLengthRepartition value="10,50,100,500,1000,5000,10000"/>
+</scenario>

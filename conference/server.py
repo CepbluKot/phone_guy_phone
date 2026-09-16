@@ -4,6 +4,7 @@ import asyncio
 from contextlib import asynccontextmanager, suppress
 import json
 import os
+from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
@@ -12,7 +13,9 @@ import httpx
 from .asterisk import AsteriskRoom
 from .media import FRAME_BYTES, finish_cleanup
 from .rvc import ALLOWED_ORIGINS, RvcStream
+from .routing import load_routing
 from .session import DemoSession, Listener, SessionError, public_error
+from .sip_controller import SipController
 
 
 READY = dict(type="ready", version=1, sampleRate=48000, channels=1,
@@ -27,6 +30,25 @@ def default_session():
             os.environ.get("CONFERENCE_ARI_PASSWORD", ""),
         ),
         lambda: RvcStream(os.environ.get("CONFERENCE_RVC_URL", "ws://127.0.0.1:8090/ws/rvc-v2")),
+    )
+
+
+def default_sip_controller():
+    routing = load_routing(Path(os.environ.get(
+        "CONFERENCE_ROUTING_FILE", "/run/conference/voice-routing.yaml"
+    )))
+    return SipController(
+        lambda **handlers: AsteriskRoom(
+            os.environ.get("CONFERENCE_ARI_URL", "http://127.0.0.1:8092/ari"),
+            os.environ.get("CONFERENCE_ARI_USERNAME", "phoneguy"),
+            os.environ.get("CONFERENCE_ARI_PASSWORD", ""),
+            app_name="phoneguy-sip",
+            **handlers,
+        ),
+        routing,
+        model_factory=lambda: RvcStream(
+            os.environ.get("CONFERENCE_RVC_URL", "ws://127.0.0.1:8090/ws/rvc-v2")
+        ),
     )
 
 
@@ -59,6 +81,24 @@ async def control(socket, *, first=False):
         raise SessionError("invalid_control")
 
 
+async def call_start_control(socket):
+    """Validate the one browser-to-phone protocol opening message."""
+    message = await socket.receive()
+    if message["type"] == "websocket.disconnect":
+        raise WebSocketDisconnect(message.get("code", 1000))
+    raw = message.get("text")
+    if not isinstance(raw, str) or len(raw.encode("utf-8")) > 1024:
+        raise SessionError("invalid_control")
+    try:
+        value = json.loads(raw)
+    except ValueError:
+        raise SessionError("invalid_control") from None
+    expected = dict(type="start", version=1, sampleRate=48000, channels=1,
+                    sampleFormat="s16le")
+    if value != expected:
+        raise SessionError("invalid_control")
+
+
 async def send_status(socket, status, timeout):
     async with asyncio.timeout(timeout):
         await socket.send_json(status)
@@ -86,14 +126,21 @@ async def send_audio(socket, listener, timeout):
 
 
 def create_app(session_factory=default_session, *, health_check=asterisk_available,
-               control_timeout=10, send_timeout=10):
+               sip_controller_factory=None, control_timeout=10, send_timeout=10):
     session = session_factory()
 
     @asynccontextmanager
     async def lifespan(app):
+        controller = None
         try:
+            if sip_controller_factory is not None:
+                controller = sip_controller_factory()
+                await controller.start()
+                app.state.sip_controller = controller
             yield
         finally:
+            if controller is not None:
+                await finish_cleanup(controller.close())
             await finish_cleanup(session.close())
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
@@ -166,7 +213,55 @@ def create_app(session_factory=default_session, *, health_check=asterisk_availab
                 async with asyncio.timeout(send_timeout):
                     await socket.close(code=1000 if not error else 1008)
 
+    @app.websocket("/ws/call")
+    async def call_phone(socket: WebSocket):
+        """Private browser microphone -> RVC -> originated Yealink call."""
+        if socket.headers.get("origin") not in ALLOWED_ORIGINS:
+            await socket.close(code=1008)
+            return
+        await socket.accept()
+        call_id = None
+        error = None
+        disconnected = False
+        try:
+            async with asyncio.timeout(control_timeout):
+                await call_start_control(socket)
+            controller = getattr(app.state, "sip_controller", None)
+            if controller is None or controller.sessions is None:
+                raise SessionError("upstream_unavailable")
+            await send_status(socket, {"type": "preparing"}, send_timeout)
+            call_id = await controller.sessions.start_browser_call("1983")
+            await send_status(socket, {"type": "ringing"}, send_timeout)
+            while True:
+                message = await socket.receive()
+                if message["type"] == "websocket.disconnect":
+                    disconnected = True
+                    break
+                frame = message.get("bytes")
+                if isinstance(frame, bytes):
+                    await controller.sessions.send_browser_audio(call_id, frame)
+                    continue
+                raw = message.get("text")
+                if raw == '{"type":"stop"}':
+                    break
+                raise SessionError("invalid_control")
+        except WebSocketDisconnect:
+            disconnected = True
+        except Exception as exc:
+            error = public_error(exc)
+        finally:
+            if call_id is not None:
+                with suppress(Exception):
+                    await controller.sessions.close_browser_call(call_id)
+        if not disconnected:
+            with suppress(Exception):
+                if error:
+                    await send_status(socket, {"type": "error", "code": error}, send_timeout)
+                await send_status(socket, {"type": "stopped"}, send_timeout)
+                async with asyncio.timeout(send_timeout):
+                    await socket.close(code=1000 if not error else 1008)
+
     return app
 
 
-app = create_app()
+app = create_app(sip_controller_factory=default_sip_controller)

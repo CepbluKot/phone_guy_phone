@@ -4,17 +4,9 @@
 <title>RTRVC demo</title><link rel="stylesheet" href="/rtrvc.css"></head>
 <body><main>
 <p class="eyebrow">EXPERIMENTAL RTRVC.PY ENGINE</p><h1>Голос Phone Guy</h1>
-<p>Победитель A/B-прослушивания из четырёх вариантов движка
-(<code>infer/rtrvc.py</code>, подробности — в research-ветке): FCPE, блок
-0.3с. Остальные три сняты, чтобы не плодить выбор ради выбора — этот
-единственный живой live-вариант.</p>
-<ul>
-<li><a href="/v2-fcpe/">Голос в реальном времени (наш вариант)</a> — нужны микрофон и наушники</li>
-<li><a href="/gpt-live/">Голос в реальном времени (GPT)</a> — тот же принцип, чужой движок (research/latency-optimization), блок крупнее (1с)</li>
-</ul>
-<p><a href="/bots/">Комната ботов</a> — отдельная демка, слушать без микрофона.</p>
-<p><a href="/tts/">Текст → голос</a> — впишите текст, услышите его голосом Phone Guy (Piper TTS + тот же движок).</p>
-<p><a href="/compare/">Сравнить с другими агентами</a> — одна запись → наш вариант, вариант GPT (research/latency-optimization) и вариант GLM (research/latency-glm), каждый прогнан вашей записью изолированно, рядом для прямого сравнения.</p>
-<p>Research-демо (ветка research/latency-sonnet), не продакшен Phone Guy.
-Голос не сохраняется.</p>
+<p>Отдельный canary <code>infer/rtrvc.py</code>: FCPE, блок 0.3с. Он нужен
+для сравнения с рабочим голосовым маршрутом и не участвует в телефонной
+конференции.</p>
+<p><a href="/v2-fcpe/">Голос FCPE в реальном времени</a> — нужны микрофон и наушники.</p>
+<p>Это отдельный canary для проверки качества. Голос не сохраняется.</p>
 </main></body></html>

@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Phone Guy — звонок из браузера</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body><main>
+  <p class="eyebrow">PRIVATE VPN VOICE LAB</p>
+  <h1>ЗВОНОК В ТЕЛЕФОН</h1>
+  <p>Эта страница звонит на подключённый Yealink. После ответа говорите в микрофон — в трубке будет голос Phone Guy.</p>
+  <p id="status" role="status">Готово</p>
+  <div class="controls">
+    <button id="call">Позвонить на телефон</button>
+    <button id="hangup" disabled>Завершить</button>
+  </div>
+  <label>Уровень микрофона <meter id="input" min="0" max="1" value="0"></meter></label>
+  <p class="note">Работает только через VPN и HTTPS. Обратный звук из трубки сюда не выводится — так не возникает эхо.</p>
+</main><script src="app.js"></script></body>
+</html>
