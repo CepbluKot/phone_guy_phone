@@ -39,17 +39,34 @@ def _websocket_url(url):
 
 
 def parse_control(message):
-    """Validate one chan_websocket control message and return its fields."""
+    """Validate one chan_websocket control message and return its fields.
+
+    Controls arrive either as JSON objects or as plain ``EVENT key:value``
+    text; both forms are part of the chan_websocket wire format (mirrors
+    conference/asterisk.py's _media_control).
+    """
     if not isinstance(message, str):
         raise ValueError("invalid_asterisk_control")
-    try:
-        import json
+    if message.startswith("{"):
+        try:
+            import json
 
-        value = json.loads(message)
-    except (TypeError, ValueError):
-        raise ValueError("invalid_asterisk_control") from None
-    if not isinstance(value, dict):
+            value = json.loads(message)
+        except (TypeError, ValueError):
+            raise ValueError("invalid_asterisk_control") from None
+        if not isinstance(value, dict):
+            raise ValueError("invalid_asterisk_control")
+        return value
+
+    fields = message.split()
+    if not fields:
         raise ValueError("invalid_asterisk_control")
+    value = {"event": fields[0]}
+    for field in fields[1:]:
+        key, separator, item = field.partition(":")
+        if not separator or not key or key in value:
+            raise ValueError("invalid_asterisk_control")
+        value[key] = item
     return value
 
 
@@ -240,11 +257,17 @@ class SelfMonitorAri:
                     name = channel.get("name")
                     if not isinstance(channel_id, str) or not isinstance(name, str):
                         continue
-                    if not name.startswith("PJSIP/"):
+                    # Real callers arrive as PJSIP channels. Local/...;2 is the
+                    # dialplan half used by the offline live check (live_check.py).
+                    if name.startswith("PJSIP/"):
+                        endpoint = name[len("PJSIP/"):].partition("-")[0]
+                    elif name.startswith("Local/") and name.endswith(";2"):
+                        endpoint = "local-check"
+                    else:
                         continue
-                    endpoint = name[len("PJSIP/"):].partition("-")[0]
                     if not endpoint:
                         continue
+                    print(f"selfmonitor: stasis start {name} ({endpoint})", flush=True)
                     self.sip_channels[channel_id] = endpoint
                     self._dispatch(self.stasis_handler, channel_id, endpoint)
                 if (
@@ -252,12 +275,14 @@ class SelfMonitorAri:
                     and channel_id in self.sip_channels
                 ):
                     self.sip_channels.pop(channel_id, None)
+                    print(f"selfmonitor: channel gone {channel_id}", flush=True)
                     self._dispatch(self.destroyed_handler, channel_id)
                 if event.get("type") == "ChannelDestroyed" and channel_id in self.media:
                     self.media[channel_id].fail(ConnectionError("asterisk_channel_destroyed"))
         except asyncio.CancelledError:
             raise
         except Exception as error:
+            print(f"selfmonitor: events loop failed: {error!r}", flush=True)
             self.error = error
             for media in self.media.values():
                 media.fail(error)
