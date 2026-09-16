@@ -77,6 +77,27 @@ test('delay line shifts playback by exactly the requested seconds', () => {
   assert.deepEqual(result.slice(48000, 48000 + 50976), baseline.slice(0, 50976));
 });
 
+test('mirror frames equal the final rendered output after browser delay', () => {
+  const {node, messages} = create();
+  node.port.onmessage({data: {type: 'configure', packetSamples: 960, holdSamples: 2400}});
+  node.port.onmessage({data: {type: 'delay', seconds: .5}});
+  const rendered = [];
+  for (let block = 0; block < 35; block++) {
+    node.port.onmessage({data: {type: 'play', pcm: new Int16Array(960).fill(8192).buffer}});
+    const output = new Float32Array(960);
+    node.process([[]], [[output]]);
+    rendered.push(Int16Array.from(output, sample => Math.round(sample * 32768)));
+  }
+  const mirrors = messages.filter(message => message.type === 'mirror');
+  assert.equal(mirrors.length, rendered.length);
+  for (let i = 0; i < mirrors.length; i++) {
+    assert.equal(mirrors[i].pcm.byteLength, 1920);
+    assert.deepEqual([...new Int16Array(mirrors[i].pcm)], [...rendered[i]]);
+  }
+  assert.ok(new Int16Array(mirrors[0].pcm).every(value => value === 0));
+  assert.ok([...new Int16Array(mirrors.at(-1).pcm)].some(value => value !== 0));
+});
+
 test('queue overload reports an error and keeps the queued speech', () => {
   const {node, messages} = create();
   node.port.onmessage({data: {type: 'configure', packetSamples: 48000, holdSamples: 6000}});

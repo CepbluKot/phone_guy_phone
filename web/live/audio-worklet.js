@@ -14,6 +14,8 @@ class PhoneAudio extends AudioWorkletProcessor {
     super();
     this.capture = new Int16Array(CAPTURE_SAMPLES);
     this.captureOffset = 0;
+    this.mirror = new Int16Array(CAPTURE_SAMPLES);
+    this.mirrorOffset = 0;
     this.mode = 'idle';
     this.packetSamples = MAX_PACKET_SAMPLES;
     this.queue = [];
@@ -123,6 +125,15 @@ class PhoneAudio extends AudioWorkletProcessor {
         output[i] = this.delayLine[this.delayPosition];
         this.delayLine[this.delayPosition] = current;
         this.delayPosition = (this.delayPosition + 1) % this.delayLine.length;
+      }
+      this.mirror[this.mirrorOffset++] = Math.round(
+        Math.max(-1, Math.min(32767 / 32768, output[i])) * 32768
+      );
+      if (this.mirrorOffset === CAPTURE_SAMPLES) {
+        const pcm = this.mirror.buffer;
+        this.port.postMessage({type: 'mirror', pcm}, [pcm]);
+        this.mirror = new Int16Array(CAPTURE_SAMPLES);
+        this.mirrorOffset = 0;
       }
     }
     return true;

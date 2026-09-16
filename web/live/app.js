@@ -6,6 +6,8 @@ const CAPTURE_SAMPLES = 960;
 const MIN_HOP_SAMPLES = 9600;
 const MAX_HOP_SAMPLES = 96000;
 const MAX_INFLIGHT_SAMPLES = SAMPLE_RATE * 12;
+const MIRROR_FRAME_BYTES = CAPTURE_SAMPLES * 2;
+const MAX_MIRROR_BUFFER_BYTES = MIRROR_FRAME_BYTES * 4;
 const el = id => document.getElementById(id);
 const startButton = el('start'), stopButton = el('stop');
 const statusEl = el('status'), latencyEl = el('latency');
@@ -42,6 +44,7 @@ function stop(message = 'Остановлено') {
   session = null;
   if (s) {
     clearInterval(s.timer);
+    try {s.mirror?.close();} catch {}
     s.stream?.getTracks().forEach(track => track.stop());
     try {s.source?.disconnect();} catch {}
     try {s.node?.disconnect();} catch {}
@@ -59,6 +62,25 @@ function stop(message = 'Остановлено') {
   el('input').value = 0;
   el('output').value = 0;
   statusEl.textContent = message;
+}
+
+function loseMirror(s, socket) {
+  if (session !== s || s.mirror !== socket) return;
+  s.mirror = null;
+  s.mirrorRetryAt = performance.now() + 1000;
+  try {socket.close();} catch {}
+}
+
+function openMirror(s) {
+  if (session !== s || !s.ready || s.mirror) return;
+  try {
+    const socket = new WebSocket('wss://vm-voice-1.lan.awesomeio.ru/ws/live-mirror');
+    s.mirror = socket;
+    socket.onerror = () => loseMirror(s, socket);
+    socket.onclose = () => loseMirror(s, socket);
+  } catch {
+    s.mirrorRetryAt = performance.now() + 1000;
+  }
 }
 
 function fail(s, error) {
@@ -108,6 +130,7 @@ async function begin() {
   s.timer = setInterval(() => {
     if (session !== s || !s.ready) return;
     const now = performance.now();
+    if (!s.mirror && now >= (s.mirrorRetryAt || 0)) openMirror(s);
     if (now - s.lastProgress > 10000) {
       const error = new Error('stalled');
       error.code = 'stalled';
@@ -141,6 +164,15 @@ async function begin() {
     s.node.port.onmessage = ({data}) => {
       if (session !== s) return;
       try {
+        if (data.type === 'mirror') {
+          if (data.pcm?.byteLength !== MIRROR_FRAME_BYTES) return;
+          const socket = s.mirror;
+          if (socket?.readyState === WebSocket.OPEN &&
+              socket.bufferedAmount + MIRROR_FRAME_BYTES <= MAX_MIRROR_BUFFER_BYTES) {
+            try {socket.send(data.pcm);} catch {loseMirror(s, socket);}
+          }
+          return;
+        }
         if (data.type === 'error') {
           const error = new Error(data.code || 'protocol');
           error.code = data.code || 'protocol';
@@ -219,6 +251,7 @@ async function begin() {
               holdSamples: Math.min(12000, Math.max(6000, Math.round(s.hopSamples / 8)))
             });
             s.node.connect(s.ctx.destination);
+            openMirror(s);
             statusEl.textContent = 'Phone Guy на линии — говори! Первый фрагмент после ~1.7 с.';
             return;
           }

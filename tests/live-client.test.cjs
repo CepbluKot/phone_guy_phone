@@ -20,7 +20,7 @@ function client(options = {}) {
     if (!elements.has(id)) elements.set(id, {value: 0, textContent: '', disabled: false});
     return elements.get(id);
   };
-  let socket, node, ctx;
+  let socket, mirrorSocket, node, ctx;
   const track = {stop() {}};
   const stream = {getTracks: () => [track]};
   class Context {
@@ -34,7 +34,11 @@ function client(options = {}) {
   }
   class Socket {
     static OPEN = 1;
-    constructor(url) {socket = this; this.url = url; this.readyState = 1; this.messages = [];}
+    constructor(url) {
+      this.url = url; this.readyState = 1; this.bufferedAmount = 0; this.messages = [];
+      if (url.endsWith('/ws/rvc-v2')) socket = this;
+      else mirrorSocket = this;
+    }
     send(message) {this.messages.push(message);}
     close() {this.closed = true;}
   }
@@ -59,7 +63,8 @@ function client(options = {}) {
     setInterval: callback => {options.interval = callback; return 1;}, clearInterval() {}
   }, {filename: 'web/live/app.js'});
   return {
-    get, socket: () => socket, node: () => node, context: () => ctx,
+    get, socket: () => socket, mirrorSocket: () => mirrorSocket,
+    node: () => node, context: () => ctx,
     advance(milliseconds) {options.now += milliseconds; options.interval?.();}
   };
 }
@@ -70,6 +75,25 @@ test('live page exposes only the monitor controls', () => {
     .map(match => match[1]);
   assert.deepEqual(interactiveIds, ['start', 'stop', 'delay']);
   assert.match(html, /Phone Guy/);
+});
+
+test('rendered frames go only to mirror socket and relay failure leaves RVC playing', async () => {
+  const ui = client();
+  await ui.get('start').onclick();
+  ui.socket().onopen();
+  ui.socket().onmessage({data: JSON.stringify(READY_V2)});
+  const mirror = ui.mirrorSocket();
+  assert.equal(mirror.url, 'wss://vm-voice-1.lan.awesomeio.ru/ws/live-mirror');
+  const rendered = new Int16Array(960).fill(7777).buffer;
+  ui.node().port.onmessage({data: {type: 'mirror', pcm: rendered}});
+  assert.equal(mirror.messages.at(-1), rendered);
+  assert.equal(ui.socket().messages.length, 1);
+  mirror.bufferedAmount = 7680;
+  ui.node().port.onmessage({data: {type: 'mirror', pcm: new ArrayBuffer(1920)}});
+  assert.equal(mirror.messages.length, 1);
+  mirror.onerror();
+  assert.equal(ui.context().closed, undefined);
+  assert.equal(ui.get('stop').disabled, false);
 });
 
 test('v2 session wires packets, meters and dynamic hop through the worklet', async () => {
