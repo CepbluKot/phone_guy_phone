@@ -1,0 +1,23 @@
+[Unit]
+Description=Private Phone Guy self-monitor echo line (1999)
+Wants=network-online.target docker.service
+After=network-online.target docker.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/voice-selfmonitor/app
+Environment=PYTHONPATH=/opt/voice-selfmonitor/app
+EnvironmentFile=/etc/voice-selfmonitor.env
+ExecStart=/opt/voice-selfmonitor/venv/bin/python -m selfmonitor.service
+Restart=always
+RestartSec=5
+DynamicUser=yes
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=
+IPAddressAllow=localhost
+
+[Install]
+WantedBy=multi-user.target
