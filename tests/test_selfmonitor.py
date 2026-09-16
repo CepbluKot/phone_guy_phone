@@ -113,8 +113,17 @@ def _ready(value):
 
 def test_parse_control_accepts_media_flow_events():
     assert parse_control('{"event": "MEDIA_XON"}') == {"event": "MEDIA_XON"}
+    # chan_websocket also emits plain "EVENT key:value" text controls.
+    assert parse_control("MEDIA_START connection_id:abc channel_id:def") == {
+        "event": "MEDIA_START", "connection_id": "abc", "channel_id": "def"
+    }
+    assert parse_control("MEDIA_XOFF") == {"event": "MEDIA_XOFF"}
     with pytest.raises(ValueError):
         parse_control(b"\x00\x01")
+    with pytest.raises(ValueError):
+        parse_control("broken duplicate:1 duplicate:2")
+    with pytest.raises(ValueError):
+        parse_control("")
 
 
 def test_stasis_start_builds_snoop_and_two_bridges_in_order():

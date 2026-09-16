@@ -49,6 +49,7 @@ class EchoSession:
         service = self.service
         ari = service.ari
         try:
+            print(f"selfmonitor: session start for {self.channel_id}", flush=True)
             await ari.answer(self.channel_id)
             self.injection = await ari.open_media("echo-" + self.channel_id, receive=False)
             await ari.create_bridge(self.echo_bridge)
@@ -60,8 +61,10 @@ class EchoSession:
             await ari.create_bridge(self.source_bridge)
             await ari.add_to_bridge(self.source_bridge, "selfmonitor-snoop-" + self.channel_id)
             await ari.add_to_bridge(self.source_bridge, self.listener.channel_id)
+            print(f"selfmonitor: bridges ready for {self.channel_id}", flush=True)
 
             self.model = await service.model_factory()
+            print(f"selfmonitor: model ready for {self.channel_id}", flush=True)
             self.tasks = [
                 asyncio.create_task(self._forward(), name="echo-forward"),
                 asyncio.create_task(self._inject(), name="echo-inject"),
@@ -69,7 +72,10 @@ class EchoSession:
             await asyncio.gather(*self.tasks)
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as error:
+            import traceback
+
+            traceback.print_exc()
             await self.close()
             raise
         finally:
