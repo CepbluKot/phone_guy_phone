@@ -5,8 +5,13 @@ type=global
 type=transport
 protocol=udp
 bind=0.0.0.0:5060
-local_net=192.168.20.0/24
-local_net=10.19.87.0/24
+; Asterisk is containerised, while SIP/RTP are published on the VM's LAN IP.
+; Treat only the Docker bridge as local, otherwise Asterisk advertises
+; 172.19.x.x to the physical phone in Contact and SDP.
+local_net=172.19.0.0/16
+external_signaling_address=192.168.20.70
+external_signaling_port=5060
+external_media_address=192.168.20.70
 
 [phone-endpoint](!)
 type=endpoint

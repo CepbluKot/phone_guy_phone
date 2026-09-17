@@ -59,3 +59,39 @@ contact=sip:1983@192.168.20.134:5062
     endpoint = result.split("[1983-auth]", 1)[0]
     assert endpoint.count("rtp_keepalive=1") == 1
     assert "password=keep-me-secret" in result
+
+
+def test_container_nat_patch_advertises_vm_address_without_touching_secrets(tmp_path):
+    active = tmp_path / "pjsip.conf"
+    active.write_text("""[transport-udp]
+type=transport
+protocol=udp
+bind=0.0.0.0:5060
+local_net=192.168.20.0/24
+local_net=10.19.87.0/24
+[1983-auth]
+type=auth
+password=keep-me-secret
+""")
+    script = ROOT / "deploy" / "patch-asterisk-container-nat.py"
+    for _ in range(2):
+        subprocess.run([sys.executable, script, active], check=True)
+    result = active.read_text()
+    transport = result.split("[1983-auth]", 1)[0]
+    assert "local_net=172.19.0.0/16" in transport
+    assert "local_net=192.168.20.0/24" not in transport
+    assert "local_net=10.19.87.0/24" not in transport
+    assert transport.count("external_signaling_address=192.168.20.70") == 1
+    assert transport.count("external_signaling_port=5060") == 1
+    assert transport.count("external_media_address=192.168.20.70") == 1
+    assert "password=keep-me-secret" in result
+
+
+def test_selfmonitor_deploy_patches_container_nat_before_restarting_asterisk():
+    deploy = (ROOT / "deploy" / "deploy-selfmonitor.sh").read_text()
+    assert "patch-asterisk-container-nat.py" in deploy
+    assert "core show channels concise" in deploy
+    assert "docker restart voice-conference-asterisk-1" in deploy
+    assert "docker restart voice-conference-controller-1" in deploy
+    assert "phoneguy-sip" in deploy
+    assert "pjsip show transport transport-udp" in deploy

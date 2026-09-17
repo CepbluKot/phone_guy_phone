@@ -147,6 +147,14 @@ def test_dialplan_profile_and_accounting_are_bounded_and_non_recording():
 def test_pjsip_template_has_only_runtime_password_placeholders_and_private_media():
     pjsip = read("pjsip.conf.template")
 
+    transport = re.search(r"^\[transport-udp\]$(.*?)(?=^\[)", pjsip,
+                          re.MULTILINE | re.DOTALL).group(1)
+    assert "local_net=172.19.0.0/16" in transport
+    assert "local_net=192.168.20.0/24" not in transport
+    assert "external_signaling_address=192.168.20.70" in transport
+    assert "external_signaling_port=5060" in transport
+    assert "external_media_address=192.168.20.70" in transport
+
     for extension in ("1983", "1987", "2014"):
         assert f"[{extension}]" in pjsip
         assert f"__SIP_{extension}_PASSWORD__" in pjsip
