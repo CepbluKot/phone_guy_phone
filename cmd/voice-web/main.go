@@ -13,6 +13,9 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"voice-changer/internal/admin"
+	"voice-changer/internal/voiceconfig"
 )
 
 const contentSecurityPolicy = "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' wss://vm-voice-1.lan.awesomeio.ru; frame-ancestors 'none'; base-uri 'none'"
@@ -44,6 +47,39 @@ func healthCheck() error {
 }
 
 func run() error {
+	routesPath := os.Getenv("VOICE_ROUTE_CONFIG_FILE")
+	if routesPath == "" {
+		routesPath = "/etc/voice-changer/voice-routing.json"
+	}
+	routes, err := voiceconfig.Open(routesPath, []string{"1983", "1987", "1988", "2014"})
+	if err != nil {
+		return errors.New("route configuration unavailable")
+	}
+	passwordPath := os.Getenv("VOICE_ADMIN_PASSWORD_FILE")
+	if passwordPath == "" {
+		return errors.New("admin password file unavailable")
+	}
+	passwordInfo, err := os.Stat(passwordPath)
+	if err != nil || !passwordInfo.Mode().IsRegular() || passwordInfo.Mode().Perm()&0o077 != 0 {
+		return errors.New("admin password file unavailable")
+	}
+	passwordBytes, err := os.ReadFile(passwordPath)
+	if err != nil {
+		return errors.New("admin password file unavailable")
+	}
+	password := strings.TrimSuffix(strings.TrimSuffix(string(passwordBytes), "\n"), "\r")
+	origin := os.Getenv("VOICE_ADMIN_ORIGIN")
+	if origin == "" {
+		return errors.New("admin origin unavailable")
+	}
+	adminAPI := admin.NewHandler(routes, password, origin, log.Default())
+	if len(passwordBytes) == 0 || password == "" {
+		return errors.New("admin password file unavailable")
+	}
+	for i := range passwordBytes {
+		passwordBytes[i] = 0
+	}
+
 	webRoot := os.Getenv("VOICE_WEB_ROOT")
 	if webRoot == "" {
 		webRoot = "./web"
@@ -70,7 +106,7 @@ func run() error {
 
 	server := &http.Server{
 		Addr:              address,
-		Handler:           newHandler(root),
+		Handler:           newAppHandler(root, adminAPI),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -101,6 +137,13 @@ func run() error {
 }
 
 func newHandler(webRoot string) http.Handler {
+	return newAppHandler(webRoot, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		http.Error(w, `{"error":"config_unavailable"}`, http.StatusServiceUnavailable)
+	}))
+}
+
+func newAppHandler(webRoot string, adminAPI http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -163,6 +206,10 @@ func newHandler(webRoot string) http.Handler {
 		w.Header().Set("Content-Security-Policy", contentSecurityPolicy)
 		if r.URL.Path == "/conference/" || strings.HasPrefix(r.URL.Path, "/admin/") || r.URL.Path == "/admin" {
 			w.Header().Set("Permissions-Policy", "microphone=()")
+		}
+		if strings.HasPrefix(r.URL.Path, "/admin/api/v1/") {
+			adminAPI.ServeHTTP(w, r)
+			return
 		}
 		mux.ServeHTTP(w, r)
 	})

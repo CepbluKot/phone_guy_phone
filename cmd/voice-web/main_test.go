@@ -143,11 +143,20 @@ func TestServerUsesConfiguredListenAddress(t *testing.T) {
 	}
 	address := reservation.Addr().String()
 	_ = reservation.Close()
+	configPath := filepath.Join(t.TempDir(), "routes.json")
+	config := `{"schemaVersion":1,"revision":1,"extensions":{"1983":"original","1987":"original","1988":"original","2014":"original"}}`
+	if err := os.WriteFile(configPath, []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	passwordPath := filepath.Join(t.TempDir(), "password")
+	if err := os.WriteFile(passwordPath, []byte("test-password"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestServerUsesConfiguredListenAddress$")
-	cmd.Env = append(os.Environ(), "VOICE_WEB_SERVER_CHILD=1", "VOICE_WEB_ADDR="+address, "VOICE_WEB_ROOT="+testWebRoot(t))
+	cmd.Env = append(os.Environ(), "VOICE_WEB_SERVER_CHILD=1", "VOICE_WEB_ADDR="+address, "VOICE_WEB_ROOT="+testWebRoot(t), "VOICE_ROUTE_CONFIG_FILE="+configPath, "VOICE_ADMIN_PASSWORD_FILE="+passwordPath, "VOICE_ADMIN_ORIGIN=https://admin.example.test")
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}

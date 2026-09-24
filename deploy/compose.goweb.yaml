@@ -12,6 +12,12 @@ services:
     environment:
       VOICE_WEB_ROOT: /opt/voice-changer/web
       VOICE_WEB_ADDR: 127.0.0.1:8080
+      VOICE_ROUTE_CONFIG_FILE: /etc/voice-changer/voice-routing.json
+      VOICE_ADMIN_PASSWORD_FILE: /run/secrets/voice-admin-password
+      VOICE_ADMIN_ORIGIN: https://vm-voice-1.lan.awesomeio.ru
+    volumes:
+      - /etc/voice-changer:/etc/voice-changer:rw
+      - /etc/voice-changer-admin/password:/run/secrets/voice-admin-password:ro
     mem_limit: 512m
     cpus: 2.0
     pids_limit: 128
