@@ -9,5 +9,8 @@ __pycache__/
 terraform.tfvars
 *.retry
 .pytest_cache/
+/admin-ui/node_modules/
+/admin-ui/dist/
+/web/admin/
 .worktrees/
 .superpowers/

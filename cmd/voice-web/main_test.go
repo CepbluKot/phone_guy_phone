@@ -225,6 +225,17 @@ func TestWebRoutesAndSecurityHeaders(t *testing.T) {
 	}
 }
 
+func TestAdminAPIPathDoesNotServeTheSPA(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	newHandler(testWebRoot(t)).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/admin/api/v1/voice-routes", nil))
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("admin API status=%d, want config-unavailable stub", recorder.Code)
+	}
+	if strings.Contains(recorder.Body.String(), "admin page") {
+		t.Fatal("admin API request fell through to the SPA")
+	}
+}
+
 func TestWebServerDoesNotExposeFilesOutsideRoot(t *testing.T) {
 	root := testWebRoot(t)
 	outside := filepath.Join(filepath.Dir(root), "outside-secret.txt")
