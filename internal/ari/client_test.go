@@ -73,6 +73,9 @@ func TestRESTAuthenticationAndBridgeOwnership(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := client.ClaimChannel("PJSIP/1983-00001"); err != nil {
+		t.Fatal(err)
+	}
 	if err := bridge.AddChannel(context.Background(), "PJSIP/1983-00001", true); err != nil {
 		t.Fatal(err)
 	}
@@ -87,6 +90,71 @@ func TestRESTAuthenticationAndBridgeOwnership(t *testing.T) {
 	}
 	if got := deleteCount.Load(); got != 1 {
 		t.Fatalf("bridge delete calls=%d want=1", got)
+	}
+}
+
+func TestSnoopChannelCreatesOnlyOwnedInboundTap(t *testing.T) {
+	var deleted atomic.Int32
+	client, _ := newARIClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requireARIAuth(t, r)
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/ari/channels/source-1/snoop/owned-snoop":
+			if r.URL.Query().Get("spy") != "in" || r.URL.Query().Get("whisper") != "none" || r.URL.Query().Get("app") != "voice-control" {
+				t.Errorf("snoop request path=%s query=%v", r.URL.Path, r.URL.Query())
+			}
+			w.WriteHeader(http.StatusCreated)
+		case r.Method == http.MethodDelete && r.URL.Path == "/ari/channels/owned-snoop":
+			deleted.Add(1)
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	if err := client.ClaimChannel("source-1"); err != nil {
+		t.Fatal(err)
+	}
+	if id, err := client.SnoopChannel(context.Background(), "source-1", "owned-snoop"); err != nil || id != "owned-snoop" {
+		t.Fatalf("snoop id=%s err=%v", id, err)
+	}
+	if err := client.DeleteChannel(context.Background(), "foreign-snoop"); !errors.Is(err, ErrNotOwned) {
+		t.Fatalf("foreign snoop delete error=%v", err)
+	}
+	if err := client.DeleteChannel(context.Background(), "owned-snoop"); err != nil {
+		t.Fatal(err)
+	}
+	if deleted.Load() != 1 {
+		t.Fatalf("deleted owned snoop %d times", deleted.Load())
+	}
+}
+
+func TestOriginateTracksOnlyConfirmedGeneratedPeerChannel(t *testing.T) {
+	var deletes atomic.Int32
+	client, _ := newARIClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requireARIAuth(t, r)
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/ari/channels/outbound-1":
+			if r.URL.Query().Get("endpoint") != "PJSIP/1988" || r.URL.Query().Get("app") != "voice-control" || r.URL.Query().Get("appArgs") != "call=abcd,role=peer" || r.URL.Query().Get("callerId") != "1983" || r.URL.Query().Get("timeout") != "30" {
+				t.Errorf("originate query=%v", r.URL.Query())
+			}
+			w.WriteHeader(http.StatusCreated)
+		case r.Method == http.MethodDelete && r.URL.Path == "/ari/channels/outbound-1":
+			deletes.Add(1)
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	if err := client.OriginateChannel(context.Background(), "1988", "outbound-1", "call=abcd,role=peer", "1983", 30); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.DeleteChannel(context.Background(), "outbound-1"); err != nil {
+		t.Fatal(err)
+	}
+	if deletes.Load() != 1 {
+		t.Fatalf("owned outbound channel deleted %d times", deletes.Load())
+	}
+	if err := client.OriginateChannel(context.Background(), "PJSIP/1988", "outbound-2", "call=abcd", "1983", 30); !errors.Is(err, ErrARIFailure) {
+		t.Fatalf("untrusted endpoint was accepted: %v", err)
 	}
 }
 

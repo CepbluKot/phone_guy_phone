@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -197,6 +198,89 @@ func (c *Client) ensureOpen() error {
 	return nil
 }
 
+// SnoopChannel creates an owned, receive-only tap on the target channel.
+// The dialplan app name and generated snoop ID are supplied by this process;
+// no caller-provided ARI URL or channel ID is sent back to the browser.
+func (c *Client) SnoopChannel(ctx context.Context, targetID, snoopID string) (string, error) {
+	if err := c.ensureOpen(); err != nil {
+		return "", err
+	}
+	if !c.owns(targetID, resourceChannel) || !validResourceID(snoopID) {
+		return "", ErrNotOwned
+	}
+	query := url.Values{
+		"spy":     []string{"in"},
+		"whisper": []string{"none"},
+		"app":     []string{c.app},
+	}
+	response, err := c.request(ctx, http.MethodPost, "/channels/"+url.PathEscape(targetID)+"/snoop/"+url.PathEscape(snoopID), query)
+	if err != nil {
+		return "", err
+	}
+	closeResponse(response)
+	if err := c.register(snoopID, resourceChannel); err != nil {
+		return "", err
+	}
+	return snoopID, nil
+}
+
+// ClaimChannel records an inbound channel delivered by this client's Stasis
+// application so cleanup can safely answer or hang up that channel.
+func (c *Client) ClaimChannel(channelID string) error {
+	if channelID == "" {
+		return ErrARIFailure
+	}
+	return c.register(channelID, resourceChannel)
+}
+
+// OriginateChannel dials only a validated PJSIP endpoint and tracks its
+// generated channel ID after Asterisk confirms creation.
+func (c *Client) OriginateChannel(ctx context.Context, endpoint, channelID, appArgs, callerID string, timeoutSeconds int) error {
+	if err := c.ensureOpen(); err != nil {
+		return err
+	}
+	if !validEndpointID(endpoint) || !validResourceID(channelID) || !validAppArgs(appArgs) || !validEndpointID(callerID) || timeoutSeconds < 1 || timeoutSeconds > 60 {
+		return ErrARIFailure
+	}
+	query := url.Values{
+		"endpoint": []string{"PJSIP/" + endpoint},
+		"app":      []string{c.app},
+		"appArgs":  []string{appArgs},
+		"callerId": []string{callerID},
+		"timeout":  []string{strconv.Itoa(timeoutSeconds)},
+	}
+	response, err := c.request(ctx, http.MethodPost, "/channels/"+url.PathEscape(channelID), query)
+	if err != nil {
+		return err
+	}
+	closeResponse(response)
+	return c.register(channelID, resourceChannel)
+}
+
+func validEndpointID(endpoint string) bool {
+	if endpoint == "" || len(endpoint) > 32 {
+		return false
+	}
+	for _, char := range endpoint {
+		if char < '0' || char > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func validAppArgs(args string) bool {
+	if args == "" || len(args) > 128 {
+		return false
+	}
+	for _, char := range args {
+		if !((char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9') || char == '-' || char == '_' || char == '=' || char == ',') {
+			return false
+		}
+	}
+	return true
+}
+
 func (c *Client) owns(id string, kind resourceKind) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -232,6 +316,12 @@ func (c *Client) Close(ctx context.Context) error {
 		for _, channel := range c.channels {
 			channels = append(channels, channel)
 		}
+		unmanagedChannels := make([]string, 0)
+		for id, kind := range c.resources {
+			if kind == resourceChannel && c.channels[id] == nil {
+				unmanagedChannels = append(unmanagedChannels, id)
+			}
+		}
 		bridges := make([]*Bridge, 0, len(c.bridges))
 		for _, bridge := range c.bridges {
 			bridges = append(bridges, bridge)
@@ -242,6 +332,11 @@ func (c *Client) Close(ctx context.Context) error {
 		}
 		for _, channel := range channels {
 			if err := channel.close(ctx); err != nil && c.closeErr == nil {
+				c.closeErr = err
+			}
+		}
+		for _, channelID := range unmanagedChannels {
+			if err := c.deleteChannel(ctx, channelID); err != nil && c.closeErr == nil {
 				c.closeErr = err
 			}
 		}
