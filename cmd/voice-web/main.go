@@ -207,7 +207,7 @@ func newAppHandler(webRoot string, adminAPI http.Handler) http.Handler {
 		if r.URL.Path == "/conference/" || strings.HasPrefix(r.URL.Path, "/admin/") || r.URL.Path == "/admin" {
 			w.Header().Set("Permissions-Policy", "microphone=()")
 		}
-		if strings.HasPrefix(r.URL.Path, "/admin/api/v1/") {
+		if r.URL.Path == "/admin/api/v1" || strings.HasPrefix(r.URL.Path, "/admin/api/v1/") {
 			adminAPI.ServeHTTP(w, r)
 			return
 		}

@@ -6,10 +6,18 @@ COPY internal/admin/ internal/admin/
 COPY internal/voiceconfig/ internal/voiceconfig/
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/voice-web ./cmd/voice-web
 
+FROM node:24-alpine AS ui-build
+WORKDIR /ui
+COPY admin-ui/package.json admin-ui/package-lock.json ./
+RUN npm ci
+COPY admin-ui/ ./
+RUN npm test -- --run && npm run build
+
 FROM gcr.io/distroless/static-debian12:nonroot
 WORKDIR /opt/voice-changer
 COPY --from=build /out/voice-web /usr/local/bin/voice-web
 COPY web/ /opt/voice-changer/web/
+COPY --from=ui-build /ui/dist/ /opt/voice-changer/web/admin/
 ENV VOICE_WEB_ROOT=/opt/voice-changer/web
 HEALTHCHECK --interval=15s --timeout=3s --start-period=5s --retries=3 \
     CMD ["/usr/local/bin/voice-web", "healthcheck"]
