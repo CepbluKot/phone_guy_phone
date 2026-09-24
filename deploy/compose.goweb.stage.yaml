@@ -1,0 +1,7 @@
+services:
+  voice-go:
+    environment:
+      VOICE_WEB_ADDR: 127.0.0.1:8081
+      VOICE_SELFMONITOR_ARI_APP: selfmonitor-go-candidate
+      VOICE_SELFMONITOR_HEALTH_ADDR: 127.0.0.1:8196
+      VOICE_SELFMONITOR_PUBLISHER_ADDR: 127.0.0.1:8197
