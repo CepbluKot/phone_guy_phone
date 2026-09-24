@@ -68,8 +68,8 @@ func (b *Bridge) AddChannel(ctx context.Context, channelID string, mute bool) er
 	if closed || !b.client.owns(b.id, resourceBridge) {
 		return ErrNotOwned
 	}
-	if channelID == "" {
-		return ErrARIFailure
+	if !b.client.owns(channelID, resourceChannel) {
+		return ErrNotOwned
 	}
 	query := url.Values{"channel": []string{channelID}}
 	if mute {
@@ -78,6 +78,24 @@ func (b *Bridge) AddChannel(ctx context.Context, channelID string, mute bool) er
 		query.Set("mute", "false")
 	}
 	response, err := b.client.request(ctx, http.MethodPost, "/bridges/"+url.PathEscape(b.id)+"/addChannel", query)
+	if err != nil {
+		return err
+	}
+	closeResponse(response)
+	return nil
+}
+
+func (b *Bridge) RemoveChannel(ctx context.Context, channelID string) error {
+	b.mu.Lock()
+	closed := b.closed
+	b.mu.Unlock()
+	if closed || !b.client.owns(b.id, resourceBridge) {
+		return ErrNotOwned
+	}
+	if !b.client.owns(channelID, resourceChannel) {
+		return ErrNotOwned
+	}
+	response, err := b.client.request(ctx, http.MethodPost, "/bridges/"+url.PathEscape(b.id)+"/removeChannel", url.Values{"channel": []string{channelID}})
 	if err != nil {
 		return err
 	}

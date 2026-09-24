@@ -16,11 +16,20 @@ const (
 )
 
 type Event struct {
-	Type    string `json:"type"`
+	Type    string   `json:"type"`
+	App     string   `json:"application"`
+	Args    []string `json:"args"`
 	Channel struct {
-		ID    string `json:"id"`
-		Name  string `json:"name"`
-		State string `json:"state"`
+		ID     string `json:"id"`
+		Name   string `json:"name"`
+		State  string `json:"state"`
+		Caller struct {
+			Name   string `json:"name"`
+			Number string `json:"number"`
+		} `json:"caller"`
+		Dialplan struct {
+			Exten string `json:"exten"`
+		} `json:"dialplan"`
 	} `json:"channel"`
 }
 
