@@ -19,6 +19,9 @@ services:
       VOICE_ARI_USERNAME: phoneguy
       VOICE_ARI_PASSWORD_FILE: /run/secrets/ari-password
       VOICE_RVC_URL: ws://127.0.0.1:8090/ws/rvc-v2
+      VOICE_SELFMONITOR_ARI_APP: ${VOICE_SELFMONITOR_ARI_APP:-selfmonitor}
+      VOICE_SELFMONITOR_HEALTH_ADDR: ${VOICE_SELFMONITOR_HEALTH_ADDR:-127.0.0.1:8096}
+      VOICE_SELFMONITOR_PUBLISHER_ADDR: ${VOICE_SELFMONITOR_PUBLISHER_ADDR:-127.0.0.1:8097}
       CONFERENCE_FIXTURE_DIR: /var/lib/voice-changer/conference-fixtures
     volumes:
       - /etc/voice-changer:/etc/voice-changer:rw

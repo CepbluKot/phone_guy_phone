@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -165,6 +167,41 @@ func run() error {
 
 type serveVoiceControl func(context.Context, func(error)) error
 
+type selfmonitorSettings struct {
+	app           string
+	healthAddr    string
+	publisherAddr string
+}
+
+func selfmonitorRuntimeSettings() (selfmonitorSettings, error) {
+	settings := selfmonitorSettings{
+		app:           envOr("VOICE_SELFMONITOR_ARI_APP", "selfmonitor"),
+		healthAddr:    envOr("VOICE_SELFMONITOR_HEALTH_ADDR", "127.0.0.1:8096"),
+		publisherAddr: envOr("VOICE_SELFMONITOR_PUBLISHER_ADDR", "127.0.0.1:8097"),
+	}
+	if !loopbackTCPAddress(settings.healthAddr) || !loopbackTCPAddress(settings.publisherAddr) {
+		return selfmonitorSettings{}, errors.New("selfmonitor listener must use loopback")
+	}
+	return settings, nil
+}
+
+func envOr(name, fallback string) string {
+	if value := os.Getenv(name); value != "" {
+		return value
+	}
+	return fallback
+}
+
+func loopbackTCPAddress(address string) bool {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(host)
+	portNumber, err := strconv.Atoi(port)
+	return err == nil && ip != nil && ip.IsLoopback() && portNumber > 0 && portNumber <= 65535
+}
+
 func setupVoiceControl(routes *voiceconfig.Store) (http.Handler, http.Handler, serveVoiceControl, serveVoiceControl, func() error, error) {
 	passwordPath := os.Getenv("VOICE_ARI_PASSWORD_FILE")
 	if passwordPath == "" {
@@ -198,7 +235,13 @@ func setupVoiceControl(routes *voiceconfig.Store) (http.Handler, http.Handler, s
 		password = ""
 		return nil, nil, nil, nil, nil, err
 	}
-	mirrorClient, err := ari.NewClient(ariURL, username, password, "selfmonitor")
+	mirrorSettings, err := selfmonitorRuntimeSettings()
+	if err != nil {
+		password = ""
+		_ = client.Close(context.Background())
+		return nil, nil, nil, nil, nil, err
+	}
+	mirrorClient, err := ari.NewClient(ariURL, username, password, mirrorSettings.app)
 	password = ""
 	if err != nil {
 		_ = client.Close(context.Background())
@@ -296,7 +339,9 @@ func setupVoiceControl(routes *voiceconfig.Store) (http.Handler, http.Handler, s
 		return first
 	}
 	serve := func(ctx context.Context, report func(error)) error { return controller.Serve(ctx, events, report) }
-	mirrorServe := func(ctx context.Context, _ func(error)) error { return monitor.Serve(ctx, mirrorEvents) }
+	mirrorServe := func(ctx context.Context, _ func(error)) error {
+		return monitor.ServeAt(ctx, mirrorEvents, mirrorSettings.publisherAddr, mirrorSettings.healthAddr)
+	}
 	return socket, mirrorSocket, serve, mirrorServe, closer, nil
 }
 

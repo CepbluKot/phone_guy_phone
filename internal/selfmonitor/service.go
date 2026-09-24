@@ -360,11 +360,15 @@ func (session *MirrorSession) cleanup() error {
 }
 
 func (service *Service) Serve(ctx context.Context, events *ari.EventStream) error {
-	publisherListener, err := net.Listen("tcp", "127.0.0.1:8097")
+	return service.ServeAt(ctx, events, "127.0.0.1:8097", "127.0.0.1:8096")
+}
+
+func (service *Service) ServeAt(ctx context.Context, events *ari.EventStream, publisherAddr, healthAddr string) error {
+	publisherListener, err := net.Listen("tcp", publisherAddr)
 	if err != nil {
 		return err
 	}
-	healthListener, err := net.Listen("tcp", "127.0.0.1:8096")
+	healthListener, err := net.Listen("tcp", healthAddr)
 	if err != nil {
 		_ = publisherListener.Close()
 		return err

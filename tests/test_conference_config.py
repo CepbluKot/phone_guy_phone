@@ -111,10 +111,38 @@ def test_phone_routes_enter_go_with_trusted_endpoint_identity():
 
 
 def test_caddy_routes_go_owned_websockets_to_go_runtime():
-    caddy = Path("deploy/Caddyfile").read_text()
+    caddy = Path("deploy/Caddyfile.goweb").read_text()
     assert "handle /ws/conference {\n        reverse_proxy 127.0.0.1:8080" in caddy
     assert "handle /ws/live-mirror {\n        reverse_proxy 127.0.0.1:8080" in caddy
     assert "handle /ws/rvc-v2 {\n        reverse_proxy 127.0.0.1:8090" in caddy
+
+
+def test_go_image_uses_the_runtime_uid_that_owns_the_ari_secret():
+    dockerfile = Path("Dockerfile.goweb").read_text()
+    compose = Path("deploy/compose.goweb.yaml").read_text()
+    assert "USER 10001:10001" in dockerfile
+    assert "/run/secrets/ari-password:ro" in compose
+
+
+def test_staging_compose_uses_distinct_loopback_ports_and_ari_app():
+    stage = Path("deploy/compose.goweb.stage.yaml").read_text()
+    assert "127.0.0.1:8081" in stage
+    assert "selfmonitor-go-candidate" in stage
+    assert "127.0.0.1:8196" in stage
+    assert "127.0.0.1:8197" in stage
+
+
+def test_go_caddy_upstream_matches_the_private_loopback_listener():
+    caddy = Path("deploy/Caddyfile.goweb").read_text().split("# Research demo stack", 1)[0]
+    assert "reverse_proxy 127.0.0.1:8080" in caddy
+    assert "reverse_proxy 192.168.20.70:8080" not in caddy
+
+
+def test_legacy_caddy_template_stays_unchanged_until_go_cutover():
+    caddy = Path("deploy/Caddyfile").read_text()
+    assert "handle /ws/conference {\n        reverse_proxy 127.0.0.1:8091" in caddy
+    assert "reverse_proxy 192.168.20.70:8080" in caddy
+    assert "/ws/live-mirror" not in caddy
 
 
 def test_source_build_is_reproducible_non_root_and_health_checked():

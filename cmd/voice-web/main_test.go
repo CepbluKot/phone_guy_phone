@@ -187,6 +187,40 @@ func TestServerUsesConfiguredListenAddress(t *testing.T) {
 	t.Fatal("server did not bind the configured loopback address")
 }
 
+func TestSelfmonitorStagingCanAvoidLiveApplicationAndPorts(t *testing.T) {
+	t.Setenv("VOICE_SELFMONITOR_ARI_APP", "selfmonitor-candidate")
+	t.Setenv("VOICE_SELFMONITOR_HEALTH_ADDR", "127.0.0.1:8196")
+	t.Setenv("VOICE_SELFMONITOR_PUBLISHER_ADDR", "127.0.0.1:8197")
+
+	settings, err := selfmonitorRuntimeSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.app != "selfmonitor-candidate" || settings.healthAddr != "127.0.0.1:8196" || settings.publisherAddr != "127.0.0.1:8197" {
+		t.Fatalf("staging settings=%+v", settings)
+	}
+}
+
+func TestSelfmonitorRuntimeSettingsKeepProductionDefaults(t *testing.T) {
+	t.Setenv("VOICE_SELFMONITOR_ARI_APP", "")
+	t.Setenv("VOICE_SELFMONITOR_HEALTH_ADDR", "")
+	t.Setenv("VOICE_SELFMONITOR_PUBLISHER_ADDR", "")
+	settings, err := selfmonitorRuntimeSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.app != "selfmonitor" || settings.healthAddr != "127.0.0.1:8096" || settings.publisherAddr != "127.0.0.1:8097" {
+		t.Fatalf("default settings=%+v", settings)
+	}
+}
+
+func TestSelfmonitorRuntimeSettingsRejectNonLoopbackListeners(t *testing.T) {
+	t.Setenv("VOICE_SELFMONITOR_HEALTH_ADDR", "0.0.0.0:8096")
+	if _, err := selfmonitorRuntimeSettings(); err == nil {
+		t.Fatal("non-loopback selfmonitor health listener accepted")
+	}
+}
+
 func TestWebRoutesAndSecurityHeaders(t *testing.T) {
 	handler := newHandler(testWebRoot(t))
 	cases := []struct {
