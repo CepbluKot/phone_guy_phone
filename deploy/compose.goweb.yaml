@@ -1,0 +1,29 @@
+name: voice-go
+
+services:
+  voice-go:
+    build:
+      context: ..
+      dockerfile: Dockerfile.goweb
+    image: voice-go:current
+    container_name: voice-go
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      VOICE_WEB_ROOT: /opt/voice-changer/web
+      VOICE_WEB_ADDR: 127.0.0.1:8080
+    mem_limit: 512m
+    cpus: 2.0
+    pids_limit: 128
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
