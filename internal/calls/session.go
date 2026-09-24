@@ -23,7 +23,7 @@ type Session struct {
 	listener     Media
 	injection    Media
 	model        rvc.RVCStream
-	lease        *sessionLease
+	lease        ProcessingLease
 	ctx          context.Context
 	cancel       context.CancelFunc
 	done         chan struct{}
@@ -33,6 +33,8 @@ type Session struct {
 	cleanupError error
 }
 
+type ProcessingLease interface{ Release() }
+
 func JoinOriginal(ctx context.Context, main Bridge, sourceID string) error {
 	if main == nil || sourceID == "" {
 		return ErrUnknownEndpoint
@@ -40,7 +42,7 @@ func JoinOriginal(ctx context.Context, main Bridge, sourceID string) error {
 	return main.AddChannel(ctx, sourceID, false)
 }
 
-func StartPhoneGuy(ctx context.Context, ariClient ARI, main Bridge, sourceID string, rvcClient RVC, lease *sessionLease) (*Session, error) {
+func StartPhoneGuy(ctx context.Context, ariClient ARI, main Bridge, sourceID string, rvcClient RVC, lease ProcessingLease) (*Session, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}

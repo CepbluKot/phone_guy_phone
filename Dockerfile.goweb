@@ -2,7 +2,12 @@ FROM golang:1.22-alpine AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 COPY cmd/voice-web/ cmd/voice-web/
+COPY internal/ari/ internal/ari/
 COPY internal/admin/ internal/admin/
+COPY internal/calls/ internal/calls/
+COPY internal/conference/ internal/conference/
+COPY internal/rvc/ internal/rvc/
+COPY internal/selfmonitor/ internal/selfmonitor/
 COPY internal/voiceconfig/ internal/voiceconfig/
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/voice-web ./cmd/voice-web
 

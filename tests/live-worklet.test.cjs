@@ -24,6 +24,19 @@ test('128-sample blocks accumulate into complete 960-sample capture frames', () 
   }
 });
 
+test('mirror emits the rendered 48kHz PCM after the selected delay', () => {
+  const {node, messages} = create();
+  node.port.onmessage({data: {type: 'configure', packetSamples: 48000, holdSamples: 2400}});
+  node.port.onmessage({data: {type: 'delay', seconds: 0.1}});
+  node.port.onmessage({data: {type: 'play', pcm: new Int16Array(48000).fill(8192).buffer}});
+  for (let i = 0; i < 55; i++) node.process([[]], [[new Float32Array(960)]]);
+  const mirror = messages.filter(message => message.type === 'mirror').map(message => new Int16Array(message.pcm));
+  assert.ok(mirror.length >= 50);
+  assert.equal(mirror[0].length, 960);
+  assert.ok(mirror[0].every(sample => sample === 0));
+  assert.ok(mirror.some(frame => frame.some(sample => sample === 8192)));
+});
+
 test('only the server-declared packet size is accepted', () => {
   const {node} = create();
   node.port.onmessage({data: {type: 'configure', packetSamples: 48000, holdSamples: 6000}});

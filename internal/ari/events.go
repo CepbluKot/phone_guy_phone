@@ -120,6 +120,11 @@ func (stream *EventStream) run(connection *websocket.Conn) {
 	defer close(stream.done)
 	defer close(stream.events)
 	defer close(stream.errors)
+	defer func() {
+		if stream.ctx.Err() != nil {
+			stream.client.failChannelWaiters(ErrEventDisconnected)
+		}
+	}()
 	backoff := 100 * time.Millisecond
 	for {
 		if stream.ctx.Err() != nil {
@@ -171,6 +176,7 @@ func (stream *EventStream) run(connection *websocket.Conn) {
 			stream.setConnection(nil)
 			continue
 		}
+		stream.client.observeEvent(event)
 		backoff = 100 * time.Millisecond
 		select {
 		case stream.events <- event:

@@ -29,6 +29,7 @@ var (
 	ErrARIFailure          = errors.New("ari_request_failed")
 	ErrARICollision        = errors.New("ari_resource_collision")
 	ErrARINotFound         = errors.New("ari_resource_not_found")
+	ErrChannelNotInStasis  = errors.New("ari_channel_not_in_stasis")
 	ErrNotOwned            = errors.New("ari_resource_not_owned")
 	ErrARIClosed           = errors.New("ari_client_closed")
 	ErrInvalidEvent        = errors.New("invalid_ari_event")
@@ -60,6 +61,9 @@ type Client struct {
 	bridges            map[string]*Bridge
 	channels           map[string]*MediaChannel
 	resources          map[string]resourceKind
+	channelUp          map[string]bool
+	channelGone        map[string]bool
+	channelWaiters     map[string]chan error
 	receiveQueueFrames int
 	closeOnce          sync.Once
 	closeErr           error
@@ -114,7 +118,7 @@ func NewClient(baseURL, username, password, app string) (*Client, error) {
 	return &Client{
 		baseURL: parsed, app: app, username: username, password: password, timeout: defaultTimeout,
 		http:    &http.Client{Transport: transport, Timeout: defaultTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
-		bridges: make(map[string]*Bridge), channels: make(map[string]*MediaChannel), resources: make(map[string]resourceKind), receiveQueueFrames: defaultMediaQueue,
+		bridges: make(map[string]*Bridge), channels: make(map[string]*MediaChannel), resources: make(map[string]resourceKind), channelUp: make(map[string]bool), channelGone: make(map[string]bool), channelWaiters: make(map[string]chan error), receiveQueueFrames: defaultMediaQueue,
 	}, nil
 }
 
@@ -160,6 +164,8 @@ func (c *Client) request(ctx context.Context, method, path string, query url.Val
 	}
 	_ = response.Body.Close()
 	switch response.StatusCode {
+	case http.StatusUnprocessableEntity:
+		return nil, ErrChannelNotInStasis
 	case http.StatusUnauthorized, http.StatusForbidden:
 		return nil, ErrARIUnauthorized
 	case http.StatusConflict:
@@ -196,6 +202,78 @@ func (c *Client) ensureOpen() error {
 		return ErrARIClosed
 	}
 	return nil
+}
+
+func (c *Client) WaitChannelUp(ctx context.Context, channelID string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	c.mu.Lock()
+	stream := c.events
+	if stream == nil {
+		c.mu.Unlock()
+		return nil
+	}
+	if c.channelUp[channelID] {
+		c.mu.Unlock()
+		return nil
+	}
+	if c.channelGone[channelID] {
+		c.mu.Unlock()
+		return ErrMediaHangup
+	}
+	if stream.ctx.Err() != nil {
+		c.mu.Unlock()
+		return ErrEventDisconnected
+	}
+	waiter := make(chan error, 1)
+	c.channelWaiters[channelID] = waiter
+	c.mu.Unlock()
+	select {
+	case err := <-waiter:
+		return err
+	case <-ctx.Done():
+		c.mu.Lock()
+		if c.channelWaiters[channelID] == waiter {
+			delete(c.channelWaiters, channelID)
+		}
+		c.mu.Unlock()
+		return ctx.Err()
+	}
+}
+
+func (c *Client) observeEvent(event Event) {
+	id := event.Channel.ID
+	if id == "" {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var result error
+	switch {
+	case (event.Type == "StasisStart" || event.Type == "ChannelStateChange") && event.Channel.State == "Up":
+		c.channelUp[id] = true
+	case event.Type == "ChannelDestroyed":
+		c.channelGone[id] = true
+		result = ErrMediaHangup
+	default:
+		return
+	}
+	if waiter := c.channelWaiters[id]; waiter != nil {
+		waiter <- result
+		close(waiter)
+		delete(c.channelWaiters, id)
+	}
+}
+
+func (c *Client) failChannelWaiters(err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for id, waiter := range c.channelWaiters {
+		waiter <- err
+		close(waiter)
+		delete(c.channelWaiters, id)
+	}
 }
 
 // SnoopChannel creates an owned, receive-only tap on the target channel.

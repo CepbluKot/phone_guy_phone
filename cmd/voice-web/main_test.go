@@ -236,6 +236,32 @@ func TestAdminAPIPathDoesNotServeTheSPA(t *testing.T) {
 	}
 }
 
+func TestConferenceSocketRouteIsMountedAndFailsClosedWhenUnconfigured(t *testing.T) {
+	handler := newHandler(testWebRoot(t))
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/ws/conference", nil))
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("conference websocket status=%d", recorder.Code)
+	}
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/ws/live-mirror", nil))
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("mirror websocket status=%d", recorder.Code)
+	}
+	configured := newAppHandler(testWebRoot(t), http.NotFoundHandler(), http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusAccepted) }))
+	recorder = httptest.NewRecorder()
+	configured.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/ws/conference", nil))
+	if recorder.Code != http.StatusAccepted {
+		t.Fatalf("configured conference handler status=%d", recorder.Code)
+	}
+	configured = newAppHandler(testWebRoot(t), http.NotFoundHandler(), http.NotFoundHandler(), http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+	recorder = httptest.NewRecorder()
+	configured.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/ws/live-mirror", nil))
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("configured mirror handler status=%d", recorder.Code)
+	}
+}
+
 func TestWebServerDoesNotExposeFilesOutsideRoot(t *testing.T) {
 	root := testWebRoot(t)
 	outside := filepath.Join(filepath.Dir(root), "outside-secret.txt")
