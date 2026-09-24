@@ -21,6 +21,7 @@ function client(options = {}) {
     return elements.get(id);
   };
   let socket, node, ctx;
+  const sockets = [];
   const track = {stop() {}};
   const stream = {getTracks: () => [track]};
   class Context {
@@ -34,7 +35,7 @@ function client(options = {}) {
   }
   class Socket {
     static OPEN = 1;
-    constructor(url) {socket = this; this.url = url; this.readyState = 1; this.messages = [];}
+    constructor(url) {socket = this; this.url = url; this.readyState = 1; this.bufferedAmount = 0; this.messages = []; sockets.push(this);}
     send(message) {this.messages.push(message);}
     close() {this.closed = true;}
   }
@@ -59,7 +60,7 @@ function client(options = {}) {
     setInterval: callback => {options.interval = callback; return 1;}, clearInterval() {}
   }, {filename: 'web/live/app.js'});
   return {
-    get, socket: () => socket, node: () => node, context: () => ctx,
+    get, socket: () => socket, sockets: () => sockets, mirror: () => sockets.find(value => value.url.endsWith('/ws/live-mirror')), node: () => node, context: () => ctx,
     advance(milliseconds) {options.now += milliseconds; options.interval?.();}
   };
 }
@@ -70,6 +71,23 @@ test('live page exposes only the monitor controls', () => {
     .map(match => match[1]);
   assert.deepEqual(interactiveIds, ['start', 'stop', 'delay']);
   assert.match(html, /Phone Guy/);
+});
+
+test('rendered PCM is mirrored to the private bounded publisher socket', async () => {
+  const ui = client();
+  await ui.get('start').onclick();
+  const model = ui.socket();
+  model.onopen();
+  model.onmessage({data: JSON.stringify(READY_V2)});
+  const mirror = ui.mirror();
+  assert.ok(mirror);
+  assert.equal(mirror.url, 'wss://vm-voice-1.lan.awesomeio.ru/ws/live-mirror');
+  const pcm = new Int16Array(960).fill(1024).buffer;
+  ui.node().port.onmessage({data: {type: 'mirror', pcm}});
+  assert.equal(mirror.messages.length, 1);
+  assert.equal(mirror.messages[0].byteLength, 1920);
+  ui.get('stop').onclick();
+  assert.equal(mirror.closed, true);
 });
 
 test('v2 session wires packets, meters and dynamic hop through the worklet', async () => {

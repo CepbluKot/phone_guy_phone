@@ -98,6 +98,25 @@ def test_dialplan_profile_and_accounting_are_bounded_and_non_recording():
     assert "enable=no" in read("cel.conf")
 
 
+def test_phone_routes_enter_go_with_trusted_endpoint_identity():
+    extensions = read("extensions.conf")
+    assert "[phoneguy-sip]" in extensions
+    assert "exten => 1999,1,Stasis(selfmonitor)" in extensions
+    assert "Set(PHONEGUY_SOURCE=${CHANNEL(endpoint)})" in extensions
+    assert "Stasis(voice-control,source=${PHONEGUY_SOURCE},peer=${EXTEN})" in extensions
+    assert "Stasis(voice-control,source=${PHONEGUY_SOURCE},peer=conference)" in extensions
+    assert "Stasis(voice-control,source=${PHONEGUY_SOURCE},peer=1983)" in extensions
+    # Once the route is handed to Go, no endpoint may be dialed natively before policy runs.
+    assert not re.search(r"(?:^|\n)\s*(?:same\s*=>\s*n|exten\s*=>).*\bDial\(", extensions)
+
+
+def test_caddy_routes_go_owned_websockets_to_go_runtime():
+    caddy = Path("deploy/Caddyfile").read_text()
+    assert "handle /ws/conference {\n        reverse_proxy 127.0.0.1:8080" in caddy
+    assert "handle /ws/live-mirror {\n        reverse_proxy 127.0.0.1:8080" in caddy
+    assert "handle /ws/rvc-v2 {\n        reverse_proxy 127.0.0.1:8090" in caddy
+
+
 def test_source_build_is_reproducible_non_root_and_health_checked():
     dockerfile = read("Dockerfile")
 

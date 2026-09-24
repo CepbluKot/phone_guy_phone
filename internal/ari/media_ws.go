@@ -121,6 +121,9 @@ func (c *Client) CreateMediaChannel(ctx context.Context, role string, receive bo
 	if err := media.sendControl(ctx, "ANSWER"); err != nil {
 		return nil, err
 	}
+	if err := c.WaitChannelUp(ctx, id); err != nil {
+		return nil, err
+	}
 	created = false
 	return media, nil
 }
@@ -526,6 +529,28 @@ func (c *Client) HangupChannel(ctx context.Context, channelID string) error {
 	return c.DeleteChannel(ctx, channelID)
 }
 
+func (c *Client) HangupChannelWithCause(ctx context.Context, channelID string, cause int) error {
+	if !c.owns(channelID, resourceChannel) {
+		return ErrNotOwned
+	}
+	if cause < 1 || cause > 127 {
+		return ErrARIFailure
+	}
+	response, err := c.request(ctx, http.MethodPost, "/channels/"+url.PathEscape(channelID)+"/hangup", url.Values{"cause": []string{strconv.Itoa(cause)}})
+	if err != nil && !errors.Is(err, ErrARINotFound) {
+		return err
+	}
+	closeResponse(response)
+	c.mu.Lock()
+	delete(c.resources, channelID)
+	delete(c.channels, channelID)
+	delete(c.channelUp, channelID)
+	delete(c.channelGone, channelID)
+	delete(c.channelWaiters, channelID)
+	c.mu.Unlock()
+	return nil
+}
+
 func (c *Client) DeleteChannel(ctx context.Context, channelID string) error {
 	if !c.owns(channelID, resourceChannel) {
 		return ErrNotOwned
@@ -551,6 +576,9 @@ func (c *Client) deleteChannel(ctx context.Context, channelID string) error {
 	c.mu.Lock()
 	delete(c.resources, channelID)
 	delete(c.channels, channelID)
+	delete(c.channelUp, channelID)
+	delete(c.channelGone, channelID)
+	delete(c.channelWaiters, channelID)
 	c.mu.Unlock()
 	return nil
 }

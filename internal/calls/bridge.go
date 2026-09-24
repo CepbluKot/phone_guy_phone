@@ -53,6 +53,14 @@ func (adapter ARIAdapter) DeleteChannel(ctx context.Context, id string) error {
 	return adapter.Client.DeleteChannel(ctx, id)
 }
 
+func (adapter ARIAdapter) HangupChannel(ctx context.Context, id string) error {
+	return adapter.Client.HangupChannel(ctx, id)
+}
+
+func (adapter ARIAdapter) HangupBusyChannel(ctx context.Context, id string) error {
+	return adapter.Client.HangupChannelWithCause(ctx, id, 17)
+}
+
 type RVC interface {
 	Open(context.Context) (rvc.RVCStream, error)
 }

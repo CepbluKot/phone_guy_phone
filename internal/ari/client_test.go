@@ -207,6 +207,48 @@ func TestEventSubscriptionAuthenticatesAndReconnects(t *testing.T) {
 	}
 }
 
+func TestWaitChannelUpUsesARIEventsAndReportsHangup(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	started := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		connection, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer connection.Close()
+		close(started)
+		_ = connection.WriteJSON(map[string]any{"type": "ChannelStateChange", "channel": map[string]any{"id": "media-up", "state": "Up"}})
+		_ = connection.WriteJSON(map[string]any{"type": "ChannelDestroyed", "channel": map[string]any{"id": "media-gone"}})
+		<-r.Context().Done()
+	}))
+	t.Cleanup(server.Close)
+	client, err := NewClient(server.URL+"/ari", testARIUser, testARIPass, "voice-control")
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := client.Subscribe(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer events.Close()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("event stream did not start")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := client.WaitChannelUp(ctx, "media-up"); err != nil {
+		t.Fatalf("wait up: %v", err)
+	}
+	if err := client.WaitChannelUp(ctx, "media-gone"); !errors.Is(err, ErrMediaHangup) {
+		t.Fatalf("wait destroyed error=%v", err)
+	}
+	if err := client.WaitChannelUp(ctx, "never-up"); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("wait timeout error=%v", err)
+	}
+}
+
 func TestMediaCreateStartAnswerFramesFlowControlAndCleanup(t *testing.T) {
 	upgrader := websocket.Upgrader{Subprotocols: []string{"media"}}
 	var deleted atomic.Int32
@@ -451,6 +493,34 @@ func TestIncomingChannelAnswerAndOwnedHangup(t *testing.T) {
 	}
 	if answerCalls.Load() != 1 || deleteCalls.Load() != 0 {
 		t.Fatalf("answer=%d deletes=%d", answerCalls.Load(), deleteCalls.Load())
+	}
+}
+
+func TestHangupBusyUsesCause17OnlyForClaimedChannel(t *testing.T) {
+	var hangups atomic.Int32
+	client, _ := newARIClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requireARIAuth(t, r)
+		if r.Method == http.MethodPost && r.URL.Path == "/ari/channels/inbound/hangup" {
+			if r.URL.Query().Get("cause") != "17" {
+				t.Errorf("busy hangup query=%v", r.URL.Query())
+			}
+			hangups.Add(1)
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	if err := client.ClaimChannel("inbound"); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.HangupChannelWithCause(context.Background(), "inbound", 17); err != nil {
+		t.Fatal(err)
+	}
+	if hangups.Load() != 1 {
+		t.Fatalf("hangup requests=%d", hangups.Load())
+	}
+	if err := client.HangupChannelWithCause(context.Background(), "foreign", 17); !errors.Is(err, ErrNotOwned) {
+		t.Fatalf("unowned hangup=%v", err)
 	}
 }
 

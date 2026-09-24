@@ -302,6 +302,8 @@ func (joiner *fakeConferenceJoiner) JoinCall(_ context.Context, event ari.Event,
 	joiner.route = route
 	return nil
 }
+func (*fakeConferenceJoiner) HandleChannelDestroyed(context.Context, string) error { return nil }
+func (*fakeConferenceJoiner) Close(context.Context) error                          { return nil }
 
 func TestControllerDelegatesConferenceEntryWithResolvedProfile(t *testing.T) {
 	store := snapshotStore{snapshot: voiceconfig.RouteSnapshot{Revision: 6, Extensions: map[string]voiceconfig.Profile{"4101": voiceconfig.ProfilePhoneGuy}}}

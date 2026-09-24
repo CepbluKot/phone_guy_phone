@@ -15,9 +15,16 @@ services:
       VOICE_ROUTE_CONFIG_FILE: /etc/voice-changer/voice-routing.json
       VOICE_ADMIN_PASSWORD_FILE: /run/secrets/voice-admin-password
       VOICE_ADMIN_ORIGIN: https://vm-voice-1.lan.awesomeio.ru
+      VOICE_ARI_URL: http://127.0.0.1:8092/ari
+      VOICE_ARI_USERNAME: phoneguy
+      VOICE_ARI_PASSWORD_FILE: /run/secrets/ari-password
+      VOICE_RVC_URL: ws://127.0.0.1:8090/ws/rvc-v2
+      CONFERENCE_FIXTURE_DIR: /var/lib/voice-changer/conference-fixtures
     volumes:
       - /etc/voice-changer:/etc/voice-changer:rw
       - /etc/voice-changer-admin/password:/run/secrets/voice-admin-password:ro
+      - "${VOICE_ARI_RUNTIME:?VOICE_ARI_RUNTIME is required}/asterisk/ari-password:/run/secrets/ari-password:ro"
+      - "${VOICE_CONFERENCE_FIXTURES:?VOICE_CONFERENCE_FIXTURES is required}:/var/lib/voice-changer/conference-fixtures:ro"
     mem_limit: 512m
     cpus: 2.0
     pids_limit: 128

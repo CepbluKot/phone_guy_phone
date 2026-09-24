@@ -36,6 +36,13 @@ func (route *Route) Close() {
 	}
 }
 
+func (route *Route) ProcessingLease() ProcessingLease {
+	if route == nil {
+		return nil
+	}
+	return route.lease
+}
+
 type Router struct {
 	store   voiceconfig.RouteStore
 	allowed map[string]struct{}
@@ -104,6 +111,13 @@ func (router *Router) Resolve(ctx context.Context, event ari.Event) (*Route, err
 		}
 	}
 	return route, nil
+}
+
+func (router *Router) AcquireProcessingLease(ctx context.Context) (ProcessingLease, error) {
+	if router == nil {
+		return nil, ErrUnknownEndpoint
+	}
+	return router.gate.Acquire(ctx)
 }
 
 // Stasis arguments are written by the trusted dialplan as source=<PJSIP ID>

@@ -15,6 +15,11 @@ import (
 	"time"
 
 	"voice-changer/internal/admin"
+	"voice-changer/internal/ari"
+	"voice-changer/internal/calls"
+	"voice-changer/internal/conference"
+	"voice-changer/internal/rvc"
+	"voice-changer/internal/selfmonitor"
 	"voice-changer/internal/voiceconfig"
 )
 
@@ -104,15 +109,30 @@ func run() error {
 		address = ":8080"
 	}
 
+	conferenceHandler, mirrorHandler, voiceControl, mirrorControl, closeVoice, err := setupVoiceControl(routes)
+	if err != nil {
+		return errors.New("voice control unavailable")
+	}
+	defer closeVoice()
 	server := &http.Server{
 		Addr:              address,
-		Handler:           newAppHandler(root, adminAPI),
+		Handler:           newAppHandler(root, adminAPI, conferenceHandler, mirrorHandler),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	result := make(chan error, 1)
+	controlResult := make(chan error, 1)
+	mirrorResult := make(chan error, 1)
+	if voiceControl != nil {
+		go func() {
+			controlResult <- voiceControl(ctx, func(err error) { log.Printf("voice-control: %v", err) })
+		}()
+	}
+	if mirrorControl != nil {
+		go func() { mirrorResult <- mirrorControl(ctx, func(err error) { log.Printf("selfmonitor: %v", err) }) }()
+	}
 	go func() {
 		log.Printf("serving web assets from %s on %s", root, server.Addr)
 		result <- server.ListenAndServe()
@@ -123,6 +143,13 @@ func run() error {
 			return nil
 		}
 		return err
+	case err := <-controlResult:
+		if err != nil {
+			return errors.New("voice control stopped")
+		}
+		return errors.New("voice control stopped")
+	case <-mirrorResult:
+		return errors.New("selfmonitor stopped")
 	case <-ctx.Done():
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -136,6 +163,143 @@ func run() error {
 	}
 }
 
+type serveVoiceControl func(context.Context, func(error)) error
+
+func setupVoiceControl(routes *voiceconfig.Store) (http.Handler, http.Handler, serveVoiceControl, serveVoiceControl, func() error, error) {
+	passwordPath := os.Getenv("VOICE_ARI_PASSWORD_FILE")
+	if passwordPath == "" {
+		return nil, nil, nil, nil, func() error { return nil }, nil
+	}
+	passwordInfo, err := os.Stat(passwordPath)
+	if err != nil || !passwordInfo.Mode().IsRegular() || passwordInfo.Mode().Perm()&0o077 != 0 || passwordInfo.Size() == 0 || passwordInfo.Size() > 4096 {
+		return nil, nil, nil, nil, nil, errors.New("ari password unavailable")
+	}
+	passwordBytes, err := os.ReadFile(passwordPath)
+	if err != nil {
+		return nil, nil, nil, nil, nil, err
+	}
+	password := strings.TrimRight(string(passwordBytes), "\r\n")
+	for index := range passwordBytes {
+		passwordBytes[index] = 0
+	}
+	if password == "" {
+		return nil, nil, nil, nil, nil, errors.New("ari password unavailable")
+	}
+	ariURL := os.Getenv("VOICE_ARI_URL")
+	if ariURL == "" {
+		ariURL = "http://127.0.0.1:8092/ari"
+	}
+	username := os.Getenv("VOICE_ARI_USERNAME")
+	if username == "" {
+		username = "phoneguy"
+	}
+	client, err := ari.NewClient(ariURL, username, password, "voice-control")
+	if err != nil {
+		password = ""
+		return nil, nil, nil, nil, nil, err
+	}
+	mirrorClient, err := ari.NewClient(ariURL, username, password, "selfmonitor")
+	password = ""
+	if err != nil {
+		_ = client.Close(context.Background())
+		return nil, nil, nil, nil, nil, err
+	}
+	router, err := calls.NewRouter(routes, []string{"1983", "1987", "1988", "2014"})
+	if err != nil {
+		_ = client.Close(context.Background())
+		_ = mirrorClient.Close(context.Background())
+		return nil, nil, nil, nil, nil, err
+	}
+	modelURL := os.Getenv("VOICE_RVC_URL")
+	var model *rvc.Client
+	if modelURL == "" {
+		model = rvc.DefaultClient()
+	} else {
+		model, err = rvc.NewClient(modelURL)
+	}
+	if err != nil {
+		_ = client.Close(context.Background())
+		_ = mirrorClient.Close(context.Background())
+		return nil, nil, nil, nil, nil, err
+	}
+	controller, err := calls.NewController("voice-control", calls.ARIAdapter{Client: client}, router, model)
+	if err != nil {
+		_ = client.Close(context.Background())
+		_ = mirrorClient.Close(context.Background())
+		return nil, nil, nil, nil, nil, err
+	}
+	events, err := client.Subscribe(context.Background())
+	if err != nil {
+		_ = client.Close(context.Background())
+		_ = mirrorClient.Close(context.Background())
+		return nil, nil, nil, nil, nil, err
+	}
+	mirrorEvents, err := mirrorClient.Subscribe(context.Background())
+	if err != nil {
+		_ = events.Close()
+		_ = client.Close(context.Background())
+		_ = mirrorClient.Close(context.Background())
+		return nil, nil, nil, nil, nil, err
+	}
+	monitor, err := selfmonitor.New(calls.ARIAdapter{Client: mirrorClient}, selfmonitor.NewRelay())
+	if err != nil {
+		_ = events.Close()
+		_ = mirrorEvents.Close()
+		_ = client.Close(context.Background())
+		_ = mirrorClient.Close(context.Background())
+		return nil, nil, nil, nil, nil, err
+	}
+	var manager *conference.Manager
+	var socket http.Handler
+	var mirrorSocket http.Handler = monitor.Handler()
+	fixtureDir := os.Getenv("CONFERENCE_FIXTURE_DIR")
+	if fixtureDir != "" {
+		source, sourceErr := conference.FixtureSource(fixtureDir)
+		if sourceErr != nil {
+			_ = events.Close()
+			_ = mirrorEvents.Close()
+			_ = client.Close(context.Background())
+			_ = mirrorClient.Close(context.Background())
+			return nil, nil, nil, nil, nil, sourceErr
+		}
+		manager, err = conference.NewManager(calls.ARIAdapter{Client: client}, model, source, conference.Options{})
+		if err != nil {
+			_ = events.Close()
+			_ = mirrorEvents.Close()
+			_ = client.Close(context.Background())
+			_ = mirrorClient.Close(context.Background())
+			return nil, nil, nil, nil, nil, err
+		}
+		controller.SetConferenceJoiner(manager)
+		socket = conference.NewHandler(manager, "https://voice.lan.awesomeio.ru", "https://vm-voice-1.lan.awesomeio.ru")
+	}
+	closer := func() error {
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		defer cancel()
+		var first error
+		if manager != nil {
+			if err := manager.Close(ctx); err != nil {
+				first = err
+			}
+		}
+		if err := monitor.Close(ctx); err != nil && first == nil {
+			first = err
+		}
+		_ = events.Close()
+		_ = mirrorEvents.Close()
+		if err := client.Close(ctx); err != nil && first == nil {
+			first = err
+		}
+		if err := mirrorClient.Close(ctx); err != nil && first == nil {
+			first = err
+		}
+		return first
+	}
+	serve := func(ctx context.Context, report func(error)) error { return controller.Serve(ctx, events, report) }
+	mirrorServe := func(ctx context.Context, _ func(error)) error { return monitor.Serve(ctx, mirrorEvents) }
+	return socket, mirrorSocket, serve, mirrorServe, closer, nil
+}
+
 func newHandler(webRoot string) http.Handler {
 	return newAppHandler(webRoot, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -143,7 +307,7 @@ func newHandler(webRoot string) http.Handler {
 	}))
 }
 
-func newAppHandler(webRoot string, adminAPI http.Handler) http.Handler {
+func newAppHandler(webRoot string, adminAPI http.Handler, realtimeHandlers ...http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -152,6 +316,20 @@ func newAppHandler(webRoot string, adminAPI http.Handler) http.Handler {
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		serveFile(webRoot, "index.html", w, r)
 	})
+	conferenceSocket := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "conference unavailable", http.StatusServiceUnavailable)
+	}))
+	if len(realtimeHandlers) > 0 && realtimeHandlers[0] != nil {
+		conferenceSocket = realtimeHandlers[0]
+	}
+	mux.Handle("GET /ws/conference", conferenceSocket)
+	mirrorSocket := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "mirror unavailable", http.StatusServiceUnavailable)
+	}))
+	if len(realtimeHandlers) > 1 && realtimeHandlers[1] != nil {
+		mirrorSocket = realtimeHandlers[1]
+	}
+	mux.Handle("GET /ws/live-mirror", mirrorSocket)
 	mux.HandleFunc("GET /conference/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/conference/" {
 			http.NotFound(w, r)
@@ -191,7 +369,7 @@ func newAppHandler(webRoot string, adminAPI http.Handler) http.Handler {
 		serveFile(webRoot, rel, w, r)
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/" || r.URL.Path == "/healthz" || r.URL.Path == "/conference/" || r.URL.Path == "/live/" || r.URL.Path == "/admin" || strings.HasPrefix(r.URL.Path, "/static/") || strings.HasPrefix(r.URL.Path, "/admin/") {
+		if r.URL.Path == "/" || r.URL.Path == "/healthz" || r.URL.Path == "/conference/" || r.URL.Path == "/live/" || r.URL.Path == "/admin" || r.URL.Path == "/ws/conference" || r.URL.Path == "/ws/live-mirror" || strings.HasPrefix(r.URL.Path, "/static/") || strings.HasPrefix(r.URL.Path, "/admin/") {
 			w.Header().Set("Allow", "GET, HEAD")
 			http.Error(w, `{"detail":"Method Not Allowed"}`, http.StatusMethodNotAllowed)
 			return

@@ -49,6 +49,8 @@ type Controller struct {
 
 type ConferenceJoiner interface {
 	JoinCall(context.Context, ari.Event, *Route) error
+	HandleChannelDestroyed(context.Context, string) error
+	Close(context.Context) error
 }
 
 func (controller *Controller) SetConferenceJoiner(joiner ConferenceJoiner) {
@@ -416,6 +418,12 @@ func (controller *Controller) destroyed(ctx context.Context, channelID string) e
 	}
 	controller.mu.Unlock()
 	if found == nil {
+		controller.mu.Lock()
+		joiner := controller.conference
+		controller.mu.Unlock()
+		if joiner != nil {
+			return joiner.HandleChannelDestroyed(ctx, channelID)
+		}
 		return nil
 	}
 	controller.recordOutcome("call_ended")
@@ -489,6 +497,14 @@ func (controller *Controller) Close(ctx context.Context) error {
 			first = err
 		}
 		cancel()
+	}
+	controller.mu.Lock()
+	joiner := controller.conference
+	controller.mu.Unlock()
+	if joiner != nil {
+		if err := joiner.Close(ctx); err != nil && first == nil {
+			first = err
+		}
 	}
 	return first
 }
