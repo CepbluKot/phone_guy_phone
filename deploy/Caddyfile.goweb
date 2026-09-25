@@ -1,36 +1,36 @@
 {
-    auto_https disable_redirects
+	auto_https disable_redirects
 }
 
 https://vm-voice-1.lan.awesomeio.ru {
-    bind 192.168.20.70
-    tls /etc/voice-certs/fullchain.pem /etc/voice-certs/key.pem
-    handle /ws/conference {
-        reverse_proxy 127.0.0.1:8080
-    }
-    handle /ws/live-mirror {
-        reverse_proxy 127.0.0.1:8080
-    }
-    handle /ws/rvc-v2 {
-        reverse_proxy 127.0.0.1:8090
-    }
-    handle /ws/rvc {
-        reverse_proxy 127.0.0.1:8090
-    }
-    redir /live /live/ 308
-    handle_path /live/* {
-        root * /opt/voice-changer/web/live
-        file_server
-    }
-    handle {
-        reverse_proxy 127.0.0.1:8080
-    }
+	bind 192.168.20.70
+	tls /etc/voice-certs/fullchain.pem /etc/voice-certs/key.pem
+	handle /ws/conference {
+		reverse_proxy 127.0.0.1:8080
+	}
+	handle /ws/live-mirror {
+		reverse_proxy 127.0.0.1:8080
+	}
+	handle /ws/rvc-v2 {
+		reverse_proxy 127.0.0.1:8090
+	}
+	handle /ws/rvc {
+		reverse_proxy 127.0.0.1:8090
+	}
+	redir /live /live/ 308
+	handle_path /live/* {
+		root * /opt/voice-changer/web/live
+		file_server
+	}
+	handle {
+		reverse_proxy 127.0.0.1:8080
+	}
 }
 
 # Research demo stack (rvc_service.rt_server on 8093 + isolated GPT v2 copy on
 # 8098). Keep the separately owned research hostname unchanged across cutover.
 https://voice-claude.lan.awesomeio.ru {
-    bind 192.168.20.70
-    tls /etc/voice-certs/fullchain.pem /etc/voice-certs/key.pem
-    reverse_proxy 127.0.0.1:8093
+	bind 192.168.20.70
+	tls /etc/voice-certs/fullchain.pem /etc/voice-certs/key.pem
+	reverse_proxy 127.0.0.1:8093
 }
