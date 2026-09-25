@@ -112,9 +112,9 @@ def test_phone_routes_enter_go_with_trusted_endpoint_identity():
 
 def test_caddy_routes_go_owned_websockets_to_go_runtime():
     caddy = Path("deploy/Caddyfile.goweb").read_text()
-    assert "handle /ws/conference {\n        reverse_proxy 127.0.0.1:8080" in caddy
-    assert "handle /ws/live-mirror {\n        reverse_proxy 127.0.0.1:8080" in caddy
-    assert "handle /ws/rvc-v2 {\n        reverse_proxy 127.0.0.1:8090" in caddy
+    assert re.search(r"handle /ws/conference\s*\{\s*reverse_proxy 127\.0\.0\.1:8080", caddy)
+    assert re.search(r"handle /ws/live-mirror\s*\{\s*reverse_proxy 127\.0\.0\.1:8080", caddy)
+    assert re.search(r"handle /ws/rvc-v2\s*\{\s*reverse_proxy 127\.0\.0\.1:8090", caddy)
 
 
 def test_go_image_uses_the_runtime_uid_that_owns_the_ari_secret():
