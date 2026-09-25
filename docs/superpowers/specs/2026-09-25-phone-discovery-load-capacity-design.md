@@ -41,6 +41,9 @@ handling requirements still apply.
 
 - `internal/calls/gate.go` creates a one-token `sessionGate`; the same router
   uses it when admitting processed calls.
+- `rvc_service/server.py` accepts only one active WebSocket session at a time.
+  The effective production limit is therefore one processed call at both the
+  Go admission gate and RVC worker, not just a GPU-derived estimate.
 - `rvc_service/server.py` serves production `/healthz` with readiness, active,
   running, and queued-window fields.
 - `internal/rvc/stream.go` requires and validates `processingMs` metadata for
@@ -141,12 +144,18 @@ valid evidence for current production capacity.
 
 ## Capacity methodology
 
-The first implementation reports the enforced call-admission limit and gathers
-the evidence required for a later estimate. A capacity estimate may be
-published only after a repeatable controlled-load procedure:
+The first implementation reports the effective enforced limit and gathers the
+evidence required for a later estimate. The current Go gate and production RVC
+worker both limit the service to one session, so testing only the running
+production route cannot establish a safe limit above one. A capacity estimate
+may be published only after a repeatable controlled-load procedure against an
+isolated candidate that uses the same model, stream settings, and hardware, but
+can admit multiple sessions without touching the production call limit:
 
-1. Use the production Go call path, production Python RVC worker, selected
-   model/profile, audio format, one-second block cadence, and the deployed VM/GPU.
+1. Use an isolated candidate on the deployed VM/GPU, with the production Go call
+   path and an explicitly benchmark-only multi-session admission setting, the
+   production Python RVC model/profile, audio format, and one-second block
+   cadence. Do not alter live admission behavior for the benchmark.
 2. Increase concurrent processed speakers in controlled steps while observing
    processing latency against the real-time block budget, output continuity,
    queue growth, errors, CPU/RAM/GPU/VRAM, and service restarts.
@@ -156,8 +165,9 @@ published only after a repeatable controlled-load procedure:
 5. Store the run's non-secret summary and timestamp. Do not store audio.
 
 This dashboard does not itself alter the enforced limit or initiate a disruptive
-load test. A separate approved implementation/deployment step is required to
-change admission behavior.
+load test. A separately reviewed benchmark procedure and an approved
+implementation/deployment step are required before changing production
+admission behavior.
 
 ## Failure and security behavior
 
