@@ -56,9 +56,9 @@ handling requirements still apply.
 - The repository's homelab documentation identifies Archer AX12 at
   `192.168.20.1` as the home DHCP server. Its current lease-read API and
   credentials are not verified from the voice-service VM.
-- The one-session Go limit is source evidence. The production worker's
-  multi-user capacity and current GPU/VM headroom are not established by this
-  inspection or by historical benchmark documents.
+- The one-session Go and RVC limits are source evidence. Multi-session RVC
+  behavior and current GPU/VM headroom are not established by this inspection
+  or by historical benchmark documents.
 
 ## Proposed architecture
 
@@ -152,10 +152,10 @@ may be published only after a repeatable controlled-load procedure against an
 isolated candidate that uses the same model, stream settings, and hardware, but
 can admit multiple sessions without touching the production call limit:
 
-1. Use an isolated candidate on the deployed VM/GPU, with the production Go call
-   path and an explicitly benchmark-only multi-session admission setting, the
-   production Python RVC model/profile, audio format, and one-second block
-   cadence. Do not alter live admission behavior for the benchmark.
+1. Use an isolated candidate on the deployed VM/GPU. Its benchmark-only Go and
+   Python worker configuration must permit multiple sessions while preserving
+   the production call path, RVC model/profile, audio format, and one-second
+   block cadence. Do not alter live admission behavior for the benchmark.
 2. Increase concurrent processed speakers in controlled steps while observing
    processing latency against the real-time block budget, output continuity,
    queue growth, errors, CPU/RAM/GPU/VRAM, and service restarts.
