@@ -108,9 +108,15 @@ func TestHealthcheckModeUsesLocalHTTPStatus(t *testing.T) {
 		{name: "unhealthy", statusCode: http.StatusServiceUnavailable, wantExit: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			listener, err := net.Listen("tcp", "127.0.0.1:8080")
+			reservation, err := net.Listen("tcp", "127.0.0.1:0")
 			if err != nil {
-				t.Skipf("healthcheck port is already occupied: %v", err)
+				t.Fatal(err)
+			}
+			address := reservation.Addr().String()
+			_ = reservation.Close()
+			listener, err := net.Listen("tcp", address)
+			if err != nil {
+				t.Fatal(err)
 			}
 			server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(tc.statusCode)
@@ -119,7 +125,7 @@ func TestHealthcheckModeUsesLocalHTTPStatus(t *testing.T) {
 			t.Cleanup(func() { _ = server.Close() })
 
 			cmd := exec.Command(os.Args[0], "-test.run=^TestHealthcheckModeUsesLocalHTTPStatus$")
-			cmd.Env = append(os.Environ(), "VOICE_WEB_HEALTHCHECK_CHILD=1", "VOICE_WEB_ROOT="+testWebRoot(t))
+			cmd.Env = append(os.Environ(), "VOICE_WEB_HEALTHCHECK_CHILD=1", "VOICE_WEB_ROOT="+testWebRoot(t), "VOICE_WEB_ADDR="+address)
 			err = cmd.Run()
 			if tc.wantExit && err == nil {
 				t.Fatal("unhealthy endpoint returned success")

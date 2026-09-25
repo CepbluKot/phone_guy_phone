@@ -68,7 +68,11 @@ func (client *fakeARI) AnswerChannel(context.Context, string) error {
 	client.answers.Add(1)
 	return nil
 }
-func (client *fakeARI) ClaimChannel(string) error { return nil }
+func (client *fakeARI) ClaimChannel(string) error                                      { return nil }
+func (*fakeARI) ContinueChannel(context.Context, string, string, string, string) error { return nil }
+func (*fakeARI) RingChannel(context.Context, string) error                             { return nil }
+func (*fakeARI) RingStopChannel(context.Context, string) error                         { return nil }
+func (*fakeARI) PlayChannel(context.Context, string, string, string) error             { return nil }
 func (client *fakeARI) OriginateChannel(context.Context, string, string, string, string, int) error {
 	return nil
 }

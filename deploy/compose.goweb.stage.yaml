@@ -1,7 +1,42 @@
+name: voice-go-stage
+
 services:
-  voice-go:
+  voice-go-stage:
+    image: ${VOICE_GO_IMAGE:?VOICE_GO_IMAGE is required}
+    container_name: voice-go-stage
+    restart: "no"
+    network_mode: host
     environment:
+      VOICE_WEB_ROOT: /opt/voice-changer/web
       VOICE_WEB_ADDR: 127.0.0.1:8081
+      VOICE_ROUTE_CONFIG_FILE: /var/lib/voice-go-stage/voice-routing.json
+      VOICE_ADMIN_PASSWORD_FILE: /run/secrets/voice-admin-password
+      VOICE_ADMIN_ORIGIN: https://voice.lan.awesomeio.ru,https://vm-voice-1.lan.awesomeio.ru
+      VOICE_ARI_URL: http://127.0.0.1:8092/ari
+      VOICE_ARI_USERNAME: phoneguy
+      VOICE_ARI_PASSWORD_FILE: /run/secrets/ari-password
+      VOICE_RVC_URL: ws://127.0.0.1:8090/ws/rvc-v2
       VOICE_SELFMONITOR_ARI_APP: selfmonitor-go-candidate
       VOICE_SELFMONITOR_HEALTH_ADDR: 127.0.0.1:8196
       VOICE_SELFMONITOR_PUBLISHER_ADDR: 127.0.0.1:8197
+      CONFERENCE_FIXTURE_DIR: /var/lib/voice-go-stage/fixtures
+    volumes:
+      - ${VOICE_GO_STAGE_CONFIG_DIR:?VOICE_GO_STAGE_CONFIG_DIR is required}:/var/lib/voice-go-stage:rw
+      - ${VOICE_GO_STAGE_PASSWORD:?VOICE_GO_STAGE_PASSWORD is required}:/run/secrets/voice-admin-password:ro
+      - ${VOICE_ARI_PASSWORD:?VOICE_ARI_PASSWORD is required}:/run/secrets/ari-password:ro
+      - ${VOICE_CONFERENCE_FIXTURES:?VOICE_CONFERENCE_FIXTURES is required}:/var/lib/voice-go-stage/fixtures:ro
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 128
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "2"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true

@@ -6,8 +6,19 @@
 # Never restarts asterisk/voice-rvc/conference containers.
 set -euo pipefail
 
-TARGET=${TARGET:-ubuntu@192.168.20.70}
+approved_target=ubuntu@192.168.20.70
+TARGET=${TARGET:-$approved_target}
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+
+if [ "$TARGET" != "$approved_target" ]; then
+  echo "TARGET must be the approved VM209: $approved_target" >&2
+  exit 2
+fi
+
+if ! ssh "$TARGET" 'sudo test ! -e /opt/voice-changer/.go-runtime-owner'; then
+  echo "Go runtime owns VM209; legacy deployment refused" >&2
+  exit 2
+fi
 
 echo "==> 1/6 sync code"
 ssh "$TARGET" 'mkdir -p /opt/voice-selfmonitor/app/selfmonitor /opt/voice-selfmonitor/app/conference'

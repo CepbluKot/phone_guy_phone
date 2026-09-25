@@ -12,7 +12,7 @@ def read(name: str) -> str:
 def test_conference_configuration_is_private_and_wideband():
     assert "internal_sample_rate=48000" in read("confbridge.conf")
     assert "autoload=no" in read("modules.conf")
-    assert "chan_pjsip" not in read("modules.conf")
+    assert "load => chan_pjsip.so" in read("modules.conf")
     assert "ConfBridge(phoneguy-demo" in read("extensions.conf")
 
 
@@ -34,18 +34,37 @@ def test_module_allowlist_is_exact_and_contains_release_dependencies():
     loaded = set(re.findall(r"^load\s*=>\s*([a-z0-9_]+)\.so$", modules, re.MULTILINE))
 
     assert loaded == {
+        "app_dial",
         "app_confbridge",
+        "app_playback",
         "app_stasis",
         "bridge_softmix",
+        "chan_pjsip",
         "chan_websocket",
+        "codec_alaw",
+        "codec_resample",
+        "format_wav",
         "pbx_config",
         "res_ari",
         "res_ari_asterisk",
+        "res_ari_bridges",
         "res_ari_channels",
         "res_ari_events",
         "res_ari_model",
         "res_http_websocket",
+        "res_pjsip",
+        "res_pjsip_authenticator_digest",
+        "res_pjsip_endpoint_identifier_user",
+        "res_pjsip_nat",
+        "res_pjsip_pubsub",
+        "res_pjsip_registrar",
+        "res_pjsip_sdp_rtp",
+        "res_pjsip_session",
+        "res_pjproject",
+        "res_rtp_asterisk",
+        "res_sorcery_astdb",
         "res_sorcery_config",
+        "res_sorcery_memory",
         "res_stasis",
         "res_stasis_answer",
         "res_stasis_playback",
@@ -54,7 +73,10 @@ def test_module_allowlist_is_exact_and_contains_release_dependencies():
         "res_timing_timerfd",
         "res_websocket_client",
     }
-    assert "pjsip" not in modules.lower()
+    assert "chan_pjsip" in loaded
+    assert "app_playback" in loaded
+    assert "format_wav" in loaded
+    assert "res_pjsip" in loaded
     assert "cdr_" not in modules.lower()
     assert "cel_" not in modules.lower()
     assert "res_ari_recordings" not in modules
@@ -105,15 +127,32 @@ def test_phone_routes_enter_go_with_trusted_endpoint_identity():
     assert "Set(PHONEGUY_SOURCE=${CHANNEL(endpoint)})" in extensions
     assert "Stasis(voice-control,source=${PHONEGUY_SOURCE},peer=${EXTEN})" in extensions
     assert "Stasis(voice-control,source=${PHONEGUY_SOURCE},peer=conference)" in extensions
-    assert "Stasis(voice-control,source=${PHONEGUY_SOURCE},peer=1983)" in extensions
+    assert "Stasis(voice-control,source=${PHONEGUY_SOURCE},peer=1983,mode=callback-1900)" in extensions
     # Once the route is handed to Go, no endpoint may be dialed natively before policy runs.
     assert not re.search(r"(?:^|\n)\s*(?:same\s*=>\s*n|exten\s*=>).*\bDial\(", extensions)
 
 
+def test_legacy_recording_extensions_enter_go_then_retain_their_exact_loops():
+    extensions = read("extensions.conf")
+    for extension, sound in (
+        ("1987", "phoneguy-bot/phoneguy"),
+        ("2014", "phoneguy-bot/mr-beast-phoneguy"),
+        ("1993", "phoneguy-bot/fnaf1-night1-original"),
+    ):
+        start = extensions.index(f"exten => {extension},1,")
+        end = extensions.find("\nexten =>", start + 1)
+        block = extensions[start:] if end < 0 else extensions[start:end]
+        assert "same => n,Set(PHONEGUY_SOURCE=${CHANNEL(endpoint)})" in block
+        assert f"Stasis(voice-control,source=${{PHONEGUY_SOURCE}},service={extension})" in block
+        assert f"same => n(play),Playback({sound})" in block
+        assert "same => n(pause),Wait(2)" in block
+        assert f'GotoIf($["${{PLAYBACKSTATUS}}" = "SUCCESS"]?pause:done)' in extensions
+
+
 def test_caddy_routes_go_owned_websockets_to_go_runtime():
     caddy = Path("deploy/Caddyfile.goweb").read_text()
-    assert re.search(r"handle /ws/conference\s*\{\s*reverse_proxy 127\.0\.0\.1:8080", caddy)
-    assert re.search(r"handle /ws/live-mirror\s*\{\s*reverse_proxy 127\.0\.0\.1:8080", caddy)
+    assert re.search(r"handle /ws/conference\s*\{\s*reverse_proxy 192\.168\.20\.70:8080", caddy)
+    assert re.search(r"handle /ws/live-mirror\s*\{\s*reverse_proxy 192\.168\.20\.70:8080", caddy)
     assert re.search(r"handle /ws/rvc-v2\s*\{\s*reverse_proxy 127\.0\.0\.1:8090", caddy)
 
 
@@ -122,6 +161,36 @@ def test_go_image_uses_the_runtime_uid_that_owns_the_ari_secret():
     compose = Path("deploy/compose.goweb.yaml").read_text()
     assert "USER 10001:10001" in dockerfile
     assert "/run/secrets/ari-password:ro" in compose
+
+
+def test_production_asterisk_compose_preserves_sip_rtp_and_runtime_configs():
+    compose = Path("deploy/compose.conference.yaml").read_text()
+
+    assert '"192.168.20.70:5060:5060/udp"' in compose
+    assert '"192.168.20.70:10000-10019:10000-10019/udp"' in compose
+    for path in (
+        "pjsip.conf:/etc/asterisk/pjsip.conf:ro",
+        "extensions.conf:/etc/asterisk/extensions.conf:ro",
+        "modules.conf:/etc/asterisk/modules.conf:ro",
+        "sounds:/var/lib/asterisk/sounds/phoneguy-bot:ro",
+    ):
+        assert path in compose
+
+
+def test_asterisk_image_builds_active_pjsip_and_audio_dependencies():
+    dockerfile = read("Dockerfile")
+    for module in (
+        "app_dial", "app_playback", "chan_pjsip", "codec_alaw",
+        "codec_resample", "format_wav", "res_ari_bridges", "res_pjsip",
+        "res_pjsip_authenticator_digest", "res_pjsip_endpoint_identifier_user",
+        "res_pjsip_registrar", "res_pjsip_session", "res_rtp_asterisk",
+    ):
+        assert f"--enable {module}" in dockerfile
+    assert "modules.conf rtp.conf stasis.conf" in dockerfile
+    assert "COPY pjsip.conf.template" in dockerfile
+    pjsip = read("pjsip.conf.template")
+    for endpoint in ("1983", "1987", "1988", "2014"):
+        assert f"[{endpoint}](phone-endpoint)" in pjsip
 
 
 def test_staging_compose_uses_distinct_loopback_ports_and_ari_app():
@@ -134,8 +203,8 @@ def test_staging_compose_uses_distinct_loopback_ports_and_ari_app():
 
 def test_go_caddy_upstream_matches_the_private_loopback_listener():
     caddy = Path("deploy/Caddyfile.goweb").read_text().split("# Research demo stack", 1)[0]
-    assert "reverse_proxy 127.0.0.1:8080" in caddy
-    assert "reverse_proxy 192.168.20.70:8080" not in caddy
+    assert "reverse_proxy 192.168.20.70:8080" in caddy
+    assert "reverse_proxy 127.0.0.1:8080" not in caddy
 
 
 def test_legacy_caddy_template_stays_unchanged_until_go_cutover():

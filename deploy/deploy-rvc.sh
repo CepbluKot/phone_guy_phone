@@ -47,6 +47,10 @@ remote_rollback() {
 
   backup=$(p "/opt/voice-rvc/backups/$stamp")
   voice_root=$(p /opt/voice-changer)
+  if [ -e "$voice_root/.go-runtime-owner" ]; then
+    echo "Go runtime owns VM209; legacy deployment refused" >&2
+    return 2
+  fi
   rvc_root=$(p /opt/voice-rvc)
   live_caddy=$(p /etc/caddy/Caddyfile)
   live_unit=$(p /etc/systemd/system/voice-rvc.service)
@@ -263,6 +267,10 @@ fi
 
 stamp=${DEPLOY_RVC_STAMP:-$(date -u +%Y%m%dT%H%M%SZ)}
 validate_stamp "$stamp"
+if ! ssh "$target" 'sudo test ! -e /opt/voice-changer/.go-runtime-owner'; then
+  echo "Go runtime owns VM209; legacy deployment refused" >&2
+  exit 2
+fi
 stage="/tmp/voice-rvc-release-$stamp"
 backup="/opt/voice-rvc/backups/$stamp"
 health_attempts=${DEPLOY_RVC_HEALTH_ATTEMPTS:-20}
@@ -309,6 +317,10 @@ ssh "$target" sudo bash -s -- "$stamp" "$stage" <<'REMOTE_PREPARE'
 set -euo pipefail
 stamp=$1
 stage=$2
+if [ -e /opt/voice-changer/.go-runtime-owner ]; then
+  echo "Go runtime owns VM209; legacy deployment refused" >&2
+  exit 2
+fi
 backup="/opt/voice-rvc/backups/$stamp"
 release="/opt/voice-rvc/releases/$stamp"
 assets=/opt/voice-changer/experiments/phoneguy

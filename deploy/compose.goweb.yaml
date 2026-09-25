@@ -5,16 +5,16 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile.goweb
-    image: voice-go:current
+    image: ${VOICE_GO_IMAGE:-voice-go:current}
     container_name: voice-go
     restart: unless-stopped
     network_mode: host
     environment:
       VOICE_WEB_ROOT: /opt/voice-changer/web
-      VOICE_WEB_ADDR: 127.0.0.1:8080
+      VOICE_WEB_ADDR: 192.168.20.70:8080
       VOICE_ROUTE_CONFIG_FILE: /etc/voice-changer/voice-routing.json
       VOICE_ADMIN_PASSWORD_FILE: /run/secrets/voice-admin-password
-      VOICE_ADMIN_ORIGIN: https://vm-voice-1.lan.awesomeio.ru
+      VOICE_ADMIN_ORIGIN: https://voice.lan.awesomeio.ru,https://vm-voice-1.lan.awesomeio.ru
       VOICE_ARI_URL: http://127.0.0.1:8092/ari
       VOICE_ARI_USERNAME: phoneguy
       VOICE_ARI_PASSWORD_FILE: /run/secrets/ari-password

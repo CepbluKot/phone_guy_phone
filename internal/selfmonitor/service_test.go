@@ -72,7 +72,11 @@ func (a *testARI) AnswerChannel(context.Context, string) error {
 	a.record("answer")
 	return nil
 }
-func (*testARI) ClaimChannel(string) error { return nil }
+func (*testARI) ClaimChannel(string) error                                             { return nil }
+func (*testARI) ContinueChannel(context.Context, string, string, string, string) error { return nil }
+func (*testARI) RingChannel(context.Context, string) error                             { return nil }
+func (*testARI) RingStopChannel(context.Context, string) error                         { return nil }
+func (*testARI) PlayChannel(context.Context, string, string, string) error             { return nil }
 func (*testARI) OriginateChannel(context.Context, string, string, string, string, int) error {
 	return nil
 }
@@ -214,7 +218,7 @@ func TestSecondMirrorCallerIsRejectedWithoutReplacingSession(t *testing.T) {
 
 func TestPublisherRequiresPrivateOriginAndExactBinaryFrames(t *testing.T) {
 	service, _ := New(&testARI{}, NewRelay())
-	server := httptest.NewServer(service.Handler())
+	server := httptest.NewServer(service.Handler(Origin, "https://voice.lan.awesomeio.ru"))
 	defer server.Close()
 	url := "ws" + strings.TrimPrefix(server.URL, "http") + "/ws/live-mirror"
 	_, response, err := websocket.DefaultDialer.Dial(url, http.Header{"Origin": []string{"https://wrong.example"}})
@@ -224,6 +228,11 @@ func TestPublisherRequiresPrivateOriginAndExactBinaryFrames(t *testing.T) {
 	socket, _, err := websocket.DefaultDialer.Dial(url, http.Header{"Origin": []string{Origin}})
 	if err != nil {
 		t.Fatal(err)
+	}
+	_ = socket.Close()
+	socket, _, err = websocket.DefaultDialer.Dial(url, http.Header{"Origin": []string{"https://voice.lan.awesomeio.ru"}})
+	if err != nil {
+		t.Fatalf("main UI origin rejected: %v", err)
 	}
 	frame := make([]byte, FrameBytes)
 	if err := socket.WriteMessage(websocket.BinaryMessage, frame); err != nil {

@@ -3,6 +3,7 @@ package calls
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -12,28 +13,39 @@ import (
 	"voice-changer/internal/voiceconfig"
 )
 
-var ErrInvalidCallEvent = errors.New("invalid_call_event")
+var (
+	ErrInvalidCallEvent     = errors.New("invalid_call_event")
+	errCallbackAttemptEnded = errors.New("callback_attempt_ended")
+)
 
 type Outcome struct{ Code string }
 
 const outcomeQueueSize = 128
 
 type managedCall struct {
-	id          string
-	route       *Route
-	callerID    string
-	peerID      string
-	main        Bridge
-	voice       *Session
-	ctx         context.Context
-	cancel      context.CancelFunc
-	mu          sync.Mutex
-	closed      bool
-	connecting  bool
-	connected   bool
-	connectDone chan struct{}
-	closeOnce   sync.Once
-	closeErr    error
+	id             string
+	route          *Route
+	callerID       string
+	peerID         string
+	flow           string
+	attempt        int
+	main           Bridge
+	voice          *Session
+	playbackID     string
+	playbackDone   chan struct{}
+	playbackErr    error
+	callerAnswered bool
+	retrying       bool
+	attemptCancel  context.CancelFunc
+	ctx            context.Context
+	cancel         context.CancelFunc
+	mu             sync.Mutex
+	closed         bool
+	connecting     bool
+	connected      bool
+	connectDone    chan struct{}
+	closeOnce      sync.Once
+	closeErr       error
 }
 
 type Controller struct {
@@ -135,46 +147,116 @@ func (controller *Controller) HandleEvent(ctx context.Context, event ari.Event) 
 	if event.Type == "ChannelDestroyed" {
 		return controller.destroyed(ctx, event.Channel.ID)
 	}
+	if event.Type == "PlaybackFinished" {
+		return controller.playbackFinished(event.Playback.ID)
+	}
 	if event.Type == "ChannelStateChange" && event.Channel.State == "Up" {
 		return controller.peerUp(ctx, event)
 	}
 	if event.Type != "StasisStart" {
 		return nil
 	}
-	if callID, role, ok := pairArgs(event.Args); ok {
+	if hasPlaybackServiceArg(event.Args) {
+		return controller.playbackServiceStart(ctx, event)
+	}
+	if callID, role, attempt, ok := pairArgs(event.Args); ok {
 		if role != "peer" {
 			cleanupCtx, cancel := cleanupCallContext(ctx)
 			_ = controller.ari.DeleteChannel(cleanupCtx, event.Channel.ID)
 			cancel()
 			return ErrInvalidCallEvent
 		}
-		return controller.peerStarted(ctx, callID, event)
+		return controller.peerStarted(ctx, callID, attempt, event)
 	}
 	return controller.start(ctx, event)
 }
 
-func pairArgs(args []string) (callID, role string, ok bool) {
+func hasPlaybackServiceArg(args []string) bool {
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "service=") {
+			return true
+		}
+	}
+	return false
+}
+
+func (controller *Controller) playbackFinished(playbackID string) error {
+	if playbackID == "" {
+		return nil
+	}
+	controller.mu.Lock()
+	calls := make([]*managedCall, 0, len(controller.calls))
+	for _, call := range controller.calls {
+		calls = append(calls, call)
+	}
+	controller.mu.Unlock()
+	for _, call := range calls {
+		call.mu.Lock()
+		if call.playbackID == playbackID && call.playbackDone != nil {
+			select {
+			case <-call.playbackDone:
+			default:
+				close(call.playbackDone)
+			}
+			call.mu.Unlock()
+			return nil
+		}
+		call.mu.Unlock()
+	}
+	return nil
+}
+
+func (controller *Controller) playbackServiceStart(ctx context.Context, event ari.Event) error {
+	if event.Channel.ID == "" || controller.ari.ClaimChannel(event.Channel.ID) != nil {
+		return ErrInvalidCallEvent
+	}
+	service, err := controller.router.ResolvePlaybackService(ctx, event)
+	if err == nil {
+		err = controller.ari.ContinueChannel(ctx, event.Channel.ID, "phoneguy-sip", service, "play")
+	}
+	if err != nil {
+		cleanupCtx, cancel := cleanupCallContext(ctx)
+		_ = controller.ari.DeleteChannel(cleanupCtx, event.Channel.ID)
+		cancel()
+		if errors.Is(err, ErrUnknownEndpoint) || errors.Is(err, ErrInvalidProfile) {
+			controller.recordOutcome("route_rejected")
+		}
+		return err
+	}
+	controller.recordOutcome("playback_service")
+	return nil
+}
+
+func pairArgs(args []string) (callID, role string, attempt int, ok bool) {
+	attempt = 1
+	attemptSeen := false
 	for _, arg := range args {
 		key, value, found := strings.Cut(arg, "=")
 		if !found || value == "" {
-			return "", "", false
+			return "", "", 0, false
 		}
 		switch key {
 		case "call":
 			if callID != "" {
-				return "", "", false
+				return "", "", 0, false
 			}
 			callID = value
 		case "role":
 			if role != "" {
-				return "", "", false
+				return "", "", 0, false
 			}
 			role = value
+		case "attempt":
+			if attemptSeen || (value != "1" && value != "2") {
+				return "", "", 0, false
+			}
+			attemptSeen = true
+			attempt, _ = strconv.Atoi(value)
 		default:
-			return "", "", false
+			return "", "", 0, false
 		}
 	}
-	return callID, role, callID != "" && role != ""
+	return callID, role, attempt, callID != "" && role != ""
 }
 
 func (controller *Controller) start(ctx context.Context, event ari.Event) error {
@@ -230,26 +312,59 @@ func (controller *Controller) start(ctx context.Context, event ari.Event) error 
 		return err
 	}
 	peerID := "call-peer-" + callID
+	if route.Flow == "callback-1900" {
+		peerID += "-1"
+	}
 	callCtx, callCancel := context.WithCancel(ctx)
-	call := &managedCall{id: callID, route: route, callerID: event.Channel.ID, peerID: peerID, main: main, ctx: callCtx, cancel: callCancel}
+	call := &managedCall{id: callID, route: route, callerID: event.Channel.ID, peerID: peerID, flow: route.Flow, attempt: 1, main: main, ctx: callCtx, cancel: callCancel}
 	controller.mu.Lock()
 	controller.calls[callID] = call
 	controller.mu.Unlock()
-	args := "call=" + callID + ",role=peer"
-	if err := controller.ari.OriginateChannel(callCtx, route.Peer, peerID, args, route.Source, 30); err != nil {
+	if err := controller.originatePeer(call, 30); err != nil {
 		cleanupCtx, cancel := cleanupCallContext(ctx)
 		_ = controller.closeCall(cleanupCtx, call)
 		cancel()
 		return err
 	}
+	if call.flow == "callback-1900" {
+		if err := controller.ari.RingChannel(callCtx, call.callerID); err != nil {
+			cleanupCtx, cancel := cleanupCallContext(ctx)
+			_ = controller.closeCall(cleanupCtx, call)
+			cancel()
+			return err
+		}
+	}
 	return nil
 }
 
-func (controller *Controller) peerStarted(ctx context.Context, callID string, event ari.Event) error {
+func (controller *Controller) originatePeer(call *managedCall, timeout int) error {
+	call.mu.Lock()
+	peerID, attempt, flow := call.peerID, call.attempt, call.flow
+	call.mu.Unlock()
+	if peerID == "" {
+		return ErrInvalidCallEvent
+	}
+	args := "call=" + call.id + ",role=peer"
+	if flow == "callback-1900" {
+		args += ",attempt=" + strconv.Itoa(attempt)
+	}
+	return controller.ari.OriginateChannel(call.ctx, call.route.Peer, peerID, args, call.route.Source, timeout)
+}
+
+func (controller *Controller) peerStarted(ctx context.Context, callID string, attempt int, event ari.Event) error {
 	controller.mu.Lock()
 	call := controller.calls[callID]
 	controller.mu.Unlock()
-	if call == nil || event.Channel.ID != call.peerID {
+	if call == nil {
+		cleanupCtx, cancel := cleanupCallContext(ctx)
+		_ = controller.ari.DeleteChannel(cleanupCtx, event.Channel.ID)
+		cancel()
+		return ErrInvalidCallEvent
+	}
+	call.mu.Lock()
+	matches := event.Channel.ID == call.peerID && attempt == call.attempt
+	call.mu.Unlock()
+	if !matches {
 		cleanupCtx, cancel := cleanupCallContext(ctx)
 		_ = controller.ari.DeleteChannel(cleanupCtx, event.Channel.ID)
 		cancel()
@@ -272,7 +387,10 @@ func (controller *Controller) peerUp(ctx context.Context, event ari.Event) error
 	controller.mu.Lock()
 	var found *managedCall
 	for _, call := range controller.calls {
-		if call.peerID == event.Channel.ID {
+		call.mu.Lock()
+		matches := call.peerID == event.Channel.ID
+		call.mu.Unlock()
+		if matches {
 			found = call
 			break
 		}
@@ -296,25 +414,32 @@ func (controller *Controller) beginConnect(call *managedCall) error {
 		call.mu.Unlock()
 		return ErrInvalidCallEvent
 	}
-	if call.connecting || call.connected {
+	if call.connecting || call.connected || call.retrying {
 		call.mu.Unlock()
 		return nil
 	}
 	call.connecting = true
+	attempt := call.attempt
+	peerID := call.peerID
+	attemptCtx, attemptCancel := context.WithCancel(call.ctx)
+	call.attemptCancel = attemptCancel
 	call.connectDone = make(chan struct{})
 	done := call.connectDone
 	call.mu.Unlock()
 	go func() {
-		err := controller.connect(call.ctx, call)
+		err := controller.connect(attemptCtx, call, attempt, peerID)
+		attemptCancel()
 		call.mu.Lock()
 		call.connecting = false
-		active := err == nil && !call.closed
+		call.attemptCancel = nil
+		retried := call.flow == "callback-1900" && call.attempt != attempt
+		active := err == nil && !call.closed && !retried
 		if active {
 			call.connected = true
 		}
 		close(done)
 		call.mu.Unlock()
-		if err != nil {
+		if err != nil && !retried {
 			controller.recordOutcome(outcomeCode(err))
 			cleanupCtx, cancel := cleanupCallContext(context.Background())
 			_ = controller.closeCall(cleanupCtx, call)
@@ -342,15 +467,18 @@ func outcomeCode(err error) string {
 	}
 }
 
-func (controller *Controller) connect(ctx context.Context, call *managedCall) error {
+func (controller *Controller) connect(ctx context.Context, call *managedCall, attempt int, peerID string) error {
 	call.mu.Lock()
 	if call.closed {
 		call.mu.Unlock()
 		return ErrInvalidCallEvent
 	}
 	call.mu.Unlock()
-	if call.callerID == "" || call.peerID == "" {
+	if call.callerID == "" || peerID == "" {
 		return ErrInvalidCallEvent
+	}
+	if call.flow == "callback-1900" {
+		return controller.connectCallback(ctx, call, attempt, peerID)
 	}
 	if call.route.Profile == voiceconfig.ProfilePhoneGuy {
 		voice, err := StartPhoneGuy(ctx, controller.ari, call.main, call.callerID, controller.rvc, call.route.lease)
@@ -360,7 +488,7 @@ func (controller *Controller) connect(ctx context.Context, call *managedCall) er
 		call.mu.Lock()
 		call.voice = voice
 		call.mu.Unlock()
-		if err := call.main.AddChannel(ctx, call.peerID, false); err != nil {
+		if err := call.main.AddChannel(ctx, peerID, false); err != nil {
 			return err
 		}
 		if err := controller.ari.AnswerChannel(ctx, call.callerID); err != nil {
@@ -370,7 +498,7 @@ func (controller *Controller) connect(ctx context.Context, call *managedCall) er
 		return nil
 	}
 	if call.route.PeerProfile == voiceconfig.ProfilePhoneGuy {
-		voice, err := StartPhoneGuy(ctx, controller.ari, call.main, call.peerID, controller.rvc, call.route.lease)
+		voice, err := StartPhoneGuy(ctx, controller.ari, call.main, peerID, controller.rvc, call.route.lease)
 		if err != nil {
 			return err
 		}
@@ -389,17 +517,149 @@ func (controller *Controller) connect(ctx context.Context, call *managedCall) er
 	if err := call.main.AddChannel(ctx, call.callerID, false); err != nil {
 		return err
 	}
-	if err := call.main.AddChannel(ctx, call.peerID, false); err != nil {
+	if err := call.main.AddChannel(ctx, peerID, false); err != nil {
 		return err
 	}
 	call.route.Close()
 	return controller.ari.AnswerChannel(ctx, call.callerID)
 }
 
+type retainedProcessingLease struct{}
+
+func (retainedProcessingLease) Release() {}
+
+func (controller *Controller) connectCallback(ctx context.Context, call *managedCall, attempt int, peerID string) error {
+	call.mu.Lock()
+	voice := call.voice
+	callerAnswered := call.callerAnswered
+	call.mu.Unlock()
+	if attempt < 1 || attempt > 2 {
+		return ErrInvalidCallEvent
+	}
+	if call.route.Profile == voiceconfig.ProfilePhoneGuy && voice == nil {
+		lease := call.route.ProcessingLease()
+		voiceSession, err := StartPhoneGuy(call.ctx, controller.ari, call.main, call.callerID, controller.rvc, retainedProcessingLease{})
+		if err != nil {
+			return err
+		}
+		if lease == nil {
+			_ = voiceSession.Close(context.Background())
+			return ErrInvalidCallEvent
+		}
+		call.mu.Lock()
+		call.voice = voiceSession
+		call.mu.Unlock()
+		controller.monitorVoice(call, voiceSession)
+		voice = voiceSession
+	}
+	if call.route.PeerProfile == voiceconfig.ProfilePhoneGuy && voice == nil {
+		lease := call.route.ProcessingLease()
+		if lease == nil {
+			return ErrInvalidCallEvent
+		}
+		voiceSession, err := StartPhoneGuy(ctx, controller.ari, call.main, peerID, controller.rvc, retainedProcessingLease{})
+		if err != nil {
+			return err
+		}
+		call.mu.Lock()
+		if call.closed || call.attempt != attempt {
+			call.mu.Unlock()
+			_ = voiceSession.Close(context.Background())
+			return errCallbackAttemptEnded
+		}
+		call.voice = voiceSession
+		call.mu.Unlock()
+		controller.monitorVoice(call, voiceSession)
+		voice = voiceSession
+	}
+	sound := "phoneguy-bot/fnaf1-night1-original"
+	if attempt == 2 {
+		sound = "phoneguy-bot/night5-then-scary"
+	}
+	if err := controller.playAnnouncement(ctx, call, peerID, sound); err != nil {
+		return err
+	}
+	if err := controller.ari.RingStopChannel(ctx, call.callerID); err != nil {
+		return err
+	}
+	if call.route.Profile == voiceconfig.ProfilePhoneGuy {
+		if err := call.main.AddChannel(ctx, peerID, false); err != nil {
+			return err
+		}
+	} else if call.route.PeerProfile == voiceconfig.ProfilePhoneGuy {
+		if err := call.main.AddChannel(ctx, call.callerID, false); err != nil {
+			return err
+		}
+	} else {
+		if err := call.main.AddChannel(ctx, call.callerID, false); err != nil {
+			return err
+		}
+		if err := call.main.AddChannel(ctx, peerID, false); err != nil {
+			return err
+		}
+	}
+	if !callerAnswered {
+		if err := controller.ari.AnswerChannel(ctx, call.callerID); err != nil {
+			return err
+		}
+		call.mu.Lock()
+		call.callerAnswered = true
+		call.mu.Unlock()
+	}
+	return nil
+}
+
+func (controller *Controller) playAnnouncement(ctx context.Context, call *managedCall, peerID, sound string) error {
+	playbackSuffix, err := sessionID()
+	if err != nil {
+		return err
+	}
+	playbackID := "call-playback-" + playbackSuffix
+	done := make(chan struct{})
+	call.mu.Lock()
+	if call.closed {
+		call.mu.Unlock()
+		return context.Canceled
+	}
+	call.playbackID = playbackID
+	call.playbackDone = done
+	call.playbackErr = nil
+	call.mu.Unlock()
+	defer func() {
+		call.mu.Lock()
+		if call.playbackID == playbackID {
+			call.playbackID = ""
+			call.playbackDone = nil
+			call.playbackErr = nil
+		}
+		call.mu.Unlock()
+	}()
+	if err := controller.ari.PlayChannel(ctx, peerID, sound, playbackID); err != nil {
+		return err
+	}
+	timer := time.NewTimer(3 * time.Minute)
+	defer timer.Stop()
+	select {
+	case <-done:
+		call.mu.Lock()
+		playbackErr := call.playbackErr
+		call.mu.Unlock()
+		return playbackErr
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return context.DeadlineExceeded
+	}
+}
+
 func (controller *Controller) monitorVoice(call *managedCall, voice *Session) {
 	go func() {
 		<-voice.Done()
-		if voice.Err() != nil {
+		voiceErr := voice.Err()
+		call.mu.Lock()
+		expectedPeerHangup := call.flow == "callback-1900" && call.route.PeerProfile == voiceconfig.ProfilePhoneGuy && errors.Is(voiceErr, ari.ErrMediaHangup)
+		call.mu.Unlock()
+		if voiceErr != nil && !expectedPeerHangup {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
 			_ = controller.closeCall(ctx, call)
@@ -410,9 +670,14 @@ func (controller *Controller) monitorVoice(call *managedCall, voice *Session) {
 func (controller *Controller) destroyed(ctx context.Context, channelID string) error {
 	controller.mu.Lock()
 	var found *managedCall
+	peerDestroyed := false
 	for _, call := range controller.calls {
-		if call.callerID == channelID || call.peerID == channelID {
+		call.mu.Lock()
+		callerID, peerID := call.callerID, call.peerID
+		call.mu.Unlock()
+		if callerID == channelID || peerID == channelID {
 			found = call
+			peerDestroyed = peerID == channelID
 			break
 		}
 	}
@@ -426,10 +691,123 @@ func (controller *Controller) destroyed(ctx context.Context, channelID string) e
 		}
 		return nil
 	}
+	if peerDestroyed && found.flow == "callback-1900" {
+		return controller.retryCallback(ctx, found)
+	}
 	controller.recordOutcome("call_ended")
 	cleanupCtx, cancel := cleanupCallContext(ctx)
 	defer cancel()
 	return controller.closeCall(cleanupCtx, found)
+}
+
+func (controller *Controller) retryCallback(ctx context.Context, call *managedCall) error {
+	call.mu.Lock()
+	if call.closed {
+		call.mu.Unlock()
+		return nil
+	}
+	if call.retrying {
+		call.mu.Unlock()
+		return nil
+	}
+	if call.attempt != 1 {
+		call.mu.Unlock()
+		cleanupCtx, cancel := cleanupCallContext(ctx)
+		defer cancel()
+		controller.recordOutcome("call_ended")
+		return controller.closeCall(cleanupCtx, call)
+	}
+	call.attempt = 2
+	call.retrying = true
+	oldPeerID := call.peerID
+	if call.attemptCancel != nil {
+		call.attemptCancel()
+	}
+	connectDone := call.connectDone
+	if call.playbackDone != nil {
+		call.playbackErr = errCallbackAttemptEnded
+		select {
+		case <-call.playbackDone:
+		default:
+			close(call.playbackDone)
+		}
+	}
+	var oldVoice *Session
+	if call.route.PeerProfile == voiceconfig.ProfilePhoneGuy {
+		oldVoice = call.voice
+		call.voice = nil
+	}
+	callerAnswered := call.callerAnswered
+	call.mu.Unlock()
+
+	if connectDone != nil {
+		select {
+		case <-connectDone:
+		case <-ctx.Done():
+			return controller.failCallbackRetry(ctx, call, oldPeerID, ctx.Err())
+		}
+	}
+	if oldVoice != nil {
+		cleanupCtx, cancel := cleanupCallContext(ctx)
+		if err := oldVoice.Close(cleanupCtx); err != nil {
+			cancel()
+			return controller.failCallbackRetry(ctx, call, oldPeerID, err)
+		}
+		cancel()
+	}
+	cleanupCtx, cleanupCancel := cleanupCallContext(ctx)
+	if err := controller.ari.DeleteChannel(cleanupCtx, oldPeerID); err != nil {
+		cleanupCancel()
+		return controller.failCallbackRetry(ctx, call, oldPeerID, err)
+	}
+	cleanupCancel()
+	call.mu.Lock()
+	if call.peerID == oldPeerID {
+		call.peerID = ""
+	}
+	call.mu.Unlock()
+	timer := time.NewTimer(time.Second)
+	select {
+	case <-timer.C:
+	case <-ctx.Done():
+		timer.Stop()
+		return controller.failCallbackRetry(ctx, call, oldPeerID, ctx.Err())
+	}
+	call.mu.Lock()
+	if call.closed {
+		call.mu.Unlock()
+		return nil
+	}
+	call.peerID = "call-peer-" + call.id + "-2"
+	call.connecting = false
+	call.connected = false
+	call.connectDone = nil
+	call.retrying = false
+	call.mu.Unlock()
+	if callerAnswered {
+		if err := controller.ari.RingChannel(call.ctx, call.callerID); err != nil {
+			return controller.failCallbackRetry(ctx, call, oldPeerID, err)
+		}
+	}
+	if err := controller.originatePeer(call, 40); err != nil {
+		return controller.failCallbackRetry(ctx, call, oldPeerID, err)
+	}
+	controller.recordOutcome("callback_retry")
+	return nil
+}
+
+func (controller *Controller) failCallbackRetry(ctx context.Context, call *managedCall, oldPeerID string, cause error) error {
+	call.mu.Lock()
+	if !call.closed && call.peerID == "" {
+		call.peerID = oldPeerID
+	}
+	call.mu.Unlock()
+	cleanupCtx, cancel := cleanupCallContext(ctx)
+	defer cancel()
+	if closeErr := controller.closeCall(cleanupCtx, call); closeErr != nil {
+		return errors.Join(cause, closeErr)
+	}
+	return cause
 }
 
 func (controller *Controller) closeCall(ctx context.Context, call *managedCall) error {
@@ -438,6 +816,9 @@ func (controller *Controller) closeCall(ctx context.Context, call *managedCall) 
 		call.closed = true
 		if call.cancel != nil {
 			call.cancel()
+		}
+		if call.attemptCancel != nil {
+			call.attemptCancel()
 		}
 		connectDone := call.connectDone
 		call.mu.Unlock()
@@ -450,13 +831,14 @@ func (controller *Controller) closeCall(ctx context.Context, call *managedCall) 
 		}
 		call.mu.Lock()
 		voice := call.voice
+		peerID := call.peerID
 		call.mu.Unlock()
 		if voice != nil {
 			if err := voice.Close(ctx); err != nil && call.closeErr == nil {
 				call.closeErr = err
 			}
 		}
-		for _, id := range []string{call.callerID, call.peerID} {
+		for _, id := range []string{call.callerID, peerID} {
 			if id != "" {
 				if err := controller.ari.DeleteChannel(ctx, id); err != nil && call.closeErr == nil {
 					call.closeErr = err

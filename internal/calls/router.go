@@ -15,9 +15,12 @@ var (
 	ErrDualProcessedEndpoints = errors.New("multiple_processed_endpoints_unsupported")
 )
 
+var playbackServices = map[string]struct{}{"1987": {}, "2014": {}, "1993": {}}
+
 type endpoints struct {
 	Source string
 	Peer   string
+	Flow   string
 }
 
 type Route struct {
@@ -27,6 +30,7 @@ type Route struct {
 	PeerProfile   voiceconfig.Profile
 	Revision      uint64
 	ProcessedPeer bool
+	Flow          string
 	lease         *sessionLease
 }
 
@@ -91,7 +95,7 @@ func (router *Router) Resolve(ctx context.Context, event ari.Event) (*Route, err
 	if err != nil {
 		return nil, err
 	}
-	route := &Route{Source: identity.Source, Peer: identity.Peer, Profile: profile, Revision: snapshot.Revision}
+	route := &Route{Source: identity.Source, Peer: identity.Peer, Profile: profile, Revision: snapshot.Revision, Flow: identity.Flow}
 	processed := profile == voiceconfig.ProfilePhoneGuy
 	if identity.Peer != "conference" {
 		route.PeerProfile, err = profileForSource(snapshot, identity.Peer)
@@ -113,6 +117,45 @@ func (router *Router) Resolve(ctx context.Context, event ari.Event) (*Route, err
 	return route, nil
 }
 
+// ResolvePlaybackService validates the trusted caller before a one-way local
+// recording call is handed back to its fixed Asterisk dialplan label. These
+// services do not bridge caller audio to another endpoint.
+func (router *Router) ResolvePlaybackService(ctx context.Context, event ari.Event) (string, error) {
+	if event.Type != "StasisStart" || event.Channel.ID == "" {
+		return "", ErrUnknownEndpoint
+	}
+	values := make(map[string]string, 3)
+	for _, arg := range event.Args {
+		key, value, ok := strings.Cut(arg, "=")
+		if !ok || value == "" || (key != "source" && key != "service") || values[key] != "" {
+			return "", ErrUnknownEndpoint
+		}
+		values[key] = value
+	}
+	if len(values) != 2 {
+		return "", ErrUnknownEndpoint
+	}
+	source, service := values["source"], values["service"]
+	if _, ok := router.allowed[source]; !ok {
+		return "", ErrUnknownEndpoint
+	}
+	if _, ok := playbackServices[service]; !ok {
+		return "", ErrUnknownEndpoint
+	}
+	channelEndpoint, ok := pjsipEndpoint(event.Channel.Name)
+	if !ok || channelEndpoint != source {
+		return "", ErrUnknownEndpoint
+	}
+	snapshot, err := router.store.Snapshot()
+	if err != nil {
+		return "", err
+	}
+	if _, err := profileForSource(snapshot, source); err != nil {
+		return "", err
+	}
+	return service, nil
+}
+
 func (router *Router) AcquireProcessingLease(ctx context.Context) (ProcessingLease, error) {
 	if router == nil {
 		return nil, ErrUnknownEndpoint
@@ -124,19 +167,23 @@ func (router *Router) AcquireProcessingLease(ctx context.Context) (ProcessingLea
 // and peer=<PJSIP ID|conference>. Caller-ID is deliberately not used as an
 // authorization identity because it is caller-controlled.
 func resolveEndpoints(event ari.Event, allowed map[string]struct{}) (endpoints, error) {
-	if event.Type != "StasisStart" || len(event.Args) != 2 {
+	if event.Type != "StasisStart" || (len(event.Args) != 2 && len(event.Args) != 3) {
 		return endpoints{}, ErrUnknownEndpoint
 	}
 	values := make(map[string]string, 2)
 	for _, arg := range event.Args {
 		key, value, ok := strings.Cut(arg, "=")
-		if !ok || value == "" || values[key] != "" {
+		if !ok || value == "" || (key != "source" && key != "peer" && key != "mode") || values[key] != "" {
 			return endpoints{}, ErrUnknownEndpoint
 		}
 		values[key] = value
 	}
 	source, peer := values["source"], values["peer"]
-	if len(values) != 2 || source == "" || peer == "" {
+	flow := values["mode"]
+	if (len(values) != 2 && len(values) != 3) || source == "" || peer == "" {
+		return endpoints{}, ErrUnknownEndpoint
+	}
+	if flow != "" && (flow != "callback-1900" || peer != "1983" || len(values) != 3) {
 		return endpoints{}, ErrUnknownEndpoint
 	}
 	if _, ok := allowed[source]; !ok {
@@ -151,7 +198,7 @@ func resolveEndpoints(event ari.Event, allowed map[string]struct{}) (endpoints, 
 	if event.Channel.ID == "" || !ok || (channelEndpoint != source && channelEndpoint != peer) {
 		return endpoints{}, ErrUnknownEndpoint
 	}
-	return endpoints{Source: source, Peer: peer}, nil
+	return endpoints{Source: source, Peer: peer, Flow: flow}, nil
 }
 
 func pjsipEndpoint(channelName string) (string, bool) {

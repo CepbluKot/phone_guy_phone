@@ -23,6 +23,7 @@ type fakeBridge struct {
 	joined []string
 	closed bool
 	log    *[]string
+	logMu  *sync.Mutex
 }
 
 func (bridge *fakeBridge) ID() string { return bridge.id }
@@ -31,6 +32,10 @@ func (bridge *fakeBridge) AddChannel(_ context.Context, id string, mute bool) er
 	defer bridge.mu.Unlock()
 	bridge.joined = append(bridge.joined, id)
 	if bridge.log != nil {
+		if bridge.logMu != nil {
+			bridge.logMu.Lock()
+			defer bridge.logMu.Unlock()
+		}
 		*bridge.log = append(*bridge.log, "add:"+bridge.id+":"+id+":"+map[bool]string{true: "muted", false: "open"}[mute])
 	}
 	return nil
@@ -40,15 +45,30 @@ func (bridge *fakeBridge) Close(context.Context) error {
 	defer bridge.mu.Unlock()
 	bridge.closed = true
 	if bridge.log != nil {
+		if bridge.logMu != nil {
+			bridge.logMu.Lock()
+			defer bridge.logMu.Unlock()
+		}
 		*bridge.log = append(*bridge.log, "close:"+bridge.id)
 	}
 	return nil
+}
+func (bridge *fakeBridge) isClosed() bool {
+	bridge.mu.Lock()
+	defer bridge.mu.Unlock()
+	return bridge.closed
+}
+func (bridge *fakeBridge) joinedSnapshot() []string {
+	bridge.mu.Lock()
+	defer bridge.mu.Unlock()
+	return append([]string(nil), bridge.joined...)
 }
 
 type fakeMedia struct {
 	id      string
 	closed  bool
 	log     *[]string
+	logMu   *sync.Mutex
 	closeMu sync.Mutex
 	sent    [][]byte
 }
@@ -70,45 +90,351 @@ func (media *fakeMedia) Close(context.Context) error {
 	defer media.closeMu.Unlock()
 	media.closed = true
 	if media.log != nil {
+		if media.logMu != nil {
+			media.logMu.Lock()
+			defer media.logMu.Unlock()
+		}
 		*media.log = append(*media.log, "close:"+media.id)
 	}
 	return nil
 }
+func (media *fakeMedia) isClosed() bool {
+	media.closeMu.Lock()
+	defer media.closeMu.Unlock()
+	return media.closed
+}
 
 type fakeARI struct {
-	log       []string
-	main      *fakeBridge
-	private   *fakeBridge
-	media     []*fakeMedia
-	openError error
+	logMu        sync.Mutex
+	log          []string
+	deleteErrFor string
+	main         *fakeBridge
+	private      *fakeBridge
+	media        []*fakeMedia
+	openError    error
+	playCalls    chan playbackRequest
 }
 
-func (client *fakeARI) AnswerChannel(context.Context, string) error { return nil }
-func (client *fakeARI) ClaimChannel(id string) error {
-	client.log = append(client.log, "claim:"+id)
+func (client *fakeARI) addLog(action string) {
+	client.logMu.Lock()
+	client.log = append(client.log, action)
+	client.logMu.Unlock()
+}
+func (client *fakeARI) logSnapshot() []string {
+	client.logMu.Lock()
+	defer client.logMu.Unlock()
+	return append([]string(nil), client.log...)
+}
+
+type playbackRequest struct{ channelID, sound, playbackID string }
+
+func (client *fakeARI) AnswerChannel(_ context.Context, channelID string) error {
+	client.addLog("answer:" + channelID)
 	return nil
 }
+func (client *fakeARI) RingChannel(_ context.Context, channelID string) error {
+	client.addLog("ring:" + channelID)
+	return nil
+}
+func (client *fakeARI) RingStopChannel(_ context.Context, channelID string) error {
+	client.addLog("ring-stop:" + channelID)
+	return nil
+}
+func (client *fakeARI) PlayChannel(_ context.Context, channelID, sound, playbackID string) error {
+	client.addLog("play:" + channelID + ":" + sound + ":" + playbackID)
+	if client.playCalls != nil {
+		client.playCalls <- playbackRequest{channelID: channelID, sound: sound, playbackID: playbackID}
+	}
+	return nil
+}
+func (client *fakeARI) ContinueChannel(_ context.Context, channelID, contextName, extension, label string) error {
+	client.addLog("continue:" + channelID + ":" + contextName + ":" + extension + ":" + label)
+	return nil
+}
+func (client *fakeARI) ClaimChannel(id string) error {
+	client.addLog("claim:" + id)
+	return nil
+}
+
+func TestLegacyPlaybackServiceHandsChannelBackAfterTrustedAdmission(t *testing.T) {
+	store := snapshotStore{snapshot: voiceconfig.RouteSnapshot{Revision: 8, Extensions: map[string]voiceconfig.Profile{
+		"4101": voiceconfig.ProfilePhoneGuy,
+	}}}
+	router, err := NewRouter(store, []string{"4101"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &fakeARI{}
+	controller, err := NewController("voice-control", client, router, fakeRVC{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := ari.Event{Type: "StasisStart", App: "voice-control", Args: []string{"source=4101", "service=1987"}}
+	event.Channel.ID = "PJSIP/4101-00001"
+	event.Channel.Name = event.Channel.ID
+	if err := controller.HandleEvent(context.Background(), event); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"claim:PJSIP/4101-00001", "continue:PJSIP/4101-00001:phoneguy-sip:1987:play"}
+	if actions := client.logSnapshot(); !reflect.DeepEqual(actions, want) {
+		t.Fatalf("actions=%v want=%v", actions, want)
+	}
+	if client.main != nil || len(client.media) != 0 {
+		t.Fatal("one-way recording service created a phone bridge or RVC media")
+	}
+}
+
+func Test1900CallbackAdmitsFixedDestinationAndRingsBeforeAnswer(t *testing.T) {
+	store := snapshotStore{snapshot: voiceconfig.RouteSnapshot{Revision: 8, Extensions: map[string]voiceconfig.Profile{
+		"4101": voiceconfig.ProfileOriginal,
+		"1983": voiceconfig.ProfileOriginal,
+	}}}
+	router, err := NewRouter(store, []string{"4101", "1983"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &fakeARI{}
+	controller, err := NewController("voice-control", client, router, fakeRVC{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := ari.Event{Type: "StasisStart", App: "voice-control", Args: []string{"source=4101", "peer=1983", "mode=callback-1900"}}
+	event.Channel.ID = "callback-caller"
+	event.Channel.Name = "PJSIP/4101-00001"
+	if err := controller.HandleEvent(context.Background(), event); err != nil {
+		t.Fatal(err)
+	}
+	var call *managedCall
+	for _, value := range controller.calls {
+		call = value
+	}
+	if call == nil || call.route.Flow != "callback-1900" || call.attempt != 1 {
+		t.Fatalf("callback state=%+v", call)
+	}
+	if actions := client.logSnapshot(); !reflect.DeepEqual(actions, []string{
+		"claim:callback-caller",
+		"bridge:" + call.main.ID(),
+		"originate:1983:" + call.peerID + ":call=" + call.id + ",role=peer,attempt=1:4101:30",
+		"ring:callback-caller",
+	}) {
+		t.Fatalf("callback setup actions=%v", actions)
+	}
+	if err := controller.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func Test1900CallbackPlaysBothLegacyAnnouncementsAndRetriesOnce(t *testing.T) {
+	store := snapshotStore{snapshot: voiceconfig.RouteSnapshot{Revision: 8, Extensions: map[string]voiceconfig.Profile{
+		"4101": voiceconfig.ProfileOriginal,
+		"1983": voiceconfig.ProfileOriginal,
+	}}}
+	router, err := NewRouter(store, []string{"4101", "1983"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &fakeARI{playCalls: make(chan playbackRequest, 2)}
+	controller, err := NewController("voice-control", client, router, fakeRVC{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := ari.Event{Type: "StasisStart", App: "voice-control", Args: []string{"source=4101", "peer=1983", "mode=callback-1900"}}
+	start.Channel.ID = "callback-caller"
+	start.Channel.Name = "PJSIP/4101-00011"
+	if err := controller.HandleEvent(context.Background(), start); err != nil {
+		t.Fatal(err)
+	}
+	call := callbackCall(t, controller)
+	firstPeer := callbackPeerEvent(call, 1, "PJSIP/1983-00012")
+	if err := controller.HandleEvent(context.Background(), firstPeer); err != nil {
+		t.Fatal(err)
+	}
+	firstPlayback := waitPlayback(t, client.playCalls)
+	if firstPlayback.sound != "phoneguy-bot/fnaf1-night1-original" {
+		t.Fatalf("first announcement=%q", firstPlayback.sound)
+	}
+	if err := controller.HandleEvent(context.Background(), ari.Event{Type: "PlaybackFinished", Playback: struct {
+		ID string `json:"id"`
+	}{ID: firstPlayback.playbackID}}); err != nil {
+		t.Fatal(err)
+	}
+	waitCallConnect(t, call)
+	if actions := client.logSnapshot(); indexOf(actions, "play:"+firstPlayback.channelID+":"+firstPlayback.sound+":"+firstPlayback.playbackID) > indexOf(actions, "answer:callback-caller") {
+		t.Fatalf("caller answered before callee announcement completed: %v", actions)
+	}
+	destroyed := ari.Event{Type: "ChannelDestroyed"}
+	destroyed.Channel.ID = firstPeer.Channel.ID
+	if err := controller.HandleEvent(context.Background(), destroyed); err != nil {
+		t.Fatal(err)
+	}
+	if len(controller.calls) != 1 || call.attempt != 2 || call.peerID == "" {
+		t.Fatalf("callback did not advance to its second dial: attempt=%d peer=%q", call.attempt, call.peerID)
+	}
+	if actions := client.logSnapshot(); !contains(actions, "originate:1983:"+call.peerID+":call="+call.id+",role=peer,attempt=2:4101:40") {
+		t.Fatalf("second callback dial missing: %v", actions)
+	}
+	secondPeer := callbackPeerEvent(call, 2, "PJSIP/1983-00013")
+	if err := controller.HandleEvent(context.Background(), secondPeer); err != nil {
+		t.Fatal(err)
+	}
+	secondPlayback := waitPlayback(t, client.playCalls)
+	if secondPlayback.sound != "phoneguy-bot/night5-then-scary" {
+		t.Fatalf("second announcement=%q", secondPlayback.sound)
+	}
+	if err := controller.HandleEvent(context.Background(), ari.Event{Type: "PlaybackFinished", Playback: struct {
+		ID string `json:"id"`
+	}{ID: secondPlayback.playbackID}}); err != nil {
+		t.Fatal(err)
+	}
+	waitCallConnect(t, call)
+	destroyed.Channel.ID = secondPeer.Channel.ID
+	if err := controller.HandleEvent(context.Background(), destroyed); err != nil {
+		t.Fatal(err)
+	}
+	if actions := client.logSnapshot(); len(controller.calls) != 0 || !contains(actions, "delete:callback-caller") {
+		t.Fatalf("second dial did not finish the callback: calls=%d actions=%v", len(controller.calls), actions)
+	}
+}
+
+func Test1900CallbackRetriesWhenFirstOutboundNeverAnswers(t *testing.T) {
+	store := snapshotStore{snapshot: voiceconfig.RouteSnapshot{Revision: 8, Extensions: map[string]voiceconfig.Profile{
+		"4101": voiceconfig.ProfileOriginal,
+		"1983": voiceconfig.ProfileOriginal,
+	}}}
+	router, err := NewRouter(store, []string{"4101", "1983"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &fakeARI{}
+	controller, err := NewController("voice-control", client, router, fakeRVC{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := ari.Event{Type: "StasisStart", App: "voice-control", Args: []string{"source=4101", "peer=1983", "mode=callback-1900"}}
+	start.Channel.ID = "callback-caller"
+	start.Channel.Name = "PJSIP/4101-00021"
+	if err := controller.HandleEvent(context.Background(), start); err != nil {
+		t.Fatal(err)
+	}
+	call := callbackCall(t, controller)
+	firstPeerID := call.peerID
+	destroyed := ari.Event{Type: "ChannelDestroyed"}
+	destroyed.Channel.ID = firstPeerID
+	if err := controller.HandleEvent(context.Background(), destroyed); err != nil {
+		t.Fatal(err)
+	}
+	if call.attempt != 2 || call.peerID == "" || call.peerID == firstPeerID {
+		t.Fatalf("no-answer callback did not advance once: attempt=%d peer=%q", call.attempt, call.peerID)
+	}
+	if actions := client.logSnapshot(); contains(actions, "play:"+firstPeerID+":phoneguy-bot/fnaf1-night1-original") {
+		t.Fatalf("first announcement played despite no answer: %v", actions)
+	}
+	if actions := client.logSnapshot(); !contains(actions, "delete:"+firstPeerID) || !contains(actions, "originate:1983:"+call.peerID+":call="+call.id+",role=peer,attempt=2:4101:40") {
+		t.Fatalf("retry did not clean up and redial with the legacy second timeout: %v", actions)
+	}
+	if err := controller.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func Test1900CallbackClosesCallWhenRetryCleanupFails(t *testing.T) {
+	store := snapshotStore{snapshot: voiceconfig.RouteSnapshot{Revision: 8, Extensions: map[string]voiceconfig.Profile{
+		"4101": voiceconfig.ProfileOriginal,
+		"1983": voiceconfig.ProfileOriginal,
+	}}}
+	router, err := NewRouter(store, []string{"4101", "1983"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &fakeARI{}
+	controller, err := NewController("voice-control", client, router, fakeRVC{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := ari.Event{Type: "StasisStart", App: "voice-control", Args: []string{"source=4101", "peer=1983", "mode=callback-1900"}}
+	start.Channel.ID = "callback-caller"
+	start.Channel.Name = "PJSIP/4101-00031"
+	if err := controller.HandleEvent(context.Background(), start); err != nil {
+		t.Fatal(err)
+	}
+	call := callbackCall(t, controller)
+	client.deleteErrFor = call.peerID
+	destroyed := ari.Event{Type: "ChannelDestroyed"}
+	destroyed.Channel.ID = call.peerID
+	if err := controller.HandleEvent(context.Background(), destroyed); err == nil {
+		t.Fatal("failed retry cleanup was swallowed")
+	}
+	if len(controller.calls) != 0 || !call.main.(*fakeBridge).isClosed() {
+		t.Fatalf("failed retry left callback state/resources: calls=%d mainClosed=%t", len(controller.calls), call.main.(*fakeBridge).isClosed())
+	}
+}
+
+func callbackCall(t *testing.T, controller *Controller) *managedCall {
+	t.Helper()
+	controller.mu.Lock()
+	defer controller.mu.Unlock()
+	for _, call := range controller.calls {
+		return call
+	}
+	t.Fatal("callback call missing")
+	return nil
+}
+
+func callbackPeerEvent(call *managedCall, attempt int, channelName string) ari.Event {
+	event := ari.Event{Type: "StasisStart", App: "voice-control", Args: []string{
+		"call=" + call.id, "role=peer", "attempt=" + strconv.Itoa(attempt),
+	}}
+	event.Channel.ID = call.peerID
+	event.Channel.Name = channelName
+	event.Channel.State = "Up"
+	return event
+}
+
+func waitPlayback(t *testing.T, calls <-chan playbackRequest) playbackRequest {
+	t.Helper()
+	select {
+	case call := <-calls:
+		return call
+	case <-time.After(2 * time.Second):
+		t.Fatal("callback announcement did not start")
+		return playbackRequest{}
+	}
+}
+
+func indexOf(values []string, want string) int {
+	for index, value := range values {
+		if value == want {
+			return index
+		}
+	}
+	return -1
+}
+
+func contains(values []string, want string) bool { return indexOf(values, want) >= 0 }
 func (client *fakeARI) OriginateChannel(_ context.Context, endpoint, id, args, caller string, timeout int) error {
-	client.log = append(client.log, "originate:"+endpoint+":"+id+":"+args+":"+caller+":"+strconv.Itoa(timeout))
+	client.addLog("originate:" + endpoint + ":" + id + ":" + args + ":" + caller + ":" + strconv.Itoa(timeout))
 	return nil
 }
 func (client *fakeARI) CreateBridge(_ context.Context, id string) (Bridge, error) {
-	client.log = append(client.log, "bridge:"+id)
-	client.private = &fakeBridge{id: id, log: &client.log}
+	client.addLog("bridge:" + id)
+	client.private = &fakeBridge{id: id, log: &client.log, logMu: &client.logMu}
 	return client.private, nil
 }
 func (client *fakeARI) SnoopChannel(_ context.Context, source, id string) (string, error) {
-	client.log = append(client.log, "snoop:"+source+":"+id)
+	client.addLog("snoop:" + source + ":" + id)
 	return id, nil
 }
 func (client *fakeARI) CreateMediaChannel(_ context.Context, role string, receive bool) (Media, error) {
-	client.log = append(client.log, "media:"+role+":"+map[bool]string{true: "receive", false: "send"}[receive])
-	media := &fakeMedia{id: role, log: &client.log}
+	client.addLog("media:" + role + ":" + map[bool]string{true: "receive", false: "send"}[receive])
+	media := &fakeMedia{id: role, log: &client.log, logMu: &client.logMu}
 	client.media = append(client.media, media)
 	return media, nil
 }
 func (client *fakeARI) DeleteChannel(_ context.Context, id string) error {
-	client.log = append(client.log, "delete:"+id)
+	client.addLog("delete:" + id)
+	if id == client.deleteErrFor {
+		return errors.New("delete failed")
+	}
 	return nil
 }
 
@@ -142,7 +468,7 @@ func (*fakeRVCStream) Err() error                              { return nil }
 
 func TestPhoneGuySetupMutesSourceBeforeAudibleProcessedChannel(t *testing.T) {
 	client := &fakeARI{}
-	main := &fakeBridge{id: "main", log: &client.log}
+	main := &fakeBridge{id: "main", log: &client.log, logMu: &client.logMu}
 	ctx, cancel := context.WithCancel(context.Background())
 	lease, err := newSessionGate().Acquire(ctx)
 	if err != nil {
@@ -160,7 +486,7 @@ func TestPhoneGuySetupMutesSourceBeforeAudibleProcessedChannel(t *testing.T) {
 		"add:main:" + client.media[1].ID() + ":open",
 	}
 	var mainActions []string
-	for _, action := range client.log {
+	for _, action := range client.logSnapshot() {
 		if strings.HasPrefix(action, "add:main:") {
 			mainActions = append(mainActions, action)
 		}
@@ -172,14 +498,14 @@ func TestPhoneGuySetupMutesSourceBeforeAudibleProcessedChannel(t *testing.T) {
 		t.Fatal(err)
 	}
 	cancel()
-	if !client.private.closed || !client.media[0].closed || !client.media[1].closed {
+	if !client.private.isClosed() || !client.media[0].isClosed() || !client.media[1].isClosed() {
 		t.Fatal("session did not close all owned media resources")
 	}
 }
 
 func TestPhoneGuySetupFailureCleansOwnedResourcesWithoutJoiningRawSource(t *testing.T) {
 	client := &fakeARI{}
-	main := &fakeBridge{id: "main", log: &client.log}
+	main := &fakeBridge{id: "main", log: &client.log, logMu: &client.logMu}
 	lease, err := newSessionGate().Acquire(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -191,7 +517,7 @@ func TestPhoneGuySetupFailureCleansOwnedResourcesWithoutJoiningRawSource(t *test
 	if len(main.joined) != 0 {
 		t.Fatalf("raw source joined main bridge before setup completed: %v", main.joined)
 	}
-	if client.private == nil || !client.private.closed || len(client.media) != 1 || !client.media[0].closed {
+	if client.private == nil || !client.private.isClosed() || len(client.media) != 1 || !client.media[0].isClosed() {
 		t.Fatal("partial setup resources were not cleaned")
 	}
 	checkLease, err := lease.gate.Acquire(context.Background())
@@ -284,7 +610,7 @@ func TestControllerRoutesDirectCallAndCleansOnHangup(t *testing.T) {
 	if err := controller.HandleEvent(context.Background(), destroyed); err != nil {
 		t.Fatal(err)
 	}
-	if !call.main.(*fakeBridge).closed || len(controller.calls) != 0 {
+	if !call.main.(*fakeBridge).isClosed() || len(controller.calls) != 0 {
 		t.Fatal("hangup did not clean the owned bridge and call state")
 	}
 	if rvcOpens.Load() != 0 {
@@ -365,7 +691,7 @@ func TestControllerProcessesPhoneGuyCalleeAndMutesBeforeOtherLeg(t *testing.T) {
 		t.Fatalf("main bridge members=%v; expected muted phone-guy and processed output", main.joined)
 	}
 	var mainActions []string
-	for _, action := range client.log {
+	for _, action := range client.logSnapshot() {
 		if strings.HasPrefix(action, "add:"+main.id+":") {
 			mainActions = append(mainActions, action)
 		}
@@ -422,8 +748,8 @@ func TestControllerRejectsSecondPhoneGuyCallWithoutRawFallback(t *testing.T) {
 	if err := controller.HandleEvent(context.Background(), second); !errors.Is(err, ErrProcessingBusy) {
 		t.Fatalf("second phone-guy error=%v", err)
 	}
-	if len(controller.calls) != 1 || !slices.Contains(client.log, "delete:second-source") {
-		t.Fatalf("calls=%d actions=%v; busy call was not rejected/cleaned", len(controller.calls), client.log)
+	if actions := client.logSnapshot(); len(controller.calls) != 1 || !slices.Contains(actions, "delete:second-source") {
+		t.Fatalf("calls=%d actions=%v; busy call was not rejected/cleaned", len(controller.calls), actions)
 	}
 	if err := controller.Close(context.Background()); err != nil {
 		t.Fatal(err)
@@ -469,7 +795,7 @@ func TestHangupDuringRVCWarmupCancelsAndCleansCall(t *testing.T) {
 	if err := controller.HandleEvent(context.Background(), destroyed); err != nil {
 		t.Fatal(err)
 	}
-	if len(controller.calls) != 0 || !call.main.(*fakeBridge).closed || len(call.main.(*fakeBridge).joined) != 0 {
+	if len(controller.calls) != 0 || !call.main.(*fakeBridge).isClosed() || len(call.main.(*fakeBridge).joinedSnapshot()) != 0 {
 		t.Fatalf("hangup left call or audible channels behind: calls=%d main=%+v", len(controller.calls), call.main)
 	}
 	checkLease, err := call.route.lease.gate.Acquire(context.Background())

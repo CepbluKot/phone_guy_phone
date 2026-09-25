@@ -6,6 +6,10 @@ node --test tests/*.test.cjs
 git diff --check
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
 target=ubuntu@192.168.20.70
+if ! ssh "$target" 'sudo test ! -e /opt/voice-changer/.go-runtime-owner'; then
+  echo "Go runtime owns VM209; legacy deployment refused" >&2
+  exit 2
+fi
 stage=/tmp/voice-release-$stamp
 ssh "$target" "mkdir -p '$stage'"
 rsync -a app web deploy Dockerfile .dockerignore requirements.txt requirements.lock compose.yaml "$target:$stage/"

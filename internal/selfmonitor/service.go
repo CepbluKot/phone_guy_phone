@@ -139,8 +139,20 @@ func New(ariClient ARI, relay *Relay) (*Service, error) {
 	return &Service{ari: ariClient, relay: relay}, nil
 }
 
-func (service *Service) Handler() http.Handler {
-	upgrader := websocket.Upgrader{EnableCompression: false, CheckOrigin: func(request *http.Request) bool { return request.Header.Get("Origin") == Origin }}
+func (service *Service) Handler(origins ...string) http.Handler {
+	allowed := make(map[string]struct{}, len(origins))
+	if len(origins) == 0 {
+		origins = []string{Origin}
+	}
+	for _, origin := range origins {
+		if origin != "" {
+			allowed[origin] = struct{}{}
+		}
+	}
+	upgrader := websocket.Upgrader{EnableCompression: false, CheckOrigin: func(request *http.Request) bool {
+		_, ok := allowed[request.Header.Get("Origin")]
+		return ok
+	}}
 	return http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		if request.Method != http.MethodGet {
 			w.Header().Set("Allow", "GET")
