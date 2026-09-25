@@ -54,6 +54,16 @@ voice-conversion limit and measured capacity.
 - Show known physical phones with MAC, verified model/firmware where available,
   current IP, SIP registration state, assigned extension, voice profile, and
   provisioning state.
+- Give the inventory two separate admin navigation points:
+  - **Existing phones**: every phone already enrolled/assigned in the app,
+    including currently offline phones, with registration and provisioning
+    status.
+  - **New / unassigned phones**: newly discovered candidates and any known
+    device that has no phone-to-extension assignment yet. This view is the
+    explicit place to assign a free SIP extension.
+- A phone moves from “new / unassigned” to “existing phones” only after an
+  administrator saves its assignment. A temporary loss of SIP registration
+  must not move an enrolled phone back into the new-device list.
 - Discover phones already visible as PJSIP contacts. Also discover unregistered
   new phones from a read-only DHCP-client/lease source when the router exposes a
   safe, supported way to read it. A discovered device is a candidate, not an

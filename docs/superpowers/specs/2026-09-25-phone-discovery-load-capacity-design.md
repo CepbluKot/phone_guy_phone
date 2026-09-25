@@ -100,16 +100,24 @@ show only the available service/RVC metrics and mark host metrics unavailable.
 
 ### Phones
 
-- Add “discovered” candidates that have no assignment, showing source, MAC,
-  IP, last seen, and available confidence/model information.
-- Keep “registered” status separate from “discovered” status.
+- Provide two separate navigation items:
+  - **Existing phones** lists every enrolled/assigned device, including devices
+    that are currently offline. Show SIP registration and provisioning state;
+    a temporary disconnect does not remove or reclassify an enrolled phone.
+  - **New / unassigned phones** lists newly discovered candidates and any known
+    device without a device-to-extension assignment. This is the explicit
+    workflow for assigning a free configured extension.
+- Show source, MAC, IP, last seen, and available model information for
+  discovered candidates. Keep SIP registration state distinct from discovery
+  and enrollment state.
 - Let the administrator select an available configured extension and confirm
   the physical-device assignment. Reject duplicate MACs, duplicate extension
   assignments, stale revisions, unsupported extensions, and unverified
   provisioning models without mutating the current mapping.
-- After assignment, display the extension, existing voice profile, SIP
-  registration state, and provisioning state. Use the approved model-specific
-  URL/instructions without displaying the SIP secret.
+- After saving an assignment, move the device to **Existing phones** and display
+  its extension, existing voice profile, SIP registration state, and
+  provisioning state. Use the approved model-specific URL/instructions without
+  displaying the SIP secret.
 - If DHCP reading is unsupported or unavailable, explain that new unregistered
   devices cannot be discovered from that source; do not imply a complete
   network scan.
