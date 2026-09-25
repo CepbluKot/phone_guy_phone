@@ -99,8 +99,8 @@ voice-conversion limit and measured capacity.
   sources; do not grant the Go service Docker-socket access or expose a new
   unauthenticated network listener.
 - Present two distinct capacity values:
-  1. **Allowed now:** the enforced concurrent processing limit from the current
-     call controller.
+  1. **Allowed now:** the effective concurrent processing limit enforced by
+     the complete Go call-controller and Python RVC-worker path.
   2. **Measured capacity estimate:** only a repeatable controlled-load result
      using the production model, stream settings, and hardware, including the
      measurement time and safety headroom.
@@ -128,12 +128,13 @@ voice-conversion limit and measured capacity.
 
 ## Current documented capacity and verification status
 
-Repository inspection on 2026-09-25 found a Go `sessionGate` with one token,
-which currently enforces at most one processed call at a time. The production
-Python worker's `/healthz` reports readiness, active/running work, and queued
-windows. The Go RVC stream validates `processingMs` metadata for one-second
-output blocks but does not yet publish an admin telemetry API. These are source
-facts, not a fresh live VM measurement.
+Repository inspection on 2026-09-25 found both a one-token Go `sessionGate` and
+a production Python worker that accepts only one active WebSocket session.
+Together they enforce at most one processed call at a time. The Python worker's
+`/healthz` reports readiness, active/running work, and queued windows. The Go
+RVC stream validates `processingMs` metadata for one-second output blocks but
+does not yet publish an admin telemetry API. These are source facts, not a
+fresh live VM measurement.
 
 The production worker's reproducible multi-user capacity has not been measured
 in this design. Therefore the initial dashboard must show the current enforced
