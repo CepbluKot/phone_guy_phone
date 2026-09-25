@@ -6,10 +6,10 @@ https://vm-voice-1.lan.awesomeio.ru {
 	bind 192.168.20.70
 	tls /etc/voice-certs/fullchain.pem /etc/voice-certs/key.pem
 	handle /ws/conference {
-		reverse_proxy 127.0.0.1:8080
+		reverse_proxy 192.168.20.70:8080
 	}
 	handle /ws/live-mirror {
-		reverse_proxy 127.0.0.1:8080
+		reverse_proxy 192.168.20.70:8080
 	}
 	handle /ws/rvc-v2 {
 		reverse_proxy 127.0.0.1:8090
@@ -17,13 +17,18 @@ https://vm-voice-1.lan.awesomeio.ru {
 	handle /ws/rvc {
 		reverse_proxy 127.0.0.1:8090
 	}
+	redir /call /call/ 308
+	handle_path /call/* {
+		root * /opt/voice-changer/web/call
+		file_server
+	}
 	redir /live /live/ 308
 	handle_path /live/* {
 		root * /opt/voice-changer/web/live
 		file_server
 	}
 	handle {
-		reverse_proxy 127.0.0.1:8080
+		reverse_proxy 192.168.20.70:8080
 	}
 }
 

@@ -41,8 +41,17 @@ func main() {
 }
 
 func healthCheck() error {
+	address := envOr("VOICE_WEB_ADDR", ":8080")
+	host, port, err := net.SplitHostPort(address)
+	if err != nil || port == "" {
+		return errors.New("health listener address unavailable")
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	healthURL := "http://" + net.JoinHostPort(host, port) + "/healthz"
 	client := http.Client{Timeout: 2 * time.Second}
-	response, err := client.Get("http://127.0.0.1:8080/healthz")
+	response, err := client.Get(healthURL)
 	if err != nil {
 		return errors.New("health endpoint unavailable")
 	}
@@ -77,7 +86,7 @@ func run() error {
 	password := strings.TrimSuffix(strings.TrimSuffix(string(passwordBytes), "\n"), "\r")
 	origin := os.Getenv("VOICE_ADMIN_ORIGIN")
 	if origin == "" {
-		return errors.New("admin origin unavailable")
+		return errors.New("admin origin allowlist unavailable")
 	}
 	adminAPI := admin.NewHandler(routes, password, origin, log.Default())
 	if len(passwordBytes) == 0 || password == "" {
@@ -111,7 +120,7 @@ func run() error {
 		address = ":8080"
 	}
 
-	conferenceHandler, mirrorHandler, voiceControl, mirrorControl, closeVoice, err := setupVoiceControl(routes)
+	conferenceHandler, mirrorHandler, voiceControl, mirrorControl, closeVoice, err := setupVoiceControl(routes, origin)
 	if err != nil {
 		return errors.New("voice control unavailable")
 	}
@@ -202,7 +211,7 @@ func loopbackTCPAddress(address string) bool {
 	return err == nil && ip != nil && ip.IsLoopback() && portNumber > 0 && portNumber <= 65535
 }
 
-func setupVoiceControl(routes *voiceconfig.Store) (http.Handler, http.Handler, serveVoiceControl, serveVoiceControl, func() error, error) {
+func setupVoiceControl(routes *voiceconfig.Store, adminOrigins string) (http.Handler, http.Handler, serveVoiceControl, serveVoiceControl, func() error, error) {
 	passwordPath := os.Getenv("VOICE_ARI_PASSWORD_FILE")
 	if passwordPath == "" {
 		return nil, nil, nil, nil, func() error { return nil }, nil
@@ -294,7 +303,7 @@ func setupVoiceControl(routes *voiceconfig.Store) (http.Handler, http.Handler, s
 	}
 	var manager *conference.Manager
 	var socket http.Handler
-	var mirrorSocket http.Handler = monitor.Handler()
+	var mirrorSocket http.Handler = monitor.Handler(strings.Split(adminOrigins, ",")...)
 	fixtureDir := os.Getenv("CONFERENCE_FIXTURE_DIR")
 	if fixtureDir != "" {
 		source, sourceErr := conference.FixtureSource(fixtureDir)

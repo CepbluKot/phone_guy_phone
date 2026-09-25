@@ -17,7 +17,7 @@ func (store snapshotStore) Update(string, voiceconfig.Profile, uint64) (voicecon
 }
 
 func TestResolveEndpointsFromARIStasisIdentity(t *testing.T) {
-	allowed := map[string]struct{}{"4101": {}, "4103": {}, "4102": {}, "4104": {}}
+	allowed := map[string]struct{}{"4101": {}, "4103": {}, "4102": {}, "4104": {}, "1983": {}}
 	tests := []struct {
 		name       string
 		channel    string
@@ -25,11 +25,15 @@ func TestResolveEndpointsFromARIStasisIdentity(t *testing.T) {
 		args       []string
 		wantSource string
 		wantPeer   string
+		wantFlow   string
 		wantErr    error
 	}{
 		{name: "direct from configured phone", channel: "PJSIP/4101-00001", caller: "spoofable", args: []string{"source=4101", "peer=4102"}, wantSource: "4101", wantPeer: "4102"},
 		{name: "direct to configured phone", channel: "PJSIP/4102-00002", caller: "4101", args: []string{"source=4101", "peer=4102"}, wantSource: "4101", wantPeer: "4102"},
 		{name: "conference entry uses explicit caller identity", channel: "PJSIP/4103-00003", caller: "4103", args: []string{"source=4103", "peer=conference"}, wantSource: "4103", wantPeer: "conference"},
+		{name: "1900 callback flow is explicit", channel: "PJSIP/4101-00008", caller: "spoofable", args: []string{"source=4101", "peer=1983", "mode=callback-1900"}, wantSource: "4101", wantPeer: "1983", wantFlow: "callback-1900"},
+		{name: "callback cannot change destination", channel: "PJSIP/4101-00009", caller: "4101", args: []string{"source=4101", "peer=4102", "mode=callback-1900"}, wantErr: ErrUnknownEndpoint},
+		{name: "unknown call mode rejected", channel: "PJSIP/4101-00010", caller: "4101", args: []string{"source=4101", "peer=4102", "mode=anything"}, wantErr: ErrUnknownEndpoint},
 		{name: "unmapped endpoint rejected", channel: "PJSIP/9999-00004", caller: "9999", args: []string{"source=9999", "peer=4102"}, wantErr: ErrUnknownEndpoint},
 		{name: "channel identity must match route", channel: "PJSIP/4104-00007", caller: "4101", args: []string{"source=4101", "peer=4102"}, wantErr: ErrUnknownEndpoint},
 		{name: "missing target rejected", channel: "PJSIP/4101-00005", caller: "4101", args: []string{"source=4101"}, wantErr: ErrUnknownEndpoint},
@@ -45,8 +49,8 @@ func TestResolveEndpointsFromARIStasisIdentity(t *testing.T) {
 			if !errors.Is(err, test.wantErr) {
 				t.Fatalf("resolve error=%v want=%v", err, test.wantErr)
 			}
-			if err == nil && (got.Source != test.wantSource || got.Peer != test.wantPeer) {
-				t.Fatalf("resolved=%+v want source=%s peer=%s", got, test.wantSource, test.wantPeer)
+			if err == nil && (got.Source != test.wantSource || got.Peer != test.wantPeer || got.Flow != test.wantFlow) {
+				t.Fatalf("resolved=%+v want source=%s peer=%s flow=%s", got, test.wantSource, test.wantPeer, test.wantFlow)
 			}
 		})
 	}
@@ -63,6 +67,44 @@ func TestProfileResolutionRequiresSnapshotEntry(t *testing.T) {
 	}
 	if _, err := profileForSource(voiceconfig.RouteSnapshot{Extensions: map[string]voiceconfig.Profile{"4101": "future"}}, "4101"); !errors.Is(err, ErrInvalidProfile) {
 		t.Fatalf("invalid profile error=%v", err)
+	}
+}
+
+func TestResolveLegacyPlaybackServiceRequiresTrustedConfiguredCaller(t *testing.T) {
+	store := snapshotStore{snapshot: voiceconfig.RouteSnapshot{Revision: 5, Extensions: map[string]voiceconfig.Profile{
+		"4101": voiceconfig.ProfilePhoneGuy,
+		"4102": voiceconfig.ProfileOriginal,
+	}}}
+	router, err := NewRouter(store, []string{"4101", "4102"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name    string
+		channel string
+		args    []string
+		want    string
+		wantErr error
+	}{
+		{name: "configured caller can use phoneguy loop", channel: "PJSIP/4101-00001", args: []string{"source=4101", "service=1987"}, want: "1987"},
+		{name: "caller id is not trusted", channel: "PJSIP/4102-00002", args: []string{"source=4101", "service=2014"}, wantErr: ErrUnknownEndpoint},
+		{name: "unconfigured source rejected", channel: "PJSIP/9999-00003", args: []string{"source=9999", "service=1993"}, wantErr: ErrUnknownEndpoint},
+		{name: "unapproved service rejected", channel: "PJSIP/4101-00004", args: []string{"source=4101", "service=600"}, wantErr: ErrUnknownEndpoint},
+		{name: "duplicate service argument rejected", channel: "PJSIP/4101-00005", args: []string{"source=4101", "service=1987", "service=2014"}, wantErr: ErrUnknownEndpoint},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			event := ari.Event{Type: "StasisStart", Args: test.args}
+			event.Channel.ID = "service-channel"
+			event.Channel.Name = test.channel
+			service, err := router.ResolvePlaybackService(context.Background(), event)
+			if !errors.Is(err, test.wantErr) {
+				t.Fatalf("resolve error=%v want=%v", err, test.wantErr)
+			}
+			if err == nil && service != test.want {
+				t.Fatalf("service=%q want=%q", service, test.want)
+			}
+		})
 	}
 }
 

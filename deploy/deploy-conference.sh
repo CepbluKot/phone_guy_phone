@@ -24,6 +24,10 @@ remote_rollback() {
     return 2
   fi
   path() { printf '%s%s' "$root_prefix" "$1"; }
+  if [ -e "$(path /opt/voice-changer)/.go-runtime-owner" ]; then
+    echo "Go runtime owns VM209; legacy deployment refused" >&2
+    return 2
+  fi
   backup=$(path "/opt/voice-conference/backups/$stamp")
   conference_root=$(path /opt/voice-conference)
   http_root=$(path /opt/voice-changer)
@@ -105,6 +109,10 @@ fi
 
 stamp=${DEPLOY_CONFERENCE_STAMP:-$(date -u +%Y%m%dT%H%M%SZ)}
 validate_stamp "$stamp"
+if ! ssh "$target" 'sudo test ! -e /opt/voice-changer/.go-runtime-owner'; then
+  echo "Go runtime owns VM209; legacy deployment refused" >&2
+  exit 2
+fi
 stage="/tmp/voice-conference-stage-$stamp"
 backup="/opt/voice-conference/backups/$stamp"
 rollback_required=0
@@ -168,6 +176,10 @@ ssh "$target" sudo bash -s -- "$stamp" "$stage" <<'REMOTE_PREPARE'
 set -euo pipefail
 stamp=$1
 stage=$2
+if [ -e /opt/voice-changer/.go-runtime-owner ]; then
+  echo "Go runtime owns VM209; legacy deployment refused" >&2
+  exit 2
+fi
 root=/opt/voice-conference
 backup="$root/backups/$stamp"
 release="$root/releases/$stamp"

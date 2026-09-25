@@ -24,6 +24,10 @@ type Media interface {
 type ARI interface {
 	AnswerChannel(context.Context, string) error
 	ClaimChannel(string) error
+	ContinueChannel(context.Context, string, string, string, string) error
+	RingChannel(context.Context, string) error
+	RingStopChannel(context.Context, string) error
+	PlayChannel(context.Context, string, string, string) error
 	OriginateChannel(context.Context, string, string, string, string, int) error
 	CreateBridge(context.Context, string) (Bridge, error)
 	SnoopChannel(context.Context, string, string) (string, error)
@@ -37,6 +41,18 @@ func (adapter ARIAdapter) AnswerChannel(ctx context.Context, id string) error {
 	return adapter.Client.AnswerChannel(ctx, id)
 }
 func (adapter ARIAdapter) ClaimChannel(id string) error { return adapter.Client.ClaimChannel(id) }
+func (adapter ARIAdapter) ContinueChannel(ctx context.Context, id, contextName, extension, label string) error {
+	return adapter.Client.ContinueChannel(ctx, id, contextName, extension, label)
+}
+func (adapter ARIAdapter) RingChannel(ctx context.Context, id string) error {
+	return adapter.Client.RingChannel(ctx, id)
+}
+func (adapter ARIAdapter) RingStopChannel(ctx context.Context, id string) error {
+	return adapter.Client.RingStopChannel(ctx, id)
+}
+func (adapter ARIAdapter) PlayChannel(ctx context.Context, id, sound, playbackID string) error {
+	return adapter.Client.PlayChannel(ctx, id, sound, playbackID)
+}
 func (adapter ARIAdapter) OriginateChannel(ctx context.Context, endpoint, id, args, caller string, timeout int) error {
 	return adapter.Client.OriginateChannel(ctx, endpoint, id, args, caller, timeout)
 }

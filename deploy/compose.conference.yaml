@@ -5,12 +5,19 @@ services:
     mem_limit: 256m
     cpus: 0.5
     pids_limit: 128
-    ports: ["127.0.0.1:8092:8092"]
+    ports:
+      - "127.0.0.1:8092:8092"
+      - "192.168.20.70:5060:5060/udp"
+      - "192.168.20.70:10000-10019:10000-10019/udp"
     volumes:
       - "${CONFERENCE_RUNTIME:?CONFERENCE_RUNTIME is required}/asterisk/ari.conf:/etc/asterisk/ari.conf:ro"
       # The container must listen on its eth0 address for Docker's loopback-only
       # port publication; the host-visible ARI socket remains 127.0.0.1:8092.
       - "${CONFERENCE_RUNTIME}/asterisk/http.conf:/etc/asterisk/http.conf:ro"
+      - "${CONFERENCE_RUNTIME}/asterisk/pjsip.conf:/etc/asterisk/pjsip.conf:ro"
+      - "${CONFERENCE_RUNTIME}/asterisk/extensions.conf:/etc/asterisk/extensions.conf:ro"
+      - "${CONFERENCE_RUNTIME}/asterisk/modules.conf:/etc/asterisk/modules.conf:ro"
+      - "${CONFERENCE_RUNTIME}/asterisk/sounds:/var/lib/asterisk/sounds/phoneguy-bot:ro"
     read_only: true
     tmpfs:
       - /tmp

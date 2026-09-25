@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"voice-changer/internal/voiceconfig"
 )
@@ -19,14 +20,14 @@ const maxBodyBytes = 4 << 10
 type Handler struct {
 	store    voiceconfig.RouteStore
 	password []byte
-	origin   string
+	origins  map[string]struct{}
 	sessions *sessions
 	logger   *log.Logger
 }
 
-func NewHandler(store voiceconfig.RouteStore, password, origin string, logger *log.Logger) http.Handler {
-	parsed, err := url.Parse(origin)
-	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" || store == nil || password == "" {
+func NewHandler(store voiceconfig.RouteStore, password, origins string, logger *log.Logger) http.Handler {
+	allowedOrigins, validOrigins := parseOrigins(origins)
+	if !validOrigins || store == nil || password == "" {
 		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			writeError(w, http.StatusServiceUnavailable, "config_unavailable")
 		})
@@ -40,13 +41,26 @@ func NewHandler(store voiceconfig.RouteStore, password, origin string, logger *l
 			writeError(w, http.StatusServiceUnavailable, "config_unavailable")
 		})
 	}
-	h := &Handler{store: store, password: []byte(password), origin: origin, sessions: state, logger: logger}
+	h := &Handler{store: store, password: []byte(password), origins: allowedOrigins, sessions: state, logger: logger}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /admin/api/v1/session", h.login)
 	mux.HandleFunc("DELETE /admin/api/v1/session", h.logout)
 	mux.HandleFunc("GET /admin/api/v1/voice-routes", h.getRoutes)
 	mux.HandleFunc("PUT /admin/api/v1/voice-routes/{extension}", h.putRoute)
 	return mux
+}
+
+func parseOrigins(raw string) (map[string]struct{}, bool) {
+	allowed := make(map[string]struct{})
+	for _, item := range strings.Split(raw, ",") {
+		origin := strings.TrimSpace(item)
+		parsed, err := url.Parse(origin)
+		if origin == "" || err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.Opaque != "" || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+			return nil, false
+		}
+		allowed[origin] = struct{}{}
+	}
+	return allowed, len(allowed) > 0
 }
 
 func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
@@ -162,7 +176,8 @@ func (h *Handler) authorize(w http.ResponseWriter, r *http.Request, write bool) 
 }
 
 func (h *Handler) validOrigin(r *http.Request) bool {
-	return r.Header.Get("Origin") == h.origin
+	_, ok := h.origins[r.Header.Get("Origin")]
+	return ok
 }
 
 func (h *Handler) log(message string) {

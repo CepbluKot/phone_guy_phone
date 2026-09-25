@@ -16,9 +16,12 @@ const (
 )
 
 type Event struct {
-	Type    string   `json:"type"`
-	App     string   `json:"application"`
-	Args    []string `json:"args"`
+	Type     string   `json:"type"`
+	App      string   `json:"application"`
+	Args     []string `json:"args"`
+	Playback struct {
+		ID string `json:"id"`
+	} `json:"playback"`
 	Channel struct {
 		ID     string `json:"id"`
 		Name   string `json:"name"`

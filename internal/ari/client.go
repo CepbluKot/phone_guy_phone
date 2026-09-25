@@ -43,6 +43,13 @@ var (
 	ErrMediaClosed         = errors.New("asterisk_media_closed")
 )
 
+var dialplanPlaybackExtensions = map[string]struct{}{"1987": {}, "2014": {}, "1993": {}}
+
+var callbackAnnouncements = map[string]struct{}{
+	"phoneguy-bot/fnaf1-night1-original": {},
+	"phoneguy-bot/night5-then-scary":     {},
+}
+
 type Credentials struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
@@ -320,6 +327,11 @@ func (c *Client) OriginateChannel(ctx context.Context, endpoint, channelID, appA
 	if !validEndpointID(endpoint) || !validResourceID(channelID) || !validAppArgs(appArgs) || !validEndpointID(callerID) || timeoutSeconds < 1 || timeoutSeconds > 60 {
 		return ErrARIFailure
 	}
+	// Claim the generated identifier before asking Asterisk to create the
+	// channel: StasisStart/ChannelDestroyed can arrive before the REST response.
+	if err := c.register(channelID, resourceChannel); err != nil {
+		return err
+	}
 	query := url.Values{
 		"endpoint": []string{"PJSIP/" + endpoint},
 		"app":      []string{c.app},
@@ -329,10 +341,23 @@ func (c *Client) OriginateChannel(ctx context.Context, endpoint, channelID, appA
 	}
 	response, err := c.request(ctx, http.MethodPost, "/channels/"+url.PathEscape(channelID), query)
 	if err != nil {
+		if errors.Is(err, ErrARICollision) {
+			c.forgetChannel(channelID)
+		}
 		return err
 	}
 	closeResponse(response)
-	return c.register(channelID, resourceChannel)
+	return nil
+}
+
+func (c *Client) forgetChannel(channelID string) {
+	c.mu.Lock()
+	delete(c.resources, channelID)
+	delete(c.channels, channelID)
+	delete(c.channelUp, channelID)
+	delete(c.channelGone, channelID)
+	delete(c.channelWaiters, channelID)
+	c.mu.Unlock()
 }
 
 func validEndpointID(endpoint string) bool {
@@ -357,6 +382,70 @@ func validAppArgs(args string) bool {
 		}
 	}
 	return true
+}
+
+// ContinueChannel releases one owned inbound service channel to the fixed
+// playback label in the trusted phone context. It cannot select arbitrary
+// dialplan destinations.
+func (c *Client) ContinueChannel(ctx context.Context, channelID, contextName, extension, label string) error {
+	if !c.owns(channelID, resourceChannel) {
+		return ErrNotOwned
+	}
+	if contextName != "phoneguy-sip" || label != "play" {
+		return ErrARIFailure
+	}
+	if _, ok := dialplanPlaybackExtensions[extension]; !ok {
+		return ErrARIFailure
+	}
+	query := url.Values{"context": []string{contextName}, "extension": []string{extension}, "label": []string{label}}
+	response, err := c.request(ctx, http.MethodPost, "/channels/"+url.PathEscape(channelID)+"/continue", query)
+	if err != nil {
+		return err
+	}
+	closeResponse(response)
+	c.mu.Lock()
+	delete(c.resources, channelID)
+	delete(c.channels, channelID)
+	delete(c.channelUp, channelID)
+	delete(c.channelGone, channelID)
+	c.mu.Unlock()
+	return nil
+}
+
+func (c *Client) PlayChannel(ctx context.Context, channelID, sound, playbackID string) error {
+	if !c.owns(channelID, resourceChannel) {
+		return ErrNotOwned
+	}
+	if _, ok := callbackAnnouncements[sound]; !ok || !validResourceID(playbackID) || !strings.HasPrefix(playbackID, "call-playback-") {
+		return ErrARIFailure
+	}
+	query := url.Values{"media": []string{"sound:" + sound}}
+	response, err := c.request(ctx, http.MethodPost, "/channels/"+url.PathEscape(channelID)+"/play/"+url.PathEscape(playbackID), query)
+	if err != nil {
+		return err
+	}
+	closeResponse(response)
+	return nil
+}
+
+func (c *Client) RingChannel(ctx context.Context, channelID string) error {
+	return c.channelSignal(ctx, http.MethodPost, channelID, "ring")
+}
+
+func (c *Client) RingStopChannel(ctx context.Context, channelID string) error {
+	return c.channelSignal(ctx, http.MethodDelete, channelID, "ring")
+}
+
+func (c *Client) channelSignal(ctx context.Context, method, channelID, signal string) error {
+	if !c.owns(channelID, resourceChannel) {
+		return ErrNotOwned
+	}
+	response, err := c.request(ctx, method, "/channels/"+url.PathEscape(channelID)+"/"+signal, nil)
+	if err != nil {
+		return err
+	}
+	closeResponse(response)
+	return nil
 }
 
 func (c *Client) owns(id string, kind resourceKind) bool {

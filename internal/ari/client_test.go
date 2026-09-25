@@ -3,6 +3,7 @@ package ari
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -140,6 +141,8 @@ func TestOriginateTracksOnlyConfirmedGeneratedPeerChannel(t *testing.T) {
 		case r.Method == http.MethodDelete && r.URL.Path == "/ari/channels/outbound-1":
 			deletes.Add(1)
 			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPost && r.URL.Path == "/ari/channels/outbound-collision":
+			w.WriteHeader(http.StatusConflict)
 		default:
 			http.NotFound(w, r)
 		}
@@ -155,6 +158,132 @@ func TestOriginateTracksOnlyConfirmedGeneratedPeerChannel(t *testing.T) {
 	}
 	if err := client.OriginateChannel(context.Background(), "PJSIP/1988", "outbound-2", "call=abcd", "1983", 30); !errors.Is(err, ErrARIFailure) {
 		t.Fatalf("untrusted endpoint was accepted: %v", err)
+	}
+	if err := client.OriginateChannel(context.Background(), "1988", "outbound-collision", "call=abcd", "1983", 30); !errors.Is(err, ErrARICollision) {
+		t.Fatalf("channel collision error=%v", err)
+	}
+	if client.owns("outbound-collision", resourceChannel) {
+		t.Fatal("pre-existing foreign channel remained owned after an ARI collision")
+	}
+}
+
+func TestOriginateClaimsChannelBeforeARIResponseCanRaceWithEvents(t *testing.T) {
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	client, _ := newARIClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requireARIAuth(t, r)
+		if r.Method != http.MethodPost || r.URL.Path != "/ari/channels/outbound-race" {
+			http.NotFound(w, r)
+			return
+		}
+		close(entered)
+		<-release
+		w.WriteHeader(http.StatusCreated)
+	}))
+	result := make(chan error, 1)
+	go func() {
+		result <- client.OriginateChannel(context.Background(), "1988", "outbound-race", "call=abcd,role=peer", "1983", 30)
+	}()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("ARI originate request did not arrive")
+	}
+	if !client.owns("outbound-race", resourceChannel) {
+		t.Fatal("generated channel was not owned while REST creation was in flight")
+	}
+	close(release)
+	if err := <-result; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestContinueChannelHandsOnlyApprovedPlaybackTargetsToDialplan(t *testing.T) {
+	client, _ := newARIClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requireARIAuth(t, r)
+		if r.Method != http.MethodPost || r.URL.Path != "/ari/channels/inbound-service/continue" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.URL.Query().Get("context") != "phoneguy-sip" || r.URL.Query().Get("extension") != "1987" || r.URL.Query().Get("label") != "play" {
+			t.Errorf("continue query=%v", r.URL.Query())
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	if err := client.ClaimChannel("inbound-service"); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.ContinueChannel(context.Background(), "inbound-service", "phoneguy-sip", "1987", "play"); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.DeleteChannel(context.Background(), "inbound-service"); !errors.Is(err, ErrNotOwned) {
+		t.Fatalf("ownership remained after transfer to dialplan: %v", err)
+	}
+	if err := client.ContinueChannel(context.Background(), "foreign", "phoneguy-sip", "1987", "play"); !errors.Is(err, ErrNotOwned) {
+		t.Fatalf("foreign channel was continued: %v", err)
+	}
+	if err := client.ClaimChannel("second-service"); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.ContinueChannel(context.Background(), "second-service", "phoneguy-sip", "600", "play"); !errors.Is(err, ErrARIFailure) {
+		t.Fatalf("unapproved dialplan target was continued: %v", err)
+	}
+}
+
+func TestCallbackPlaybackUsesOnlyOwnedPeerAndInstalledAnnouncements(t *testing.T) {
+	client, _ := newARIClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requireARIAuth(t, r)
+		if r.Method != http.MethodPost || r.URL.Path != "/ari/channels/peer-1/play/call-playback-abcd" || r.URL.Query().Get("media") != "sound:phoneguy-bot/fnaf1-night1-original" {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+	}))
+	if err := client.ClaimChannel("peer-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.PlayChannel(context.Background(), "peer-1", "phoneguy-bot/fnaf1-night1-original", "call-playback-abcd"); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.PlayChannel(context.Background(), "peer-1", "http://untrusted.invalid/sound.wav", "call-playback-efgh"); !errors.Is(err, ErrARIFailure) {
+		t.Fatalf("unapproved sound accepted: %v", err)
+	}
+	if err := client.PlayChannel(context.Background(), "foreign", "phoneguy-bot/fnaf1-night1-original", "call-playback-ijkl"); !errors.Is(err, ErrNotOwned) {
+		t.Fatalf("playback on unowned channel accepted: %v", err)
+	}
+}
+
+func TestRingAndRingStopRequireOwnedChannel(t *testing.T) {
+	var paths []string
+	client, _ := newARIClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requireARIAuth(t, r)
+		paths = append(paths, r.Method+" "+r.URL.Path)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	if err := client.ClaimChannel("caller-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.RingChannel(context.Background(), "caller-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.RingStopChannel(context.Background(), "caller-1"); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(paths, ","); got != "POST /ari/channels/caller-1/ring,DELETE /ari/channels/caller-1/ring" {
+		t.Fatalf("ring requests=%s", got)
+	}
+	if err := client.RingChannel(context.Background(), "foreign"); !errors.Is(err, ErrNotOwned) {
+		t.Fatalf("ringed unowned channel: %v", err)
+	}
+}
+
+func TestPlaybackFinishedEventCarriesPlaybackID(t *testing.T) {
+	var event Event
+	if err := json.Unmarshal([]byte(`{"type":"PlaybackFinished","playback":{"id":"call-playback-abcd"}}`), &event); err != nil {
+		t.Fatal(err)
+	}
+	if event.Type != "PlaybackFinished" || event.Playback.ID != "call-playback-abcd" {
+		t.Fatalf("decoded event=%+v", event)
 	}
 }
 

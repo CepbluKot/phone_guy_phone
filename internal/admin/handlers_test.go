@@ -235,3 +235,32 @@ func TestPasswordNeverAppearsInResponseOrLogs(t *testing.T) {
 		t.Fatal("password leaked to cookie")
 	}
 }
+
+func TestConfiguredOriginsAreAnExactHTTPSAllowlist(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "routes.json")
+	initial := `{"schemaVersion":1,"revision":1,"extensions":{"1983":"original"}}`
+	if err := os.WriteFile(path, []byte(initial), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := voiceconfig.Open(path, []string{"1983"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	origins := "https://voice.example.test,https://vm-voice.example.test"
+	server := httptest.NewTLSServer(NewHandler(store, "known-test-password", origins, nil))
+	t.Cleanup(server.Close)
+	for _, origin := range []string{"https://voice.example.test", "https://vm-voice.example.test"} {
+		response := request(t, server.Client(), http.MethodPost, server.URL+"/admin/api/v1/session", `{"password":"known-test-password"}`, origin, "")
+		response.Body.Close()
+		if response.StatusCode != http.StatusCreated {
+			t.Fatalf("allowed Origin %q status=%d", origin, response.StatusCode)
+		}
+	}
+	for _, origin := range []string{"https://voice.example.test.evil", "http://voice.example.test", "https://evil.example.test"} {
+		response := request(t, server.Client(), http.MethodPost, server.URL+"/admin/api/v1/session", `{"password":"known-test-password"}`, origin, "")
+		response.Body.Close()
+		if response.StatusCode != http.StatusForbidden {
+			t.Fatalf("unlisted Origin %q status=%d", origin, response.StatusCode)
+		}
+	}
+}
