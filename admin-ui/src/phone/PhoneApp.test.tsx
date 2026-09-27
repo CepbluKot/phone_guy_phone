@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { PhoneApp } from "./PhoneApp";
 import { phoneAPI } from "./api";
 import { BrowserSIPSession } from "./sipSession";
 
 vi.mock("./api", () => ({ phoneAPI: { config: vi.fn(), directory: vi.fn(), claim: vi.fn(), heartbeat: vi.fn(), release: vi.fn() } }));
-const sipMocks = vi.hoisted(() => ({ connect: vi.fn(), call: vi.fn(), disconnect: vi.fn(), hangup: vi.fn(), answer: vi.fn(), decline: vi.fn() }));
-vi.mock("./sipSession", () => ({ BrowserSIPSession: class { constructor(_url: string, private registered: (state: string) => void) {} async connect(){this.registered("registered");await sipMocks.connect()} async call(target: string){await sipMocks.call(target)} async disconnect(){await sipMocks.disconnect()} async hangup(){await sipMocks.hangup()} async answer(){await sipMocks.answer()} async decline(){await sipMocks.decline()} } }));
+const sipMocks = vi.hoisted(() => ({ connect: vi.fn(), call: vi.fn(), disconnect: vi.fn(), hangup: vi.fn(), answer: vi.fn(), decline: vi.fn(), onCall: undefined as ((status: string, peer?: string) => void) | undefined }));
+vi.mock("./sipSession", () => ({ BrowserSIPSession: class { constructor(_url: string, private registered: (state: string) => void, onCall: (status: string, peer?: string) => void) { sipMocks.onCall = onCall; } async connect(){this.registered("registered");await sipMocks.connect()} async call(target: string){sipMocks.onCall?.("calling",target);await sipMocks.call(target)} async disconnect(){await sipMocks.disconnect()} async hangup(){await sipMocks.hangup()} async answer(){await sipMocks.answer()} async decline(){await sipMocks.decline()} } }));
 
 const sessionResponse={session:{sessionId:"opaque-token",nickname:"Alice",extension:"1983",expiresAt:"2026-09-26T12:00:30Z"},sip:{uri:"sip:web-abc@vm-voice-1.lan.awesomeio.ru",username:"web-abc",password:"never-store-this",endpoint:"web-abc"}};
 
@@ -26,6 +26,12 @@ describe("browser phone",()=>{
   it("registers the browser and calls only another configured internal number",async()=>{
     render(<PhoneApp/>);await screen.findByLabelText("Ваш ник");fireEvent.change(screen.getByLabelText("Ваш ник"),{target:{value:"Alice"}});fireEvent.change(screen.getByLabelText("Внутренний номер"),{target:{value:"1983"}});fireEvent.click(screen.getByRole("button",{name:/Подключиться/}));await screen.findByText("Готов принимать звонки");expect(BrowserSIPSession).toBeDefined();
     expect(screen.getByRole("option",{name:/Bob/})).not.toBeNull();expect(screen.queryByRole("option",{name:/Alice/})).toBeNull();fireEvent.click(screen.getByRole("button",{name:/Позвонить/}));await waitFor(()=>expect(sipMocks.call).toHaveBeenCalledWith("1988"));
+  });
+  it("opens a blurred active-call modal only after the call connects",async()=>{
+    render(<PhoneApp/>);await screen.findByLabelText("Ваш ник");fireEvent.change(screen.getByLabelText("Ваш ник"),{target:{value:"Alice"}});fireEvent.change(screen.getByLabelText("Внутренний номер"),{target:{value:"1983"}});fireEvent.click(screen.getByRole("button",{name:/Подключиться/}));await screen.findByText("Готов принимать звонки");
+    fireEvent.click(screen.getByRole("button",{name:/Позвонить/}));await waitFor(()=>expect(sipMocks.call).toHaveBeenCalledWith("1988"));expect(screen.queryByRole("dialog")).toBeNull();
+    act(()=>sipMocks.onCall?.("connected"));
+    const dialog=await screen.findByRole("dialog");expect(dialog.getAttribute("aria-modal")).toBe("true");expect(dialog.textContent).toContain("Bob");expect(dialog.textContent).toContain("00:00");expect(screen.getByRole("button",{name:/Завершить звонок/})).not.toBeNull();expect(document.querySelector(".phone-app-background")?.getAttribute("aria-hidden")).toBe("true");
   });
   it("releases the session and keeps session credentials out of browser storage",async()=>{
     render(<PhoneApp/>);await screen.findByLabelText("Ваш ник");fireEvent.change(screen.getByLabelText("Ваш ник"),{target:{value:"Alice"}});fireEvent.click(screen.getByRole("button",{name:/Подключиться/}));await screen.findByText("Готов принимать звонки");fireEvent.click(screen.getByRole("button",{name:/Отключить этот браузер/}));await waitFor(()=>expect(phoneAPI.release).toHaveBeenCalledWith("opaque-token",false));expect(localStorage.length).toBe(0);
