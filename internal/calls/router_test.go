@@ -70,6 +70,23 @@ func TestProfileResolutionRequiresSnapshotEntry(t *testing.T) {
 	}
 }
 
+func TestActiveBrowserEndpointResolvesOnlyToItsConfiguredExtension(t *testing.T) {
+	allowed := map[string]struct{}{"4101": {}, "4102": {}}
+	browsers := map[string]string{"web-abcd1234": "4101"}
+	event := ari.Event{Type: "StasisStart", Args: []string{"source=web-abcd1234", "peer=4102"}}
+	event.Channel.ID = "browser-inbound"
+	event.Channel.Name = "PJSIP/web-abcd1234-0001"
+	got, err := resolveEndpointsWithBrowsers(event, allowed, browsers)
+	if err != nil || got.Source != "4101" || got.Peer != "4102" {
+		t.Fatalf("resolved=%+v err=%v", got, err)
+	}
+	event.Args = []string{"source=web-forged", "peer=4102"}
+	event.Channel.Name = "PJSIP/web-forged-0002"
+	if _, err := resolveEndpointsWithBrowsers(event, allowed, browsers); !errors.Is(err, ErrUnknownEndpoint) {
+		t.Fatalf("forged browser accepted: %v", err)
+	}
+}
+
 func TestResolveLegacyPlaybackServiceRequiresTrustedConfiguredCaller(t *testing.T) {
 	store := snapshotStore{snapshot: voiceconfig.RouteSnapshot{Revision: 5, Extensions: map[string]voiceconfig.Profile{
 		"4101": voiceconfig.ProfilePhoneGuy,

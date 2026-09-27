@@ -16,6 +16,7 @@ RUN apt-get update \
         libncurses-dev \
         libsqlite3-dev \
         libssl-dev \
+        libsrtp2-dev \
         liburiparser-dev \
         libxml2-dev \
         pkg-config \
@@ -49,6 +50,7 @@ RUN ./configure \
         --enable codec_alaw \
         --enable codec_resample \
         --enable format_wav \
+        --enable func_channel \
         --enable pbx_config \
         --enable res_ari \
         --enable res_ari_asterisk \
@@ -56,6 +58,7 @@ RUN ./configure \
         --enable res_ari_channels \
         --enable res_ari_events \
         --enable res_ari_model \
+        --enable res_crypto \
         --enable res_http_websocket \
         --enable res_pjproject \
         --enable res_pjsip \
@@ -66,7 +69,9 @@ RUN ./configure \
         --enable res_pjsip_registrar \
         --enable res_pjsip_sdp_rtp \
         --enable res_pjsip_session \
+        --enable res_pjsip_transport_websocket \
         --enable res_rtp_asterisk \
+        --enable res_srtp \
         --enable res_sorcery_astdb \
         --enable res_sorcery_config \
         --enable res_sorcery_memory \
@@ -93,6 +98,7 @@ RUN apt-get update \
         libncursesw6 \
         libsqlite3-0 \
         libssl3 \
+        libsrtp2-1 \
         liburiparser1 \
         libuuid1 \
         libxml2 \
@@ -102,7 +108,7 @@ RUN apt-get update \
         --no-create-home --shell /usr/sbin/nologin asterisk
 
 COPY --from=build /opt/asterisk-root/ /
-COPY asterisk.conf cdr.conf cel.conf confbridge.conf extensions.conf http.conf modules.conf rtp.conf stasis.conf /etc/asterisk/
+COPY asterisk.conf cdr.conf cel.conf confbridge.conf extensions.conf http.conf modules.conf rtp.conf sorcery.conf stasis.conf /etc/asterisk/
 COPY ari.conf.template /usr/share/asterisk/config/ari.conf.template
 COPY pjsip.conf.template /usr/share/asterisk/config/pjsip.conf.template
 COPY healthcheck.sh /usr/local/bin/asterisk-healthcheck

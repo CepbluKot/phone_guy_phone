@@ -8,6 +8,15 @@ const routes = {
   revision: 4,
   extensions: { "1983": "original", "1987": "phone-guy" },
 };
+const phonebook = { revision: 1, devices: [] };
+const metrics = {
+  updatedAt: "2026-09-25T00:00:00Z",
+  rvc: { status: "ready", active: false, running: false, queuedWindows: 0, fresh: true },
+  calls: { active: 0, limit: 2 },
+  processing: { samples: 0 },
+  errors: [],
+  host: { status: "ready", cpuReady: true, rvcCpuReady: true },
+};
 const response = (status: number, body?: unknown) =>
   new Response(body === undefined ? null : JSON.stringify(body), {
     status,
@@ -23,16 +32,21 @@ describe("phone profile admin", () => {
   it("requires login, then loads and displays current phone profiles", async () => {
     const fetchMock = vi
       .fn()
+      .mockResolvedValueOnce(response(200, { required: true }))
       .mockResolvedValueOnce(response(401, { error: "unauthorized" }))
       .mockResolvedValueOnce(response(201, { csrfToken: "csrf-one" }))
-      .mockResolvedValueOnce(response(200, routes));
+      .mockResolvedValueOnce(response(200, routes))
+      .mockResolvedValueOnce(response(200, phonebook))
+      .mockResolvedValueOnce(response(200, metrics));
     vi.stubGlobal("fetch", fetchMock);
     render(<App />);
+    await userEvent.click(await screen.findByRole("button", { name: "EN" }));
     expect(
       await screen.findByRole("heading", { name: "Sign in" }),
     ).toBeTruthy();
     await userEvent.type(screen.getByLabelText("Admin password"), "secret");
     await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Voice profiles" }));
     expect(
       await screen.findByRole("heading", { name: "Phone profiles" }),
     ).toBeTruthy();
@@ -47,22 +61,31 @@ describe("phone profile admin", () => {
     };
     const fetchMock = vi
       .fn()
+      .mockResolvedValueOnce(response(200, { required: true }))
       .mockResolvedValueOnce(response(401, { error: "unauthorized" }))
       .mockResolvedValueOnce(response(201, { csrfToken: "csrf-two" }))
       .mockResolvedValueOnce(response(200, routes))
-      .mockResolvedValueOnce(response(200, updated));
+      .mockResolvedValueOnce(response(200, phonebook))
+      .mockResolvedValueOnce(response(200, metrics))
+      .mockResolvedValueOnce(response(200, { sessions: [] }))
+      .mockResolvedValueOnce(response(200, updated))
+      .mockResolvedValue(response(200, metrics));
     vi.stubGlobal("fetch", fetchMock);
     render(<App />);
+    await userEvent.click(await screen.findByRole("button", { name: "EN" }));
     await userEvent.type(
       await screen.findByLabelText("Admin password"),
       "secret",
     );
     await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Voice profiles" }));
     const select = await screen.findByLabelText("Profile for 1983");
     await userEvent.selectOptions(select, "phone-guy");
     await userEvent.click(screen.getByRole("button", { name: "Save 1983" }));
     expect(await screen.findByText("Saved")).toBeTruthy();
-    const put = fetchMock.mock.calls[3];
+    const put = fetchMock.mock.calls.find(
+      ([path]) => path === "/admin/api/v1/voice-routes/1983",
+    )!;
     expect(put[0]).toBe("/admin/api/v1/voice-routes/1983");
     expect(JSON.parse(String(put[1].body))).toEqual({
       profile: "phone-guy",
@@ -79,26 +102,67 @@ describe("phone profile admin", () => {
     };
     const fetchMock = vi
       .fn()
+      .mockResolvedValueOnce(response(200, { required: true }))
       .mockResolvedValueOnce(response(401, { error: "unauthorized" }))
       .mockResolvedValueOnce(response(201, { csrfToken: "csrf-three" }))
       .mockResolvedValueOnce(response(200, routes))
+      .mockResolvedValueOnce(response(200, phonebook))
+      .mockResolvedValueOnce(response(200, metrics))
+      .mockResolvedValueOnce(response(200, { sessions: [] }))
       .mockResolvedValueOnce(response(409, { error: "stale_revision" }))
-      .mockResolvedValueOnce(response(200, fresh));
+      .mockResolvedValueOnce(response(200, fresh))
+      .mockResolvedValueOnce(response(200, phonebook))
+      .mockResolvedValue(response(200, metrics));
     vi.stubGlobal("fetch", fetchMock);
     render(<App />);
+    await userEvent.click(await screen.findByRole("button", { name: "EN" }));
     await userEvent.type(
       await screen.findByLabelText("Admin password"),
       "secret",
     );
     await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Voice profiles" }));
     await userEvent.selectOptions(
       await screen.findByLabelText("Profile for 1983"),
       "phone-guy",
     );
     await userEvent.click(screen.getByRole("button", { name: "Save 1983" }));
     expect(await screen.findByText(/changed in another session/i)).toBeTruthy();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(5));
-    expect(screen.getByLabelText("Profile for 1983")).toHaveValue("original");
+    await waitFor(() =>
+      expect(screen.getByLabelText("Profile for 1983")).toHaveValue("original"),
+    );
+  });
+
+  it("loads and updates profiles without a password when auth is disabled", async () => {
+    const updated = {
+      revision: 5,
+      extensions: { ...routes.extensions, "1983": "phone-guy" },
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(response(200, { required: false }))
+      .mockResolvedValueOnce(response(200, routes))
+      .mockResolvedValueOnce(response(200, phonebook))
+      .mockResolvedValueOnce(response(200, metrics))
+      .mockResolvedValueOnce(response(200, { sessions: [] }))
+      .mockResolvedValueOnce(response(200, updated))
+      .mockResolvedValue(response(200, metrics));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+    await userEvent.click(await screen.findByRole("button", { name: "EN" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Voice profiles" }));
+    await userEvent.selectOptions(
+      await screen.findByLabelText("Profile for 1983"),
+      "phone-guy",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Save 1983" }));
+    expect(await screen.findByText("Saved")).toBeTruthy();
+    expect(screen.queryByLabelText("Admin password")).toBeNull();
+    const put = fetchMock.mock.calls.find(
+      ([path]) => path === "/admin/api/v1/voice-routes/1983",
+    )!;
+    expect(put[0]).toBe("/admin/api/v1/voice-routes/1983");
+    expect(new Headers(put[1].headers).get("X-CSRF-Token")).toBe("");
   });
 
   it("shows service unavailable when routes cannot be loaded", async () => {
@@ -107,6 +171,6 @@ describe("phone profile admin", () => {
       vi.fn().mockResolvedValue(response(503, { error: "config_unavailable" })),
     );
     render(<App />);
-    expect(await screen.findByText(/service is unavailable/i)).toBeTruthy();
+    expect(await screen.findByText(/Сервис недоступен/i)).toBeTruthy();
   });
 });

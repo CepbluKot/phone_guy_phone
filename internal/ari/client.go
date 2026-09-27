@@ -11,11 +11,22 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
+
+var dynamicPJSIPFields = map[string]map[string]struct{}{
+	"auth": {"type": {}, "auth_type": {}, "username": {}, "password": {}},
+	"aor":  {"type": {}, "max_contacts": {}, "remove_existing": {}},
+	"endpoint": {
+		"type": {}, "context": {}, "disallow": {}, "allow": {}, "auth": {}, "aors": {}, "transport": {},
+		"media_encryption": {}, "dtls_auto_generate_cert": {}, "ice_support": {}, "use_avpf": {}, "rtcp_mux": {},
+		"direct_media": {}, "force_rport": {}, "rewrite_contact": {}, "rtp_symmetric": {}, "media_use_received_transport": {},
+	},
+}
 
 const (
 	defaultTimeout = 10 * time.Second
@@ -142,6 +153,10 @@ func validApp(app string) bool {
 }
 
 func (c *Client) request(ctx context.Context, method, path string, query url.Values) (*http.Response, error) {
+	return c.requestWithBody(ctx, method, path, query, nil)
+}
+
+func (c *Client) requestWithBody(ctx context.Context, method, path string, query url.Values, body io.Reader) (*http.Response, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -157,11 +172,14 @@ func (c *Client) request(ctx context.Context, method, path string, query url.Val
 	if query != nil {
 		endpoint.RawQuery = query.Encode()
 	}
-	request, err := http.NewRequestWithContext(ctx, method, endpoint.String(), nil)
+	request, err := http.NewRequestWithContext(ctx, method, endpoint.String(), body)
 	if err != nil {
 		return nil, ErrARIFailure
 	}
 	request.SetBasicAuth(c.username, c.password)
+	if body != nil {
+		request.Header.Set("Content-Type", "application/json")
+	}
 	response, err := c.http.Do(request)
 	if err != nil {
 		return nil, ErrARIFailure
@@ -182,6 +200,89 @@ func (c *Client) request(ctx context.Context, method, path string, query url.Val
 	default:
 		return nil, ErrARIFailure
 	}
+}
+
+// PutDynamicPJSIP provisions only the bounded dynamic object kinds and fields
+// used by the browser phone. Asterisk's response can contain plaintext SIP
+// credentials, so it is always closed without parsing or logging its body.
+func (c *Client) PutDynamicPJSIP(ctx context.Context, kind, id string, fields map[string]string) error {
+	allowed, ok := dynamicPJSIPFields[kind]
+	if !ok || !validDynamicID(id) || len(fields) == 0 || len(fields) > len(allowed) {
+		return ErrARIFailure
+	}
+	for name, value := range fields {
+		if _, ok := allowed[name]; !ok || value == "" || len(value) > 256 || strings.ContainsAny(value, "\r\n\x00") {
+			return ErrARIFailure
+		}
+	}
+	// ARI applies repeated config fields in request order. PJSIP's allow list is
+	// cleared by disallow=all, so sending these map entries in random order can
+	// silently leave a dynamic endpoint with no usable codecs.
+	names := make([]string, 0, len(fields))
+	for name := range fields {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	if kind == "endpoint" {
+		sort.SliceStable(names, func(i, j int) bool {
+			if names[i] == "disallow" {
+				return names[j] != "disallow"
+			}
+			if names[j] == "disallow" {
+				return false
+			}
+			return names[i] < names[j]
+		})
+	}
+	values := make([]map[string]string, 0, len(fields))
+	for _, name := range names {
+		value := fields[name]
+		values = append(values, map[string]string{"attribute": name, "value": value})
+	}
+	body, err := json.Marshal(map[string]any{"fields": values})
+	if err != nil {
+		return ErrARIFailure
+	}
+	if err := c.ensureOpen(); err != nil {
+		return err
+	}
+	response, err := c.requestWithBody(ctx, http.MethodPut, "/asterisk/config/dynamic/res_pjsip/"+kind+"/"+url.PathEscape(id), nil, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	closeResponse(response)
+	return nil
+}
+
+// DeleteDynamicPJSIP revokes a browser object's volatile Sorcery entry.
+func (c *Client) DeleteDynamicPJSIP(ctx context.Context, kind, id string) error {
+	if _, ok := dynamicPJSIPFields[kind]; !ok || !validDynamicID(id) {
+		return ErrARIFailure
+	}
+	if err := c.ensureOpen(); err != nil {
+		return err
+	}
+	response, err := c.request(ctx, http.MethodDelete, "/asterisk/config/dynamic/res_pjsip/"+kind+"/"+url.PathEscape(id), nil)
+	if err != nil {
+		if errors.Is(err, ErrARINotFound) {
+			return nil
+		}
+		return err
+	}
+	closeResponse(response)
+	return nil
+}
+
+func validDynamicID(id string) bool {
+	if id == "" || len(id) > 64 {
+		return false
+	}
+	for _, char := range id {
+		if !((char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9') || char == '-' || char == '_') {
+			return false
+		}
+	}
+	return true
 }
 
 func closeResponse(response *http.Response) {
@@ -324,7 +425,7 @@ func (c *Client) OriginateChannel(ctx context.Context, endpoint, channelID, appA
 	if err := c.ensureOpen(); err != nil {
 		return err
 	}
-	if !validEndpointID(endpoint) || !validResourceID(channelID) || !validAppArgs(appArgs) || !validEndpointID(callerID) || timeoutSeconds < 1 || timeoutSeconds > 60 {
+	if (!validEndpointID(endpoint) && !validBrowserEndpointID(endpoint)) || !validResourceID(channelID) || !validAppArgs(appArgs) || !validEndpointID(callerID) || timeoutSeconds < 1 || timeoutSeconds > 60 {
 		return ErrARIFailure
 	}
 	// Claim the generated identifier before asking Asterisk to create the
@@ -348,6 +449,18 @@ func (c *Client) OriginateChannel(ctx context.Context, endpoint, channelID, appA
 	}
 	closeResponse(response)
 	return nil
+}
+
+func validBrowserEndpointID(endpoint string) bool {
+	if !strings.HasPrefix(endpoint, "web-") || len(endpoint) > 64 {
+		return false
+	}
+	for _, c := range endpoint {
+		if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-') {
+			return false
+		}
+	}
+	return true
 }
 
 func (c *Client) forgetChannel(channelID string) {

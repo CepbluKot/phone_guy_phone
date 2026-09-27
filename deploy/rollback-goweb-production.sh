@@ -40,6 +40,7 @@ conference_release=
 selfmonitor_was_active=
 selfmonitor_was_enabled=
 http_container_was_running=
+phonebook_was_present=
 while IFS= read -r line || [ -n "$line" ]; do
   case "$line" in
     stamp=*) manifest_stamp=${line#stamp=} ;;
@@ -47,13 +48,15 @@ while IFS= read -r line || [ -n "$line" ]; do
     selfmonitor_was_active=*) selfmonitor_was_active=${line#selfmonitor_was_active=} ;;
     selfmonitor_was_enabled=*) selfmonitor_was_enabled=${line#selfmonitor_was_enabled=} ;;
     http_container_was_running=*) http_container_was_running=${line#http_container_was_running=} ;;
+    phonebook_was_present=*) phonebook_was_present=${line#phonebook_was_present=} ;;
     *) echo "ROLLBACK_FAILED invalid production manifest" >&2; exit 1 ;;
   esac
 done < "$manifest"
 if [[ "$manifest_stamp" != "$stamp" || ! "$conference_release" =~ ^[0-9]{8}T[0-9]{6}Z$ \
     || "$selfmonitor_was_active" != active \
     || "$selfmonitor_was_enabled" != enabled \
-    || "$http_container_was_running" != stopped ]]; then
+    || "$http_container_was_running" != stopped \
+    || ( "$phonebook_was_present" != true && "$phonebook_was_present" != false ) ]]; then
   echo "ROLLBACK_FAILED production snapshot does not match expected stopped-HTTP baseline" >&2
   exit 1
 fi
@@ -68,6 +71,11 @@ if [[ ! -f "$go_release/deploy/compose.goweb.yaml" || ! -f "$go_release/.env" \
     || ! -s "$backup/asterisk-image-id" || ! -s "$backup/controller-image-id" \
     || ! -s "$backup/route-config-sha256" || ! -s "$backup/admin-password-sha256" ]]; then
   echo "ROLLBACK_FAILED production snapshot is incomplete" >&2
+  exit 1
+fi
+if { [ "$phonebook_was_present" = true ] && { [ ! -f "$backup/phonebook.json" ] || [ ! -s "$backup/phonebook-sha256" ]; }; } \
+    || { [ "$phonebook_was_present" = false ] && [ ! -f "$backup/phonebook-absent" ]; }; then
+  echo "ROLLBACK_FAILED phonebook snapshot does not match manifest" >&2
   exit 1
 fi
 
@@ -87,6 +95,11 @@ if ! cp -a "$backup/Caddyfile" "$caddy_live" \
   echo "rollback: saved files could not be restored" >&2
   failed=1
 fi
+if [ "$phonebook_was_present" = true ]; then
+  cp -a "$backup/phonebook.json" "$(path /etc/voice-changer/phonebook.json)" || failed=1
+else
+  rm -f -- "$(path /etc/voice-changer/phonebook.json)" || failed=1
+fi
 
 if ! caddy validate --config "$caddy_live" || ! systemctl reload caddy; then
   echo "rollback: restored Caddy config failed validation or reload" >&2
@@ -97,6 +110,12 @@ if ! cmp -s "$backup/Caddyfile" "$caddy_live" \
     || ! cmp -s "$backup/voice-routing.json" "$(path /etc/voice-changer/voice-routing.json)" \
     || ! cmp -s "$backup/admin-password" "$(path /etc/voice-changer-admin/password)"; then
   echo "rollback: restored config bytes do not match the snapshot" >&2
+  failed=1
+fi
+if [ "$phonebook_was_present" = true ] \
+    && { ! cmp -s "$backup/phonebook.json" "$(path /etc/voice-changer/phonebook.json)" \
+      || ! printf '%s  %s\n' "$(cat "$backup/phonebook-sha256")" "$(path /etc/voice-changer/phonebook.json)" | sha256sum -c - >/dev/null; }; then
+  echo "rollback: restored phonebook does not match the snapshot" >&2
   failed=1
 fi
 if ! printf '%s  %s\n' "$(cat "$backup/route-config-sha256")" "$(path /etc/voice-changer/voice-routing.json)" | sha256sum -c - >/dev/null \

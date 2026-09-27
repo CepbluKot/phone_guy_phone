@@ -13,6 +13,7 @@ for required_module in \
     chan_websocket \
     codec_alaw \
     codec_resample \
+    func_channel \
     format_wav \
     pbx_config \
     res_ari \
@@ -22,7 +23,9 @@ for required_module in \
     res_ari_events \
     res_ari_model \
     res_http_websocket \
+    res_crypto \
     res_pjsip \
+    res_pjsip_transport_websocket \
     res_pjsip_authenticator_digest \
     res_pjsip_endpoint_identifier_user \
     res_pjsip_nat \
@@ -32,6 +35,7 @@ for required_module in \
     res_pjsip_session \
     res_pjproject \
     res_rtp_asterisk \
+    res_srtp \
     res_sorcery_astdb \
     res_sorcery_config \
     res_sorcery_memory \

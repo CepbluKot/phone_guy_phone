@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 
 	"voice-changer/internal/ari"
 	"voice-changer/internal/voiceconfig"
@@ -31,6 +32,7 @@ type Route struct {
 	Revision      uint64
 	ProcessedPeer bool
 	Flow          string
+	BrowserTarget string
 	lease         *sessionLease
 }
 
@@ -48,9 +50,13 @@ func (route *Route) ProcessingLease() ProcessingLease {
 }
 
 type Router struct {
-	store   voiceconfig.RouteStore
-	allowed map[string]struct{}
-	gate    *sessionGate
+	store        voiceconfig.RouteStore
+	allowed      map[string]struct{}
+	gate         *sessionGate
+	browserMu    sync.RWMutex
+	browsers     map[string]string
+	browserByExt map[string]string
+	dynamicExts  map[string]struct{}
 }
 
 func NewRouter(store voiceconfig.RouteStore, endpointIDs []string) (*Router, error) {
@@ -67,7 +73,52 @@ func NewRouter(store voiceconfig.RouteStore, endpointIDs []string) (*Router, err
 		}
 		allowed[endpoint] = struct{}{}
 	}
-	return &Router{store: store, allowed: allowed, gate: newSessionGate()}, nil
+	return &Router{store: store, allowed: allowed, gate: newSessionGate(), browsers: map[string]string{}, browserByExt: map[string]string{}, dynamicExts: map[string]struct{}{}}, nil
+}
+
+// SetBrowserEndpoint binds a server-generated ephemeral PJSIP identity to a
+// configured logical extension. Removing it immediately rejects later events.
+func (router *Router) SetBrowserEndpoint(endpoint, extension string, active bool) error {
+	if router == nil || !validBrowserEndpoint(endpoint) {
+		return ErrUnknownEndpoint
+	}
+	if !validEndpoint(extension) {
+		return ErrUnknownEndpoint
+	}
+	router.browserMu.Lock()
+	defer router.browserMu.Unlock()
+	if active {
+		router.allowed[extension] = struct{}{}
+		router.dynamicExts[extension] = struct{}{}
+		router.browsers[endpoint] = extension
+		router.browserByExt[extension] = endpoint
+	} else {
+		delete(router.browsers, endpoint)
+		if router.browserByExt[extension] == endpoint {
+			delete(router.browserByExt, extension)
+		}
+	}
+	return nil
+}
+
+func validBrowserEndpoint(endpoint string) bool {
+	if !strings.HasPrefix(endpoint, "web-") || len(endpoint) > 64 {
+		return false
+	}
+	for _, c := range endpoint {
+		if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-') {
+			return false
+		}
+	}
+	return true
+}
+
+// ProcessingCapacity exposes the enforced call gate as read-only telemetry.
+func (router *Router) ProcessingCapacity() (active, limit int) {
+	if router == nil || router.gate == nil {
+		return 0, 1
+	}
+	return router.gate.Active(), router.gate.Limit()
 }
 
 func validEndpoint(endpoint string) bool {
@@ -83,7 +134,21 @@ func validEndpoint(endpoint string) bool {
 }
 
 func (router *Router) Resolve(ctx context.Context, event ari.Event) (*Route, error) {
-	identity, err := resolveEndpoints(event, router.allowed)
+	router.browserMu.RLock()
+	browserIDs := make(map[string]string, len(router.browsers))
+	for k, v := range router.browsers {
+		browserIDs[k] = v
+	}
+	allowed := make(map[string]struct{}, len(router.allowed))
+	for k := range router.allowed {
+		allowed[k] = struct{}{}
+	}
+	dynamicExts := make(map[string]struct{}, len(router.dynamicExts))
+	for k := range router.dynamicExts {
+		dynamicExts[k] = struct{}{}
+	}
+	router.browserMu.RUnlock()
+	identity, err := resolveEndpointsWithBrowsers(event, allowed, browserIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -91,14 +156,14 @@ func (router *Router) Resolve(ctx context.Context, event ari.Event) (*Route, err
 	if err != nil {
 		return nil, err
 	}
-	profile, err := profileForSource(snapshot, identity.Source)
+	profile, err := profileForRouteExtension(snapshot, identity.Source, dynamicExts)
 	if err != nil {
 		return nil, err
 	}
 	route := &Route{Source: identity.Source, Peer: identity.Peer, Profile: profile, Revision: snapshot.Revision, Flow: identity.Flow}
 	processed := profile == voiceconfig.ProfilePhoneGuy
 	if identity.Peer != "conference" {
-		route.PeerProfile, err = profileForSource(snapshot, identity.Peer)
+		route.PeerProfile, err = profileForRouteExtension(snapshot, identity.Peer, dynamicExts)
 		if err != nil {
 			return nil, err
 		}
@@ -107,6 +172,11 @@ func (router *Router) Resolve(ctx context.Context, event ari.Event) (*Route, err
 	}
 	if profile == voiceconfig.ProfilePhoneGuy && route.ProcessedPeer {
 		return nil, ErrDualProcessedEndpoints
+	}
+	if route.Flow != "callback-1900" {
+		router.browserMu.RLock()
+		route.BrowserTarget = router.browserByExt[route.Peer]
+		router.browserMu.RUnlock()
 	}
 	if processed {
 		route.lease, err = router.gate.Acquire(ctx)
@@ -136,7 +206,10 @@ func (router *Router) ResolvePlaybackService(ctx context.Context, event ari.Even
 		return "", ErrUnknownEndpoint
 	}
 	source, service := values["source"], values["service"]
-	if _, ok := router.allowed[source]; !ok {
+	router.browserMu.RLock()
+	_, sourceAllowed := router.allowed[source]
+	router.browserMu.RUnlock()
+	if !sourceAllowed {
 		return "", ErrUnknownEndpoint
 	}
 	if _, ok := playbackServices[service]; !ok {
@@ -167,6 +240,10 @@ func (router *Router) AcquireProcessingLease(ctx context.Context) (ProcessingLea
 // and peer=<PJSIP ID|conference>. Caller-ID is deliberately not used as an
 // authorization identity because it is caller-controlled.
 func resolveEndpoints(event ari.Event, allowed map[string]struct{}) (endpoints, error) {
+	return resolveEndpointsWithBrowsers(event, allowed, nil)
+}
+
+func resolveEndpointsWithBrowsers(event ari.Event, allowed map[string]struct{}, browsers map[string]string) (endpoints, error) {
 	if event.Type != "StasisStart" || (len(event.Args) != 2 && len(event.Args) != 3) {
 		return endpoints{}, ErrUnknownEndpoint
 	}
@@ -186,8 +263,13 @@ func resolveEndpoints(event ari.Event, allowed map[string]struct{}) (endpoints, 
 	if flow != "" && (flow != "callback-1900" || peer != "1983" || len(values) != 3) {
 		return endpoints{}, ErrUnknownEndpoint
 	}
+	rawSource := source
 	if _, ok := allowed[source]; !ok {
-		return endpoints{}, ErrUnknownEndpoint
+		logical, browser := browsers[source]
+		if !browser {
+			return endpoints{}, ErrUnknownEndpoint
+		}
+		source = logical
 	}
 	if peer != "conference" {
 		if _, ok := allowed[peer]; !ok {
@@ -195,7 +277,7 @@ func resolveEndpoints(event ari.Event, allowed map[string]struct{}) (endpoints, 
 		}
 	}
 	channelEndpoint, ok := pjsipEndpoint(event.Channel.Name)
-	if event.Channel.ID == "" || !ok || (channelEndpoint != source && channelEndpoint != peer) {
+	if event.Channel.ID == "" || !ok || (channelEndpoint != rawSource && channelEndpoint != peer) {
 		return endpoints{}, ErrUnknownEndpoint
 	}
 	return endpoints{Source: source, Peer: peer, Flow: flow}, nil
@@ -205,11 +287,12 @@ func pjsipEndpoint(channelName string) (string, bool) {
 	if !strings.HasPrefix(channelName, "PJSIP/") {
 		return "", false
 	}
-	endpoint, _, found := strings.Cut(strings.TrimPrefix(channelName, "PJSIP/"), "-")
-	if !found || endpoint == "" {
+	value := strings.TrimPrefix(channelName, "PJSIP/")
+	index := strings.LastIndex(value, "-")
+	if index <= 0 {
 		return "", false
 	}
-	return endpoint, true
+	return value[:index], true
 }
 
 func profileForSource(snapshot voiceconfig.RouteSnapshot, source string) (voiceconfig.Profile, error) {
@@ -223,4 +306,13 @@ func profileForSource(snapshot voiceconfig.RouteSnapshot, source string) (voicec
 	default:
 		return "", ErrInvalidProfile
 	}
+}
+
+func profileForRouteExtension(snapshot voiceconfig.RouteSnapshot, extension string, dynamic map[string]struct{}) (voiceconfig.Profile, error) {
+	if _, ok := snapshot.Extensions[extension]; !ok {
+		if _, isDynamic := dynamic[extension]; isDynamic && validEndpoint(extension) {
+			return voiceconfig.ProfileOriginal, nil
+		}
+	}
+	return profileForSource(snapshot, extension)
 }

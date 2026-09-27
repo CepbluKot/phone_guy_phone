@@ -94,6 +94,91 @@ func TestRESTAuthenticationAndBridgeOwnership(t *testing.T) {
 	}
 }
 
+func TestPutDynamicPJSIPEncodesFieldsAndDiscardsSecretResponse(t *testing.T) {
+	client, _ := newARIClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requireARIAuth(t, r)
+		if r.Method != http.MethodPut || r.URL.Path != "/ari/asterisk/config/dynamic/res_pjsip/auth/browser-auth-1" {
+			t.Errorf("request=%s %s", r.Method, r.URL.Path)
+		}
+		var body struct {
+			Fields []struct {
+				Attribute string `json:"attribute"`
+				Value     string `json:"value"`
+			} `json:"fields"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		found := map[string]string{}
+		for _, field := range body.Fields {
+			found[field.Attribute] = field.Value
+		}
+		if found["password"] != "temporary-password" || found["auth_type"] != "userpass" {
+			t.Errorf("fields=%v", found)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"password":"temporary-password"}`))
+	}))
+	err := client.PutDynamicPJSIP(context.Background(), "auth", "browser-auth-1", map[string]string{
+		"type": "auth", "auth_type": "userpass", "username": "browser-user-1", "password": "temporary-password",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(errString(err), "temporary-password") {
+		t.Fatal("secret leaked in error")
+	}
+}
+
+func errString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
+func TestPutDynamicPJSIPRejectsUnknownKindIDAndFields(t *testing.T) {
+	client, _ := newARIClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { t.Errorf("unexpected request %s", r.URL.Path) }))
+	for _, test := range []struct {
+		kind, id string
+		fields   map[string]string
+	}{
+		{"arbitrary", "id", map[string]string{"type": "auth"}},
+		{"auth", "../auth", map[string]string{"type": "auth"}},
+		{"auth", "valid", map[string]string{"password": "secret", "config": "/etc/passwd"}},
+		{"endpoint", "valid", map[string]string{"callerid": "spoofed"}},
+	} {
+		if err := client.PutDynamicPJSIP(context.Background(), test.kind, test.id, test.fields); !errors.Is(err, ErrARIFailure) {
+			t.Errorf("PutDynamicPJSIP(%q,%q) error=%v", test.kind, test.id, err)
+		}
+	}
+}
+
+func TestDeleteDynamicPJSIPUsesExpectedResource(t *testing.T) {
+	client, _ := newARIClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requireARIAuth(t, r)
+		if r.Method != http.MethodDelete || r.URL.Path != "/ari/asterisk/config/dynamic/res_pjsip/endpoint/browser-endpoint-1" {
+			t.Errorf("request=%s %s", r.Method, r.URL.Path)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	if err := client.DeleteDynamicPJSIP(context.Background(), "endpoint", "browser-endpoint-1"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDynamicPJSIPHonorsContextTimeout(t *testing.T) {
+	client, _ := newARIClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(60 * time.Millisecond)
+	}))
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	err := client.PutDynamicPJSIP(ctx, "auth", "browser-auth-1", map[string]string{"type": "auth"})
+	if !errors.Is(err, ErrARIFailure) {
+		t.Fatalf("error=%v", err)
+	}
+}
+
 func TestSnoopChannelCreatesOnlyOwnedInboundTap(t *testing.T) {
 	var deleted atomic.Int32
 	client, _ := newARIClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -143,6 +228,11 @@ func TestOriginateTracksOnlyConfirmedGeneratedPeerChannel(t *testing.T) {
 			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodPost && r.URL.Path == "/ari/channels/outbound-collision":
 			w.WriteHeader(http.StatusConflict)
+		case r.Method == http.MethodPost && r.URL.Path == "/ari/channels/outbound-browser":
+			if r.URL.Query().Get("endpoint") != "PJSIP/web-abcdef1234" {
+				t.Errorf("browser originate query=%v", r.URL.Query())
+			}
+			w.WriteHeader(http.StatusCreated)
 		default:
 			http.NotFound(w, r)
 		}
@@ -164,6 +254,12 @@ func TestOriginateTracksOnlyConfirmedGeneratedPeerChannel(t *testing.T) {
 	}
 	if client.owns("outbound-collision", resourceChannel) {
 		t.Fatal("pre-existing foreign channel remained owned after an ARI collision")
+	}
+	if err := client.OriginateChannel(context.Background(), "web-abcdef1234", "outbound-browser", "call=abcd,role=peer", "1983", 30); err != nil {
+		t.Fatalf("browser endpoint originate: %v", err)
+	}
+	if err := client.OriginateChannel(context.Background(), "web-abcdef1234", "outbound-forged", "call=abcd,role=peer", "web-forged", 30); !errors.Is(err, ErrARIFailure) {
+		t.Fatalf("browser caller ID was accepted: %v", err)
 	}
 }
 

@@ -22,6 +22,8 @@ remote_deploy() {
   backup="$go_root/backups/$stamp"
   caddy_live=$(p /etc/caddy/Caddyfile)
   caddy_source="$voice_root/deploy/Caddyfile"
+  phonebook_file=$(p /etc/voice-changer/phonebook.json)
+  webphone_file=$(p /etc/voice-changer/webphone-directory.json)
   conf_root=$(p /opt/voice-conference)
 
   if [ -e "$voice_root/.go-runtime-owner" ] || [ -e "$backup" ] \
@@ -49,6 +51,32 @@ remote_deploy() {
   [ -f "$(p /etc/voice-changer/voice-routing.json)" ] && [ -f "$(p /etc/voice-changer-admin/password)" ] || {
     echo "Go preflight: admin bootstrap files missing" >&2; return 1;
   }
+  if [ -e "$phonebook_file" ] || [ -L "$phonebook_file" ]; then
+    [ -f "$phonebook_file" ] && [ ! -L "$phonebook_file" ] || { echo "Go preflight: phonebook path is not a regular file" >&2; return 1; }
+    [ "$(stat -c '%u:%g:%a' "$phonebook_file")" = 10001:10001:600 ] || { echo "Go preflight: phonebook owner or mode is invalid" >&2; return 1; }
+    python3 - "$phonebook_file" <<'PY' || { echo "Go preflight: phonebook state is invalid" >&2; return 1; }
+import json, sys
+d = json.load(open(sys.argv[1]))
+assert d.get("schemaVersion") == 1 and isinstance(d.get("revision"), int) and d["revision"] > 0
+assert isinstance(d.get("devices"), list)
+for item in d["devices"]:
+    assert item.get("extension", "") in {"", "1983", "1987", "1988", "2014"}
+PY
+  fi
+  if [ -e "$webphone_file" ] || [ -L "$webphone_file" ]; then
+    [ -f "$webphone_file" ] && [ ! -L "$webphone_file" ] || { echo "Go preflight: browser phone directory is not a regular file" >&2; return 1; }
+    [ "$(stat -c '%u:%g:%a' "$webphone_file")" = 10001:10001:600 ] || { echo "Go preflight: browser directory owner or mode is invalid" >&2; return 1; }
+    python3 - "$webphone_file" <<'PY' || { echo "Go preflight: browser phone directory is invalid" >&2; return 1; }
+import json, sys
+d=json.load(open(sys.argv[1])); assert d.get('schemaVersion')==1 and isinstance(d.get('revision'),int) and d['revision']>0
+assert isinstance(d.get('people'),list) and len(d['people'])<=4
+seen=set()
+for person in d['people']:
+    assert person.get('extension') in {'1983','1987','1988','2014'}
+    assert isinstance(person.get('nickname'),str) and 0<len(person['nickname'].strip())<=48
+    assert person['extension'] not in seen; seen.add(person['extension'])
+PY
+  fi
   [ "$(stat -c '%u:%g:%a' "$(p /etc/voice-changer-admin/password)")" = 10001:10001:400 ] || {
     echo "Go preflight: admin password file owner or mode is invalid" >&2; return 1;
   }
@@ -89,7 +117,7 @@ PY
   for item in ari.conf ari-password http.conf pjsip.conf modules.conf; do
     [ -f "$old_runtime/asterisk/$item" ] || { echo "Go preflight: Asterisk runtime file is missing: $item" >&2; return 1; }
   done
-  for item in Dockerfile.goweb go.mod go.sum cmd internal admin-ui web conference/asterisk deploy/compose.goweb.yaml deploy/compose.conference.yaml deploy/Caddyfile.goweb deploy/rollback-goweb-production.sh; do
+  for item in Dockerfile.goweb go.mod go.sum cmd internal admin-ui web conference/asterisk deploy/compose.goweb.yaml deploy/compose.conference.yaml deploy/Caddyfile.goweb deploy/phonebook.initial.json deploy/phonebook.example.json deploy/webphone-directory.initial.json deploy/webphone-directory.example.json deploy/rollback-goweb-production.sh; do
     [ -e "$release/$item" ] || { echo "Go release file is missing: $item" >&2; return 2; }
   done
 
@@ -99,8 +127,11 @@ PY
   done
   cp -a "$old_runtime/asterisk/sounds" "$new_runtime/asterisk/"
   cp "$release/conference/asterisk/extensions.conf" "$new_runtime/asterisk/extensions.conf"
+  cp "$release/conference/asterisk/sorcery.conf" "$new_runtime/asterisk/sorcery.conf"
   chown root:root "$new_runtime/asterisk/extensions.conf"
   chmod 0644 "$new_runtime/asterisk/extensions.conf"
+  chown root:root "$new_runtime/asterisk/sorcery.conf"
+  chmod 0644 "$new_runtime/asterisk/sorcery.conf"
   install -d -o root -g root -m 0750 "$backup"
   chmod 0700 "$backup"
   printf 'VOICE_GO_IMAGE=voice-go:production-%s\nVOICE_ARI_RUNTIME=%s\nVOICE_CONFERENCE_FIXTURES=%s\nCONFERENCE_TAG=%s\nCONFERENCE_RUNTIME=%s\nCONFERENCE_FIXTURES=%s\n' \
@@ -111,12 +142,20 @@ PY
   cp -a "$(p /etc/systemd/system/voice-selfmonitor.service)" "$backup/selfmonitor.service"
   cp -a "$(p /etc/voice-selfmonitor.env)" "$backup/selfmonitor.env"
   cp -a "$(p /etc/voice-changer/voice-routing.json)" "$backup/voice-routing.json"
+  phonebook_was_present=false
+  if [ -f "$phonebook_file" ]; then
+    cp -a "$phonebook_file" "$backup/phonebook.json"
+    sha256sum "$phonebook_file" | awk '{print $1}' > "$backup/phonebook-sha256"
+    phonebook_was_present=true
+  else
+    : > "$backup/phonebook-absent"
+  fi
   cp -a "$(p /etc/voice-changer-admin/password)" "$backup/admin-password"
   docker inspect voice-conference-asterisk-1 --format '{{.Image}}' > "$backup/asterisk-image-id"
   docker inspect voice-conference-controller-1 --format '{{.Image}}' > "$backup/controller-image-id"
   sha256sum "$(p /etc/voice-changer/voice-routing.json)" | awk '{print $1}' > "$backup/route-config-sha256"
   sha256sum "$(p /etc/voice-changer-admin/password)" | awk '{print $1}' > "$backup/admin-password-sha256"
-  printf 'stamp=%s\nconference_release=%s\nselfmonitor_was_active=active\nselfmonitor_was_enabled=enabled\nhttp_container_was_running=stopped\n' "$stamp" "$conf_release" > "$backup/manifest"
+  printf 'stamp=%s\nconference_release=%s\nselfmonitor_was_active=active\nselfmonitor_was_enabled=enabled\nhttp_container_was_running=stopped\nphonebook_was_present=%s\n' "$stamp" "$conf_release" "$phonebook_was_present" > "$backup/manifest"
   chmod 0600 "$backup/manifest" "$backup"/*-image-id "$backup"/*-sha256
 
   rollback_required=1
@@ -133,6 +172,13 @@ PY
     exit "$status"
   }
   trap rollback_on_error EXIT
+
+  if [ "$phonebook_was_present" = false ]; then
+    install -o 10001 -g 10001 -m 0600 "$release/deploy/phonebook.initial.json" "$phonebook_file"
+  fi
+  if [ ! -e "$webphone_file" ]; then
+    install -o 10001 -g 10001 -m 0600 "$release/deploy/webphone-directory.initial.json" "$webphone_file"
+  fi
 
   docker build -f "$release/Dockerfile.goweb" -t "voice-go:production-$stamp" "$release"
   docker build -f "$release/conference/asterisk/Dockerfile" -t "voice-conference-asterisk:$stamp" "$release/conference/asterisk"
@@ -177,24 +223,19 @@ PY
 
   python3 - <<'PY'
 import json, urllib.request
-from pathlib import Path
-password = Path('/etc/voice-changer-admin/password').read_text()
 for origin in ('https://voice.lan.awesomeio.ru', 'https://vm-voice-1.lan.awesomeio.ru'):
-    req = urllib.request.Request('http://192.168.20.70:8080/admin/api/v1/session',
-        data=json.dumps({'password': password}).encode(), method='POST',
-        headers={'Content-Type': 'application/json', 'Origin': origin})
-    with urllib.request.urlopen(req, timeout=5) as response:
-        assert response.status == 201
-        cookie = response.headers['Set-Cookie'].split(';', 1)[0]
-        csrf = json.load(response)['csrfToken']
-    req = urllib.request.Request('http://192.168.20.70:8080/admin/api/v1/voice-routes', headers={'Cookie': cookie})
-    with urllib.request.urlopen(req, timeout=5) as response:
-        assert all(role == 'original' for role in json.load(response)['extensions'].values())
-    req = urllib.request.Request('http://192.168.20.70:8080/admin/api/v1/session', method='DELETE',
-        headers={'Origin': origin, 'Cookie': cookie, 'X-CSRF-Token': csrf})
-    with urllib.request.urlopen(req, timeout=5) as response:
-        assert response.status == 204
-print('admin smoke passed for both private UI origins')
+    headers = {'Origin': origin}
+    def get(path):
+        with urllib.request.urlopen(urllib.request.Request('http://192.168.20.70:8080' + path, headers=headers), timeout=5) as response:
+            return json.load(response)
+    assert get('/admin/api/v1/auth-mode')['required'] is False
+    routes = get('/admin/api/v1/voice-routes')
+    assert set(routes['extensions']) == {'1983', '1987', '1988', '2014'}
+    phones = get('/admin/api/v1/phones')
+    assert phones['revision'] > 0 and len(phones['devices']) >= 2
+    macs = {device['mac'] for device in phones['devices']}
+    assert {'00:15:65:89:b3:85', '00:0b:82:f4:f2:8b'} <= macs
+print('passwordless admin and phonebook smoke passed for both private UI origins')
 PY
   cp "$release/deploy/Caddyfile.goweb" "$caddy_live"
   chown --reference="$backup/Caddyfile" "$caddy_live"
@@ -260,7 +301,7 @@ if ! rsync -a --delete conference/asterisk "$target:$remote_stage/conference/"; 
   ssh "$target" "rm -rf '$remote_stage'" || true
   exit 1
 fi
-if ! rsync -a --delete deploy/compose.goweb.yaml deploy/compose.conference.yaml deploy/Caddyfile.goweb deploy/rollback-goweb-production.sh \
+if ! rsync -a --delete deploy/compose.goweb.yaml deploy/compose.conference.yaml deploy/Caddyfile.goweb deploy/rollback-goweb-production.sh deploy/phonebook.initial.json deploy/phonebook.example.json deploy/webphone-directory.initial.json deploy/webphone-directory.example.json \
     "$target:$remote_stage/deploy/"; then
   ssh "$target" "rm -rf '$remote_stage'" || true
   exit 1

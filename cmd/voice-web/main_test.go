@@ -21,6 +21,7 @@ func testWebRoot(t *testing.T) string {
 		"conference/index.html": "<title>conference page</title>",
 		"live/index.html":       "<title>live page</title>",
 		"admin/index.html":      "<title>admin page</title>",
+		"phone.html":            "<title>phone page</title>",
 		"admin/assets/app.js":   "window.adminApp = true;",
 		"app.js":                "window.voiceApp = true;",
 	}
@@ -34,6 +35,23 @@ func testWebRoot(t *testing.T) string {
 		}
 	}
 	return root
+}
+
+func TestPhonePageAndAPIStayOnTheGoOrigin(t *testing.T) {
+	handler := newHandler(testWebRoot(t))
+	page := httptest.NewRecorder()
+	handler.ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/phone/", nil))
+	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "phone page") {
+		t.Fatalf("phone page status=%d body=%q", page.Code, page.Body.String())
+	}
+	if got := page.Header().Get("Permissions-Policy"); got != "microphone=(self)" {
+		t.Fatalf("phone permissions=%q", got)
+	}
+	api := httptest.NewRecorder()
+	handler.ServeHTTP(api, httptest.NewRequest(http.MethodGet, "/phone/api/v1/config", nil))
+	if api.Code != http.StatusServiceUnavailable {
+		t.Fatalf("unconfigured phone API status=%d", api.Code)
+	}
 }
 
 func TestAdminStaticRoutesStayInsideWebRoot(t *testing.T) {
@@ -158,11 +176,15 @@ func TestServerUsesConfiguredListenAddress(t *testing.T) {
 	if err := os.WriteFile(passwordPath, []byte("test-password"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	phonebookPath := filepath.Join(t.TempDir(), "phones.json")
+	if err := os.WriteFile(phonebookPath, []byte(`{"schemaVersion":1,"revision":1,"devices":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestServerUsesConfiguredListenAddress$")
-	cmd.Env = append(os.Environ(), "VOICE_WEB_SERVER_CHILD=1", "VOICE_WEB_ADDR="+address, "VOICE_WEB_ROOT="+testWebRoot(t), "VOICE_ROUTE_CONFIG_FILE="+configPath, "VOICE_ADMIN_PASSWORD_FILE="+passwordPath, "VOICE_ADMIN_ORIGIN=https://admin.example.test")
+	cmd.Env = append(os.Environ(), "VOICE_WEB_SERVER_CHILD=1", "VOICE_WEB_ADDR="+address, "VOICE_WEB_ROOT="+testWebRoot(t), "VOICE_ROUTE_CONFIG_FILE="+configPath, "VOICE_PHONEBOOK_FILE="+phonebookPath, "VOICE_ADMIN_PASSWORD_FILE="+passwordPath, "VOICE_ADMIN_ORIGIN=https://admin.example.test")
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}

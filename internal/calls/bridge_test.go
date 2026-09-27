@@ -224,6 +224,78 @@ func Test1900CallbackAdmitsFixedDestinationAndRingsBeforeAnswer(t *testing.T) {
 	}
 }
 
+func TestParallelRingIncludesActiveBrowserAndSelectsOneWinner(t *testing.T) {
+	store := snapshotStore{snapshot: voiceconfig.RouteSnapshot{Revision: 2, Extensions: map[string]voiceconfig.Profile{"4101": voiceconfig.ProfileOriginal, "4102": voiceconfig.ProfileOriginal}}}
+	router, err := NewRouter(store, []string{"4101", "4102"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := router.SetBrowserEndpoint("web-abcd1234", "4102", true); err != nil {
+		t.Fatal(err)
+	}
+	client := &fakeARI{}
+	controller, err := NewController("voice-control", client, router, fakeRVC{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := ari.Event{Type: "StasisStart", App: "voice-control", Args: []string{"source=4101", "peer=4102"}}
+	start.Channel.ID = "caller-1"
+	start.Channel.Name = "PJSIP/4101-00001"
+	if err := controller.HandleEvent(context.Background(), start); err != nil {
+		t.Fatal(err)
+	}
+	call := firstCall(t, controller)
+	physicalID := call.peerID
+	browserID := "call-peer-" + call.id + "-browser"
+	if actions := client.logSnapshot(); !contains(actions, "originate:4102:"+physicalID+":call="+call.id+",role=peer:4101:30") || !contains(actions, "originate:web-abcd1234:"+browserID+":call="+call.id+",role=peer:4101:30") {
+		t.Fatalf("parallel target setup=%v", actions)
+	}
+	browserUp := ari.Event{Type: "ChannelStateChange"}
+	browserUp.Channel.ID = browserID
+	browserUp.Channel.Name = "PJSIP/web-abcd1234-00002"
+	browserUp.Channel.State = "Up"
+	physicalUp := ari.Event{Type: "ChannelStateChange"}
+	physicalUp.Channel.ID = physicalID
+	physicalUp.Channel.Name = "PJSIP/4102-00003"
+	physicalUp.Channel.State = "Up"
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); _ = controller.HandleEvent(context.Background(), browserUp) }()
+	go func() { defer wg.Done(); _ = controller.HandleEvent(context.Background(), physicalUp) }()
+	wg.Wait()
+	call.mu.Lock()
+	winner := call.winnerID
+	done := call.connectDone
+	call.mu.Unlock()
+	if winner != "" && winner != physicalID && winner != browserID {
+		t.Fatalf("unexpected winning leg %q", winner)
+	}
+	if done != nil {
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Fatal("winner connection did not finish")
+		}
+	}
+	if winner != "" && !contains(client.logSnapshot(), "delete:"+map[bool]string{true: physicalID, false: browserID}[winner == browserID]) {
+		t.Fatalf("losing leg not canceled: %v", client.logSnapshot())
+	}
+	if err := controller.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func firstCall(t *testing.T, controller *Controller) *managedCall {
+	t.Helper()
+	controller.mu.Lock()
+	defer controller.mu.Unlock()
+	for _, call := range controller.calls {
+		return call
+	}
+	t.Fatal("call not created")
+	return nil
+}
+
 func Test1900CallbackPlaysBothLegacyAnnouncementsAndRetriesOnce(t *testing.T) {
 	store := snapshotStore{snapshot: voiceconfig.RouteSnapshot{Revision: 8, Extensions: map[string]voiceconfig.Profile{
 		"4101": voiceconfig.ProfileOriginal,

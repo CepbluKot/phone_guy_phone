@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "revision": 1,
+  "devices": [
+    {
+      "mac": "00:0b:82:f4:f2:8b",
+      "label": "Grandstream GXP21XX family",
+      "extension": "1988",
+      "lastSeenIp": "192.168.20.66",
+      "lastSeenAt": "2026-09-25",
+      "observation": "PJSIP contact and neighbor table; exact model unverified"
+    },
+    {
+      "mac": "00:15:65:89:b3:85",
+      "label": "Yealink model unverified",
+      "extension": "1983",
+      "lastSeenIp": "192.168.20.134",
+      "lastSeenAt": "2026-09-25",
+      "observation": "PJSIP contact and neighbor table; exact model unverified"
+    }
+  ]
+}

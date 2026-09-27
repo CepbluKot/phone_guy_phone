@@ -55,6 +55,12 @@ type RVCClient interface {
 	Open(context.Context) (RVCStream, error)
 }
 
+// Observer receives validated, low-cardinality operational summaries only.
+type Observer interface {
+	ObserveRVCBlockMillis(float64)
+	ObserveRVCError(string)
+}
+
 type Client struct {
 	endpoint      string
 	origin        string
@@ -62,7 +68,11 @@ type Client struct {
 	warmupTimeout time.Duration
 	ioTimeout     time.Duration
 	closeTimeout  time.Duration
+	observer      Observer
 }
+
+// SetObserver installs a metrics sink before the client is shared with call handlers.
+func (c *Client) SetObserver(observer Observer) { c.observer = observer }
 
 func NewClient(endpoint string) (*Client, error) {
 	return NewClientWithOrigin(endpoint, defaultRVCOrigin)
@@ -105,7 +115,12 @@ func validLoopbackEndpoint(endpoint *url.URL) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-func (c *Client) Open(ctx context.Context) (RVCStream, error) {
+func (c *Client) Open(ctx context.Context) (_ RVCStream, resultErr error) {
+	defer func() {
+		if resultErr != nil && c.observer != nil {
+			c.observer.ObserveRVCError(errorCode(resultErr))
+		}
+	}()
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -161,7 +176,7 @@ func (c *Client) Open(ctx context.Context) (RVCStream, error) {
 		return nil, ErrInvalidReady
 	}
 	_ = connection.SetReadDeadline(time.Time{})
-	stream := newStream(connection, c.ioTimeout, c.closeTimeout)
+	stream := newStream(connection, c.ioTimeout, c.closeTimeout, c.observer)
 	return stream, nil
 }
 

@@ -6,10 +6,20 @@ COPY internal/ari/ internal/ari/
 COPY internal/admin/ internal/admin/
 COPY internal/calls/ internal/calls/
 COPY internal/conference/ internal/conference/
+COPY internal/hostmetrics/ internal/hostmetrics/
+COPY internal/phonebook/ internal/phonebook/
 COPY internal/rvc/ internal/rvc/
 COPY internal/selfmonitor/ internal/selfmonitor/
+COPY internal/telemetry/ internal/telemetry/
+COPY internal/webphone/ internal/webphone/
 COPY internal/voiceconfig/ internal/voiceconfig/
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/voice-web ./cmd/voice-web
+RUN mkdir -p /out/metrics-host/proc /out/metrics-host/cgroup/voice-rvc.service \
+    && touch /out/metrics-host/proc/stat /out/metrics-host/proc/meminfo \
+    /out/metrics-host/cgroup/voice-rvc.service/cpu.stat \
+    /out/metrics-host/cgroup/voice-rvc.service/cpu.max \
+    /out/metrics-host/cgroup/voice-rvc.service/memory.current \
+    /out/metrics-host/cgroup/voice-rvc.service/memory.max
 
 FROM node:24-alpine AS ui-build
 WORKDIR /ui
@@ -21,8 +31,10 @@ RUN npm test -- --run && npm run build
 FROM gcr.io/distroless/static-debian12:nonroot
 WORKDIR /opt/voice-changer
 COPY --from=build /out/voice-web /usr/local/bin/voice-web
+COPY --from=build /out/metrics-host/ /host/
 COPY web/ /opt/voice-changer/web/
 COPY --from=ui-build /ui/dist/ /opt/voice-changer/web/admin/
+COPY --from=ui-build /ui/dist/phone.html /opt/voice-changer/web/phone.html
 ENV VOICE_WEB_ROOT=/opt/voice-changer/web
 HEALTHCHECK --interval=15s --timeout=3s --start-period=5s --retries=3 \
     CMD ["/usr/local/bin/voice-web", "healthcheck"]
