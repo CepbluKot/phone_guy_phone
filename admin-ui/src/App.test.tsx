@@ -29,6 +29,25 @@ afterEach(() => {
 });
 
 describe("phone profile admin", () => {
+  it("exposes the selected Voice section in an accessible application navigation", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn()
+        .mockResolvedValueOnce(response(200, { required: false }))
+        .mockResolvedValueOnce(response(200, routes))
+        .mockResolvedValueOnce(response(200, phonebook))
+        .mockResolvedValue(response(200, metrics)),
+    );
+    render(<App />);
+
+    const navigation = await screen.findByRole("navigation", { name: "Управление" });
+    expect(navigation).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Телефоны" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("button", { name: "Свернуть меню" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Профили голоса" }));
+    expect(screen.getByRole("button", { name: "Профили голоса" })).toHaveAttribute("aria-current", "page");
+  });
+
   it("requires login, then loads and displays current phone profiles", async () => {
     const fetchMock = vi
       .fn()

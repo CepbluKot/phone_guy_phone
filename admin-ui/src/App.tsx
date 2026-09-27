@@ -1,10 +1,15 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { api, ApiError, BrowserPhone, MetricsSnapshot, PhoneDevice, PhonebookSnapshot, Profile, RouteSnapshot } from "./api";
+import { VoiceShell, type VoicePage } from "./components/VoiceShell";
+import "./design-system.css";
 import "./styles.css";
 
 type Language = "en" | "ru";
 const copy = {
   en: {
+    appName: "Voice Control",
+    manage: "Manage",
+    browserPhone: "Browser phone",
     signIn: "Sign in",
     password: "Admin password",
     loginHint: "Private phone settings",
@@ -74,6 +79,9 @@ const copy = {
     openPhone: "Open browser phone →",
   },
   ru: {
+    appName: "Voice Control",
+    manage: "Управление",
+    browserPhone: "Телефон в браузере",
     signIn: "Войти",
     password: "Пароль администратора",
     loginHint: "Приватные настройки телефонов",
@@ -160,7 +168,7 @@ export default function App() {
   const [snapshot, setSnapshot] = useState<RouteSnapshot | null>(null);
   const [metrics, setMetrics] = useState<MetricsSnapshot | null>(null);
   const [browserPhones, setBrowserPhones] = useState<BrowserPhone[]>([]);
-  const [page, setPage] = useState<"phones" | "existing" | "unassigned" | "profiles" | "load">("phones");
+  const [page, setPage] = useState<VoicePage>("phones");
   const [phonebook, setPhonebook] = useState<PhonebookSnapshot | null>(null);
   const [phoneDrafts, setPhoneDrafts] = useState<Record<string, { label: string; extension: string }>>({});
   const [phoneMessages, setPhoneMessages] = useState<Record<string, string>>({});
@@ -395,72 +403,26 @@ export default function App() {
       </main>
     );
 
+  const sectionTitle = page === "phones" || page === "existing" || page === "unassigned"
+    ? t.physicalPhones
+    : page === "profiles" ? t.voiceProfiles : t.load;
+  const pageTitle = page === "phones" ? t.physicalTitle
+    : page === "existing" ? t.existingPhones
+      : page === "unassigned" ? t.newUnassigned
+        : page === "profiles" ? t.title : t.load;
+
   return (
-    <div className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : "sidebar-expanded"}`}>
-      <aside className="sidebar">
-        <div className="sidebar-header">
-          <a className="brand" href="/admin/" aria-label="Voice Control home">
-            <span>Voice<span className="brand-light"> Control</span></span>
-          </a>
-          <button
-            className="sidebar-toggle"
-            type="button"
-            aria-label={sidebarCollapsed ? t.expandSidebar : t.collapseSidebar}
-            aria-expanded={!sidebarCollapsed}
-            title={sidebarCollapsed ? t.expandSidebar : t.collapseSidebar}
-            onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-              <path d={sidebarCollapsed ? "m9 18 6-6-6-6" : "m15 18-6-6 6-6"} />
-            </svg>
-          </button>
-        </div>
-        <p className="nav-label">
-          {language === "en" ? "MANAGE" : "УПРАВЛЕНИЕ"}
-        </p>
-        <button className={`nav-item ${page === "phones" ? "active" : ""}`} aria-label={t.phones} title={sidebarCollapsed ? t.phones : undefined} onClick={() => setPage("phones")}>
-          <span className="phone-icon" aria-hidden="true">
-            ▣
-          </span>
-          <span className="nav-item-label">{t.phones}</span>
-        </button>
-        <button className={`nav-item ${page === "existing" ? "active" : ""}`} aria-label={t.existingPhones} title={sidebarCollapsed ? t.existingPhones : undefined} onClick={() => setPage("existing")}>
-          <span aria-hidden="true">▤</span><span className="nav-item-label">{t.existingPhones}</span>
-        </button>
-        <button className={`nav-item ${page === "unassigned" ? "active" : ""}`} aria-label={t.newUnassigned} title={sidebarCollapsed ? t.newUnassigned : undefined} onClick={() => setPage("unassigned")}>
-          <span aria-hidden="true">＋</span><span className="nav-item-label">{t.newUnassigned}</span>
-        </button>
-        <button className={`nav-item ${page === "load" ? "active" : ""}`} aria-label={t.load} title={sidebarCollapsed ? t.load : undefined} onClick={() => setPage("load")}>
-          <span aria-hidden="true">◴</span><span className="nav-item-label">{t.load}</span>
-        </button>
-        <button className={`nav-item ${page === "profiles" ? "active" : ""}`} aria-label={t.voiceProfiles} title={sidebarCollapsed ? t.voiceProfiles : undefined} onClick={() => setPage("profiles")}>
-          <span aria-hidden="true">♫</span><span className="nav-item-label">{t.voiceProfiles}</span>
-        </button>
-        <div className="sidebar-bottom">
-          <span className="online-dot" />
-          <span className="sidebar-bottom-label">{t.service}</span>
-        </div>
-      </aside>
-      <main className="main-content">
-        <header className="topbar">
-          <div className="breadcrumb">
-            {page === "phones" ? t.phones : page === "existing" ? t.existingPhones : page === "unassigned" ? t.newUnassigned : page === "profiles" ? t.voiceProfiles : t.load}
-            <span>/</span>
-            <strong>{page === "existing" || page === "unassigned" ? t.physicalTitle : page === "phones" ? t.physicalTitle : page === "profiles" ? t.title : t.load}</strong>
-          </div>
-          <div className="top-actions">
-            <span className="service-badge">
-              <span className="online-dot" />
-              {t.service}
-            </span>
-            <LanguageControl language={language} onChange={setLanguage} />
-            {authRequired && (
-              <button className="text-button" onClick={() => void signOut()}>
-                {t.signOut}
-              </button>
-            )}
-          </div>
-        </header>
+      <VoiceShell
+        page={page}
+        pageTitle={pageTitle}
+        sectionTitle={sectionTitle}
+        labels={t}
+        sidebarCollapsed={sidebarCollapsed}
+        onSidebarCollapsedChange={setSidebarCollapsed}
+        onNavigate={setPage}
+        languageControl={<LanguageControl language={language} onChange={setLanguage} />}
+        onSignOut={authRequired ? () => void signOut() : undefined}
+      >
         <section className="page-content">
           {page === "load" ? (
             <LoadPage metrics={metrics} language={language} labels={t} />
@@ -613,8 +575,7 @@ export default function App() {
           </section>
           </>}
         </section>
-      </main>
-    </div>
+      </VoiceShell>
   );
 }
 

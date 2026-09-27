@@ -466,7 +466,7 @@ func newAppHandler(webRoot string, adminAPI http.Handler, realtimeHandlers ...ht
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		serveFile(webRoot, "index.html", w, r)
+		http.Redirect(w, r, "/phone/", http.StatusPermanentRedirect)
 	})
 	conferenceSocket := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "conference unavailable", http.StatusServiceUnavailable)

@@ -432,6 +432,59 @@ func TestEventSubscriptionAuthenticatesAndReconnects(t *testing.T) {
 	}
 }
 
+func TestEventSubscriptionKeepsIdleARIAppRegistered(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	var connections atomic.Int32
+	pings := make(chan struct{}, 4)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		connection, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer connection.Close()
+		connections.Add(1)
+		connection.SetPingHandler(func(payload string) error {
+			select {
+			case pings <- struct{}{}:
+			default:
+			}
+			return connection.WriteControl(websocket.PongMessage, []byte(payload), time.Now().Add(time.Second))
+		})
+		_ = connection.WriteJSON(map[string]any{"type": "StasisStart", "channel": map[string]any{"id": "idle-channel"}})
+		_ = connection.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
+		for {
+			if _, _, err := connection.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}))
+	t.Cleanup(server.Close)
+	client, err := NewClient(server.URL+"/ari", testARIUser, testARIPass, "voice-control")
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.eventReadTimeout = 100 * time.Millisecond
+	client.eventPingInterval = 20 * time.Millisecond
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	events, err := client.Subscribe(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-pings:
+	case <-ctx.Done():
+		t.Fatal("ARI event stream did not send a keepalive ping")
+	}
+	time.Sleep(160 * time.Millisecond)
+	if got := connections.Load(); got != 1 {
+		t.Fatalf("idle event stream reconnected %d times; want one active ARI app", got)
+	}
+	if err := events.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestWaitChannelUpUsesARIEventsAndReportsHangup(t *testing.T) {
 	upgrader := websocket.Upgrader{}
 	started := make(chan struct{})

@@ -15,6 +15,8 @@ local_net=10.19.87.0/24
 type=transport
 protocol=wss
 bind=0.0.0.0
+external_media_address=192.168.20.70
+local_net=172.19.0.0/16
 
 [phone-endpoint](!)
 type=endpoint

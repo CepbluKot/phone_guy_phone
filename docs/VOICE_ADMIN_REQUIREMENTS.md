@@ -22,6 +22,14 @@ voice-conversion limit and measured capacity.
 - React is the admin UI. Its visual direction follows the shell, navigation,
   cards, tables, and status treatment of `/home/oleg/Documents/work/proactive-monitoring`;
   it does not import that project's source or runtime dependencies.
+- The Voice admin and browser phone share the Monitoring visual tokens
+  (`admin-ui/src/design-system.css`): neutral canvas and surfaces, blue
+  navigation state, compact status badges, accessible focus rings, and
+  reduced-motion behavior. The admin uses a collapsible icon sidebar and
+  breadcrumb top bar with Voice-specific sections for physical phones,
+  unassigned phones, voice profiles, and processing load. The browser phone
+  keeps its call-focused layout while using the shared colors, typography,
+  and surface tokens.
 - Keep Python for the existing RVC inference runtime, where the model and
   PyTorch/CUDA stack require it. The Go application calls the private RVC
   WebSocket service.

@@ -117,7 +117,7 @@ PY
   for item in ari.conf ari-password http.conf pjsip.conf modules.conf; do
     [ -f "$old_runtime/asterisk/$item" ] || { echo "Go preflight: Asterisk runtime file is missing: $item" >&2; return 1; }
   done
-  for item in Dockerfile.goweb go.mod go.sum cmd internal admin-ui web conference/asterisk deploy/compose.goweb.yaml deploy/compose.conference.yaml deploy/Caddyfile.goweb deploy/phonebook.initial.json deploy/phonebook.example.json deploy/webphone-directory.initial.json deploy/webphone-directory.example.json deploy/rollback-goweb-production.sh; do
+  for item in Dockerfile.goweb go.mod go.sum cmd internal admin-ui web conference/asterisk deploy/compose.goweb.yaml deploy/compose.conference.yaml deploy/Caddyfile.goweb deploy/phonebook.initial.json deploy/phonebook.example.json deploy/webphone-directory.initial.json deploy/webphone-directory.example.json deploy/rollback-goweb-production.sh deploy/update_pjsip_wss_transport.py; do
     [ -e "$release/$item" ] || { echo "Go release file is missing: $item" >&2; return 2; }
   done
 
@@ -125,6 +125,8 @@ PY
   for item in ari.conf ari-password http.conf pjsip.conf modules.conf; do
     cp -a "$old_runtime/asterisk/$item" "$new_runtime/asterisk/"
   done
+  python3 "$release/deploy/update_pjsip_wss_transport.py" \
+    "$new_runtime/asterisk/pjsip.conf" "$release/conference/asterisk/pjsip.conf.template"
   cp -a "$old_runtime/asterisk/sounds" "$new_runtime/asterisk/"
   cp "$release/conference/asterisk/extensions.conf" "$new_runtime/asterisk/extensions.conf"
   cp "$release/conference/asterisk/sorcery.conf" "$new_runtime/asterisk/sorcery.conf"
@@ -199,6 +201,11 @@ PY
     sleep 2
   done
   [ "$asterisk_ready" -eq 1 ] || { echo "New Asterisk image failed health check" >&2; exit 1; }
+  asterisk_ip=$(docker inspect voice-conference-asterisk-1 --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')
+  [ "$asterisk_ip" = 172.19.0.2 ] || { echo "Asterisk Docker IP changed; ICE host-candidate mapping needs review" >&2; exit 1; }
+  docker exec voice-conference-asterisk-1 grep -Fqx '172.19.0.2 => 192.168.20.70' /etc/asterisk/rtp.conf
+  docker exec voice-conference-asterisk-1 asterisk -rx 'pjsip show transport transport-wss' | grep -q 'external_media_address      : 192.168.20.70'
+  docker exec voice-conference-asterisk-1 asterisk -rx 'pjsip show transport transport-wss' | grep -q 'local_net                   : 172.19.0.0/255.255.0.0'
 
   docker compose -p voice-go -f "$release/deploy/compose.goweb.yaml" --env-file "$release/.env" up -d --no-build
   go_ready=0
@@ -301,7 +308,7 @@ if ! rsync -a --delete conference/asterisk "$target:$remote_stage/conference/"; 
   ssh "$target" "rm -rf '$remote_stage'" || true
   exit 1
 fi
-if ! rsync -a --delete deploy/compose.goweb.yaml deploy/compose.conference.yaml deploy/Caddyfile.goweb deploy/rollback-goweb-production.sh deploy/phonebook.initial.json deploy/phonebook.example.json deploy/webphone-directory.initial.json deploy/webphone-directory.example.json \
+if ! rsync -a --delete deploy/compose.goweb.yaml deploy/compose.conference.yaml deploy/Caddyfile.goweb deploy/rollback-goweb-production.sh deploy/update_pjsip_wss_transport.py deploy/phonebook.initial.json deploy/phonebook.example.json deploy/webphone-directory.initial.json deploy/webphone-directory.example.json \
     "$target:$remote_stage/deploy/"; then
   ssh "$target" "rm -rf '$remote_stage'" || true
   exit 1

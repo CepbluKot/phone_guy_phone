@@ -21,7 +21,7 @@ stage="/tmp/voice-go-update-$stamp"
 ssh -o BatchMode=yes -o ConnectTimeout=8 "$target" "mkdir -m 0700 '$stage' && mkdir -m 0755 '$stage/conference' && mkdir -m 0755 '$stage/deploy'"
 rsync -a --delete Dockerfile.goweb go.mod go.sum cmd internal admin-ui web "$target:$stage/"
 rsync -a --delete conference/asterisk "$target:$stage/conference/"
-rsync -a --delete deploy/compose.goweb.yaml deploy/compose.conference.yaml deploy/Caddyfile.goweb deploy/rollback-goweb-production.sh deploy/phonebook.initial.json deploy/phonebook.example.json deploy/webphone-directory.initial.json deploy/webphone-directory.example.json "$target:$stage/deploy/"
+rsync -a --delete deploy/compose.goweb.yaml deploy/compose.conference.yaml deploy/Caddyfile.goweb deploy/rollback-goweb-production.sh deploy/update_pjsip_wss_transport.py deploy/phonebook.initial.json deploy/phonebook.example.json deploy/webphone-directory.initial.json deploy/webphone-directory.example.json "$target:$stage/deploy/"
 ssh -o BatchMode=yes -o ConnectTimeout=8 "$target" sudo bash -s -- "$stamp" "$stage" <<'REMOTE'
 set -euo pipefail
 stamp=$1; stage=$2
@@ -63,15 +63,8 @@ cp -a "$old_runtime/asterisk/." "$new_runtime/asterisk/"
 cp "$release/conference/asterisk/extensions.conf" "$new_runtime/asterisk/extensions.conf"
 cp "$release/conference/asterisk/sorcery.conf" "$new_runtime/asterisk/sorcery.conf"
 cp "$release/conference/asterisk/modules.conf" "$new_runtime/asterisk/modules.conf"
-if ! grep -q '^\[transport-wss\]$' "$new_runtime/asterisk/pjsip.conf"; then
-  cat >> "$new_runtime/asterisk/pjsip.conf" <<'PJSIP_WSS'
-
-[transport-wss]
-type=transport
-protocol=wss
-bind=0.0.0.0
-PJSIP_WSS
-fi
+python3 "$release/deploy/update_pjsip_wss_transport.py" \
+  "$new_runtime/asterisk/pjsip.conf" "$release/conference/asterisk/pjsip.conf.template"
 chown root:root "$new_runtime/asterisk/extensions.conf" "$new_runtime/asterisk/sorcery.conf"; chmod 0644 "$new_runtime/asterisk/extensions.conf" "$new_runtime/asterisk/sorcery.conf"
 chown --reference="$old_runtime/asterisk/modules.conf" "$new_runtime/asterisk/modules.conf"; chmod --reference="$old_runtime/asterisk/modules.conf" "$new_runtime/asterisk/modules.conf"
 chown --reference="$old_runtime/asterisk/pjsip.conf" "$new_runtime/asterisk/pjsip.conf"; chmod --reference="$old_runtime/asterisk/pjsip.conf" "$new_runtime/asterisk/pjsip.conf"
@@ -106,6 +99,11 @@ ready=0; for _ in $(seq 1 30); do if curl --max-time 3 -fsS http://192.168.20.70
 [[ $ready = 1 ]]
 docker exec voice-conference-asterisk-1 asterisk -rx 'module show like res_pjsip_transport_websocket.so' | grep -Eq 'Running'
 docker exec voice-conference-asterisk-1 asterisk -rx 'pjsip show transports' | grep -q transport-wss
+asterisk_ip=$(docker inspect voice-conference-asterisk-1 --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')
+[[ "$asterisk_ip" == 172.19.0.2 ]] || { echo "Asterisk Docker IP changed; ICE host-candidate mapping needs review" >&2; exit 1; }
+docker exec voice-conference-asterisk-1 grep -Fqx '172.19.0.2 => 192.168.20.70' /etc/asterisk/rtp.conf
+docker exec voice-conference-asterisk-1 asterisk -rx 'pjsip show transport transport-wss' | grep -q 'external_media_address      : 192.168.20.70'
+docker exec voice-conference-asterisk-1 asterisk -rx 'pjsip show transport transport-wss' | grep -q 'local_net                   : 172.19.0.0/255.255.0.0'
 python3 - <<'PY'
 import json, urllib.request
 for origin in ('https://voice.lan.awesomeio.ru','https://vm-voice-1.lan.awesomeio.ru'):
