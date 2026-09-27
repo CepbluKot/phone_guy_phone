@@ -23,7 +23,9 @@ export function PhoneApp() {
   const [session, setSession] = useState<PhoneSession>();
   const [registration, setRegistration] = useState<SIPStatus>("offline");
   const [callStatus, setCallStatus] = useState<CallStatus>("idle");
-  const [caller, setCaller] = useState("");
+  const [peerExtension, setPeerExtension] = useState("");
+  const [connectedAt, setConnectedAt] = useState<number>();
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -31,6 +33,19 @@ export function PhoneApp() {
   const sessionIdRef = useRef("");
   const connected = registration === "registered";
   const targetOptions = useMemo(() => people.filter((person) => person.extension !== extension), [people, extension]);
+  const activePeer = people.find((person) => person.extension === peerExtension);
+  const activePeerName = activePeer?.nickname || peerExtension || "Внутренний номер";
+
+  useEffect(() => {
+    if (!connectedAt) {
+      setElapsedSeconds(0);
+      return;
+    }
+    const updateElapsed = () => setElapsedSeconds(Math.floor((Date.now() - connectedAt) / 1000));
+    updateElapsed();
+    const timer = window.setInterval(updateElapsed, 1000);
+    return () => window.clearInterval(timer);
+  }, [connectedAt]);
 
   const refreshDirectory = useCallback(async () => {
     const result = await phoneAPI.directory();
@@ -95,7 +110,10 @@ export function PhoneApp() {
       sessionIdRef.current = claimed.session.sessionId;
       const sip = new BrowserSIPSession(config.signalingUrl, setRegistration, (status, from) => {
         setCallStatus(status);
-        if (from) setCaller(from);
+        if (from) setPeerExtension(from);
+        if (status === "connected") setConnectedAt(Date.now());
+        else setConnectedAt(undefined);
+        if (status === "idle") setPeerExtension("");
       });
       sipRef.current = sip;
       await sip.connect(claimed.sip, audioRef.current!);
@@ -143,21 +161,32 @@ export function PhoneApp() {
     return `${person.extension} · ${endpoints.join(" + ")}`;
   };
 
+  const formatElapsed = (seconds: number) => {
+    const minutes = Math.floor(seconds / 60).toString().padStart(2, "0");
+    const remainder = (seconds % 60).toString().padStart(2, "0");
+    return `${minutes}:${remainder}`;
+  };
+
   return (
     <main className="phone-shell">
-      <header className="phone-topbar">
-        <a className="phone-brand" href="/phone/" aria-label="Voice phone home"><span className="phone-mark">V</span><span>Voice desk</span></a>
-        <a className="phone-admin-link" href="/admin/">Администрирование <span aria-hidden="true">↗</span></a>
-      </header>
-      <div className="phone-content">
-        <section className="phone-heading">
-          <p className="phone-eyebrow">ВНУТРЕННЯЯ СВЯЗЬ</p>
-          <h1>Телефон</h1>
-          <p>Звоните коллегам из браузера или принимайте звонки на внутренний номер.</p>
-        </section>
+      <div
+        className={`phone-app-background${callStatus === "connected" ? " is-blurred" : ""}`}
+        aria-hidden={callStatus === "connected" ? true : undefined}
+        inert={callStatus === "connected"}
+      >
+        <header className="phone-topbar">
+          <a className="phone-brand" href="/phone/" aria-label="Voice phone home"><span className="phone-mark">V</span><span>Voice desk</span></a>
+          <a className="phone-admin-link" href="/admin/">Администрирование <span aria-hidden="true">↗</span></a>
+        </header>
+        <div className="phone-content">
+          <section className="phone-heading">
+            <p className="phone-eyebrow">ВНУТРЕННЯЯ СВЯЗЬ</p>
+            <h1>Телефон</h1>
+            <p>Звоните коллегам из браузера или принимайте звонки на внутренний номер.</p>
+          </section>
 
-        {!session ? (
-          <section className="phone-card phone-setup-card">
+          {!session ? (
+            <section className="phone-card phone-setup-card">
             <div className="phone-card-heading"><div><span className="phone-step">01</span><h2>Подключить этот браузер</h2></div><span className="phone-status-pill is-offline"><i /> Не подключён</span></div>
             <form onSubmit={startSession} className="phone-form">
               <label>Ваш ник<input value={nickname} onChange={(event) => setNickname(event.target.value)} maxLength={48} autoComplete="nickname" required placeholder="phoneguy123" /></label>
@@ -166,24 +195,37 @@ export function PhoneApp() {
               <button className="phone-primary-button" type="submit" disabled={busy || (newExtensionMode ? !/^(?:[3-9]\d{2}|[3-9]\d{3})$/.test(newExtension) || newExtension === "600" : !extension)}>{busy ? "Подключаем…" : "Подключиться"}<span aria-hidden="true">→</span></button>
             </form>
             <p className="phone-helper">На одном внутреннем номере может быть один активный браузер. Физический аппарат продолжит работать.</p>
-          </section>
-        ) : (
-          <>
-            <section className="phone-card phone-connected-card">
+            </section>
+          ) : (
+            <>
+              <section className="phone-card phone-connected-card">
               <div className="phone-card-heading"><div><span className="phone-step">01</span><h2>{session.nickname} <small>· {session.extension}</small></h2></div><span className={`phone-status-pill ${connected ? "is-online" : "is-offline"}`}><i />{connected ? "Готов принимать звонки" : registration === "connecting" ? "Подключаем SIP…" : "SIP отключён"}</span></div>
               <button className="phone-text-button" onClick={() => void endSession()} disabled={busy}>Отключить этот браузер</button>
-            </section>
-            <section className="phone-card phone-call-card">
-              <div className="phone-card-heading"><div><span className="phone-step">02</span><h2>Звонок</h2></div><span className="phone-call-state">{callStatus === "idle" ? "Нет активного вызова" : callStatus === "calling" ? `Вызываем ${target}` : callStatus === "ringing" ? `Входящий · ${caller || "внутренний номер"}` : "Разговор"}</span></div>
-              {callStatus === "ringing" ? <div className="phone-call-actions"><button className="phone-primary-button" onClick={() => void sipRef.current?.answer()}>Ответить <span>↗</span></button><button className="phone-secondary-button" onClick={() => void sipRef.current?.decline()}>Отклонить</button></div> : callStatus !== "idle" ? <button className="phone-hangup-button" onClick={() => void stopCall()} disabled={busy}>Завершить звонок <span>×</span></button> : <div className="phone-dial-row"><label className="phone-target-select">Кому позвонить<select value={target} onChange={(event) => setTarget(event.target.value)}>{targetOptions.map((person) => <option key={person.extension} value={person.extension}>{labelFor(person)}</option>)}</select></label><button className="phone-primary-button" onClick={() => void makeCall()} disabled={!connected || busy || !target}>Позвонить <span>↗</span></button></div>}
-              <audio ref={audioRef} autoPlay playsInline />
-            </section>
-          </>
-        )}
+              </section>
+              <section className="phone-card phone-call-card">
+              <div className="phone-card-heading"><div><span className="phone-step">02</span><h2>Звонок</h2></div><span className="phone-call-state">{callStatus === "idle" ? "Нет активного вызова" : callStatus === "calling" ? `Вызываем ${target}` : callStatus === "ringing" ? `Входящий · ${peerExtension || "внутренний номер"}` : "Разговор"}</span></div>
+                {callStatus === "ringing" ? <div className="phone-call-actions"><button className="phone-primary-button" onClick={() => void sipRef.current?.answer()}>Ответить <span>↗</span></button><button className="phone-secondary-button" onClick={() => void sipRef.current?.decline()}>Отклонить</button></div> : callStatus !== "idle" ? <button className="phone-hangup-button" onClick={() => void stopCall()} disabled={busy}>Завершить звонок <span>×</span></button> : <div className="phone-dial-row"><label className="phone-target-select">Кому позвонить<select value={target} onChange={(event) => setTarget(event.target.value)}>{targetOptions.map((person) => <option key={person.extension} value={person.extension}>{labelFor(person)}</option>)}</select></label><button className="phone-primary-button" onClick={() => void makeCall()} disabled={!connected || busy || !target}>Позвонить <span>↗</span></button></div>}
+              </section>
+            </>
+          )}
 
-        {error && <div role="alert" className="phone-error"><span>!</span>{error}</div>}
-        <footer className="phone-footer"><span><i className={connected ? "is-online" : ""} />{connected ? "Сигнализация защищена TLS" : "Подключение доступно в частной сети"}</span><a href="/admin/">Управление профилями →</a></footer>
+          {error && <div role="alert" className="phone-error"><span>!</span>{error}</div>}
+          <footer className="phone-footer"><span><i className={connected ? "is-online" : ""} />{connected ? "Сигнализация защищена TLS" : "Подключение доступно в частной сети"}</span><a href="/admin/">Управление профилями →</a></footer>
+        </div>
       </div>
+      {callStatus === "connected" && (
+        <div className="phone-call-overlay">
+          <section className="phone-call-modal" role="dialog" aria-modal="true" aria-labelledby="active-call-name">
+            <div className="phone-call-avatar" aria-hidden="true">{activePeerName.slice(0, 1).toLocaleUpperCase()}</div>
+            <span className="phone-call-connected"><i /> Идёт разговор</span>
+            <h2 id="active-call-name">{activePeerName}</h2>
+            <p className="phone-call-extension">Внутренний номер · {peerExtension || target}</p>
+            <p className="phone-call-duration" aria-label={`Длительность звонка ${formatElapsed(elapsedSeconds)}`}>{formatElapsed(elapsedSeconds)}</p>
+            <button className="phone-hangup-button phone-modal-hangup" onClick={() => void stopCall()} disabled={busy}>Завершить звонок <span>×</span></button>
+          </section>
+        </div>
+      )}
+      <audio ref={audioRef} autoPlay playsInline />
     </main>
   );
 }
