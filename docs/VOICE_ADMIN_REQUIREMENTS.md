@@ -1,7 +1,7 @@
 # Voice Admin Product Requirements
 
 Status: canonical requirements index; implementation and live deployment are
-tracked separately. Last updated: 2026-09-25.
+tracked separately. Last updated: 2026-09-26.
 
 This document records the durable product decisions and requirements for the
 private voice service and its React/Go administration app. Detailed subsystem
@@ -51,6 +51,14 @@ voice-conversion limit and measured capacity.
 
 ## Physical phones, discovery, and SIP assignment
 
+- The current admin phase keeps an editable inventory mapping a physical
+  handset MAC address to one configured SIP extension. This is an administrative
+  record only: changing it does not change the handset's SIP credentials or
+  Asterisk endpoint configuration. Display its provenance and last-observed
+  address as historical evidence, not live presence.
+- Support manual enrollment in the inventory when no safe device-discovery
+  source is available. Do not label a manually entered record as automatically
+  discovered or currently online.
 - Show known physical phones with MAC, verified model/firmware where available,
   current IP, SIP registration state, assigned extension, voice profile, and
   provisioning state.
@@ -72,12 +80,12 @@ voice-conversion limit and measured capacity.
   perform active subnet scans as a fallback. If DHCP lease access is unavailable,
   show that discovery limitation and retain Asterisk registration/manual
   enrollment as the supported sources.
-- Let the administrator map a discovered physical phone to an available,
-  configured SIP extension. Prevent duplicate active MAC and extension
-  assignments. Keep voice-profile selection separate from SIP account
-  assignment.
+- Let the administrator map an inventory phone to an available, configured SIP
+  extension. Prevent duplicate active MAC and extension assignments. Keep
+  voice-profile selection separate from this administrative map.
 - A real SIP-account change requires phone provisioning; changing a UI label
-  alone is insufficient. Use Asterisk's `res_phoneprov` and
+  or inventory mapping alone is insufficient. Treat provisioning as a separate
+  future capability. Use Asterisk's `res_phoneprov` and
   `res_pjsip_phoneprov_provider` with a verified per-model template. The
   administrator manually enters the provisioning URL on a supported handset;
   no phone is rebooted or reconfigured automatically.
@@ -132,14 +140,55 @@ Repository inspection on 2026-09-25 found both a one-token Go `sessionGate` and
 a production Python worker that accepts only one active WebSocket session.
 Together they enforce at most one processed call at a time. The Python worker's
 `/healthz` reports readiness, active/running work, and queued windows. The Go
-RVC stream validates `processingMs` metadata for one-second output blocks but
-does not yet publish an admin telemetry API. These are source facts, not a
-fresh live VM measurement.
+RVC stream validates `processingMs` metadata for one-second output blocks.
+Local source now includes a bounded telemetry collector, loopback health
+poller, same-origin metrics endpoint, and Load page. These are implementation
+facts, not proof of deployment or live operation.
 
-The production worker's reproducible multi-user capacity has not been measured
-in this design. Therefore the initial dashboard must show the current enforced
-limit as one and the measured potential capacity as “not measured” until a
-controlled production-path run supplies evidence.
+The physical-phone MAC-to-extension registry is implemented in Go and React
+and was deployed to VM209 on 2026-09-26. Live checks confirmed the phone API
+returns the two enrolled records and both private admin domains serve the
+deployed UI bundle. The UI presents IPs as last-observed values; it does not
+claim live presence. New rows can be added manually. Automatic DHCP discovery
+and real SIP-account provisioning remain separate, blocked capabilities.
+
+The production worker's reproducible multi-user capacity has not been measured.
+The dashboard therefore shows the current enforced limit as one and the
+measured potential capacity as “not measured” until a controlled
+production-path run supplies evidence. Automatic physical-phone discovery is
+still blocked on a verified DHCP lease source and least-privilege Asterisk
+contact path. Changing the handset's real SIP account remains blocked on model,
+firmware, certificate trust, stable phone source addresses, and a constrained
+Asterisk apply path.
+
+## Backlog
+
+### Start a call to a phone from the admin
+
+**Status:** implemented in the browser phone at `/phone/`; the admin page shows
+active browser registrations and links to it. Deployment and live acceptance
+status are recorded in the browser-phone implementation plan.
+
+- Users connect a browser client to one configured internal extension and can
+  call another configured internal extension or receive calls there. The
+  physical handset and browser ring together; the first answer wins.
+- Keep call origination server-side in the Go service through Asterisk ARI.
+  The browser must not receive ARI credentials or choose arbitrary Asterisk
+  channel names or endpoints.
+- Route the call through the existing Go call controller so the assigned
+  phone's voice profile and fail-closed processing rules still apply. Do not
+  create a direct `Dial()` path that can bypass voice processing or recording
+  policy.
+- Nicknames and internal numbers are kept in a versioned secret-free directory.
+  SIP credentials are generated per browser session and are not persisted.
+  Enforce the current one-processed-call limit unless a separate capacity
+  change is approved and measured.
+- The browser phone can use an existing internal number or create a three- or
+  four-digit number. Reject numbers already configured or reserved by the
+  dialplan, and retain accepted numbers in the directory.
+- The call target list labels assigned physical handsets by their configured
+  device name and browser clients by nickname plus current online state. If
+  both devices share a number, show both endpoints.
 
 ## Related project documents
 

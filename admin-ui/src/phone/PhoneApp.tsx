@@ -1,0 +1,189 @@
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { DirectoryEntry, PhoneSession, phoneAPI } from "./api";
+import { BrowserSIPSession, CallStatus, SIPStatus } from "./sipSession";
+import "./phone.css";
+
+const labels: Record<string, string> = {
+  extension_busy: "Этот внутренний номер уже занят браузерным телефоном.",
+  invalid_request: "Проверьте ник и внутренний номер.",
+  session_not_found: "Сессия завершилась. Подключитесь снова.",
+  phone_unavailable: "Телефонный сервис сейчас недоступен.",
+  origin_forbidden: "Запрос отклонён: откройте страницу с адреса сервиса.",
+  invalid_sip_uri: "Не удалось подготовить SIP-соединение.",
+  invalid_call_target: "Выберите внутренний номер из списка.",
+};
+
+export function PhoneApp() {
+  const [people, setPeople] = useState<DirectoryEntry[]>([]);
+  const [nickname, setNickname] = useState("");
+  const [extension, setExtension] = useState("");
+  const [newExtensionMode, setNewExtensionMode] = useState(false);
+  const [newExtension, setNewExtension] = useState("");
+  const [target, setTarget] = useState("");
+  const [session, setSession] = useState<PhoneSession>();
+  const [registration, setRegistration] = useState<SIPStatus>("offline");
+  const [callStatus, setCallStatus] = useState<CallStatus>("idle");
+  const [caller, setCaller] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const sipRef = useRef<BrowserSIPSession | undefined>(undefined);
+  const sessionIdRef = useRef("");
+  const connected = registration === "registered";
+  const targetOptions = useMemo(() => people.filter((person) => person.extension !== extension), [people, extension]);
+
+  const refreshDirectory = useCallback(async () => {
+    const result = await phoneAPI.directory();
+    setPeople(result.people);
+    setExtension((current) => current || result.people[0]?.extension || "");
+    setTarget((current) => current || result.people.find((person) => person.extension !== extension)?.extension || "");
+  }, [extension]);
+
+  useEffect(() => {
+    void refreshDirectory().catch(() => setError("Не удалось загрузить список внутренних номеров."));
+  }, [refreshDirectory]);
+
+  useEffect(() => {
+    if (target && target !== extension && people.some((person) => person.extension === target)) return;
+    setTarget(people.find((person) => person.extension !== extension)?.extension || "");
+  }, [people, extension, target]);
+
+  const endSession = useCallback(async (keepalive = false) => {
+    const id = sessionIdRef.current;
+    sessionIdRef.current = "";
+    const sip = sipRef.current;
+    sipRef.current = undefined;
+    setSession(undefined);
+    setRegistration("offline");
+    setCallStatus("idle");
+    if (sip) await Promise.resolve(sip.disconnect()).catch(() => undefined);
+    if (id) await Promise.resolve(phoneAPI.release(id, keepalive)).catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    const releaseOnClose = () => {
+      const id = sessionIdRef.current;
+      if (id) void phoneAPI.release(id, true);
+      void sipRef.current?.disconnect();
+      sessionIdRef.current = "";
+      sipRef.current = undefined;
+    };
+    window.addEventListener("pagehide", releaseOnClose);
+    return () => window.removeEventListener("pagehide", releaseOnClose);
+  }, []);
+
+  useEffect(() => {
+    if (!session?.sessionId) return;
+    const timer = window.setInterval(() => {
+      void phoneAPI.heartbeat(session.sessionId).catch(() => {
+        setError("Соединение потеряно. Регистрация отключена.");
+        void endSession();
+      });
+    }, 10_000);
+    return () => window.clearInterval(timer);
+  }, [session?.sessionId, endSession]);
+
+  const startSession = async (event: FormEvent) => {
+    event.preventDefault();
+    const selectedExtension = newExtensionMode ? newExtension : extension;
+    setBusy(true);
+    setError("");
+    let claimed: Awaited<ReturnType<typeof phoneAPI.claim>> | undefined;
+    try {
+      const config = await phoneAPI.config();
+      claimed = await phoneAPI.claim(nickname.trim(), selectedExtension, newExtensionMode);
+      sessionIdRef.current = claimed.session.sessionId;
+      const sip = new BrowserSIPSession(config.signalingUrl, setRegistration, (status, from) => {
+        setCallStatus(status);
+        if (from) setCaller(from);
+      });
+      sipRef.current = sip;
+      await sip.connect(claimed.sip, audioRef.current!);
+      setSession(claimed.session);
+      setTarget((current) => current || people.find((person) => person.extension !== selectedExtension)?.extension || "");
+    } catch (reason) {
+      setError(labels[reason instanceof Error ? reason.message : ""] || "Не удалось подключить браузерный телефон.");
+      await endSession();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const makeCall = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      await sipRef.current?.call(target);
+    } catch (reason) {
+      setError(labels[reason instanceof Error ? reason.message : ""] || "Не удалось начать звонок.");
+      setCallStatus("idle");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const stopCall = async () => {
+    setBusy(true);
+    try {
+      let failed = false;
+      try { await sipRef.current?.hangup(); } catch { failed = true; }
+      const sessionId = sessionIdRef.current;
+      if (sessionId) {
+        try { await phoneAPI.hangup(sessionId); } catch { failed = true; }
+      }
+      if (failed) setError("Не удалось завершить вызов. Попробуйте отключить браузерный телефон.");
+    } finally { setBusy(false); }
+  };
+
+  const labelFor = (person: DirectoryEntry) => {
+    const endpoints: string[] = [];
+    if (person.physicalPhone) endpoints.push(`физический телефон · ${person.physicalPhone}`);
+    if (person.nickname) endpoints.push(`браузер · ${person.nickname} · ${person.active ? "в сети" : "не в сети"}`);
+    if (!endpoints.length) endpoints.push("нет подключённого устройства");
+    return `${person.extension} · ${endpoints.join(" + ")}`;
+  };
+
+  return (
+    <main className="phone-shell">
+      <header className="phone-topbar">
+        <a className="phone-brand" href="/phone/" aria-label="Voice phone home"><span className="phone-mark">V</span><span>Voice desk</span></a>
+        <a className="phone-admin-link" href="/admin/">Администрирование <span aria-hidden="true">↗</span></a>
+      </header>
+      <div className="phone-content">
+        <section className="phone-heading">
+          <p className="phone-eyebrow">ВНУТРЕННЯЯ СВЯЗЬ</p>
+          <h1>Телефон</h1>
+          <p>Звоните коллегам из браузера или принимайте звонки на внутренний номер.</p>
+        </section>
+
+        {!session ? (
+          <section className="phone-card phone-setup-card">
+            <div className="phone-card-heading"><div><span className="phone-step">01</span><h2>Подключить этот браузер</h2></div><span className="phone-status-pill is-offline"><i /> Не подключён</span></div>
+            <form onSubmit={startSession} className="phone-form">
+              <label>Ваш ник<input value={nickname} onChange={(event) => setNickname(event.target.value)} maxLength={48} autoComplete="nickname" required placeholder="phoneguy123" /></label>
+              <label>Внутренний номер<select value={newExtensionMode ? "new" : "existing"} onChange={(event) => setNewExtensionMode(event.target.value === "new")}><option value="existing">Выбрать существующий</option><option value="new">Придумать новый</option></select></label>
+              {newExtensionMode ? <label>Новый номер<input aria-label="Новый внутренний номер" aria-describedby="new-extension-hint" type="text" inputMode="numeric" autoComplete="off" pattern="(?:[3-9][0-9]{2}|[3-9][0-9]{3})" minLength={3} maxLength={4} value={newExtension} onChange={(event) => setNewExtension(event.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="Например, 345" required /><span id="new-extension-hint" className="phone-number-hint">Можно придумать номер из трёх или четырёх цифр. Служебный номер 600 зарезервирован.</span></label> : <label>Выберите номер<select aria-label="Выберите номер" value={extension} onChange={(event) => setExtension(event.target.value)} required>{people.map((person) => <option key={person.extension} value={person.extension}>{person.extension}{person.nickname ? ` · ${person.nickname}` : " · свободен"}{person.active ? " · браузер занят" : ""}</option>)}</select></label>}
+              <button className="phone-primary-button" type="submit" disabled={busy || (newExtensionMode ? !/^(?:[3-9]\d{2}|[3-9]\d{3})$/.test(newExtension) || newExtension === "600" : !extension)}>{busy ? "Подключаем…" : "Подключиться"}<span aria-hidden="true">→</span></button>
+            </form>
+            <p className="phone-helper">На одном внутреннем номере может быть один активный браузер. Физический аппарат продолжит работать.</p>
+          </section>
+        ) : (
+          <>
+            <section className="phone-card phone-connected-card">
+              <div className="phone-card-heading"><div><span className="phone-step">01</span><h2>{session.nickname} <small>· {session.extension}</small></h2></div><span className={`phone-status-pill ${connected ? "is-online" : "is-offline"}`}><i />{connected ? "Готов принимать звонки" : registration === "connecting" ? "Подключаем SIP…" : "SIP отключён"}</span></div>
+              <button className="phone-text-button" onClick={() => void endSession()} disabled={busy}>Отключить этот браузер</button>
+            </section>
+            <section className="phone-card phone-call-card">
+              <div className="phone-card-heading"><div><span className="phone-step">02</span><h2>Звонок</h2></div><span className="phone-call-state">{callStatus === "idle" ? "Нет активного вызова" : callStatus === "calling" ? `Вызываем ${target}` : callStatus === "ringing" ? `Входящий · ${caller || "внутренний номер"}` : "Разговор"}</span></div>
+              {callStatus === "ringing" ? <div className="phone-call-actions"><button className="phone-primary-button" onClick={() => void sipRef.current?.answer()}>Ответить <span>↗</span></button><button className="phone-secondary-button" onClick={() => void sipRef.current?.decline()}>Отклонить</button></div> : callStatus !== "idle" ? <button className="phone-hangup-button" onClick={() => void stopCall()} disabled={busy}>Завершить звонок <span>×</span></button> : <div className="phone-dial-row"><label className="phone-target-select">Кому позвонить<select value={target} onChange={(event) => setTarget(event.target.value)}>{targetOptions.map((person) => <option key={person.extension} value={person.extension}>{labelFor(person)}</option>)}</select></label><button className="phone-primary-button" onClick={() => void makeCall()} disabled={!connected || busy || !target}>Позвонить <span>↗</span></button></div>}
+              <audio ref={audioRef} autoPlay playsInline />
+            </section>
+          </>
+        )}
+
+        {error && <div role="alert" className="phone-error"><span>!</span>{error}</div>}
+        <footer className="phone-footer"><span><i className={connected ? "is-online" : ""} />{connected ? "Сигнализация защищена TLS" : "Подключение доступно в частной сети"}</span><a href="/admin/">Управление профилями →</a></footer>
+      </div>
+    </main>
+  );
+}

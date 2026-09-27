@@ -31,7 +31,7 @@ PyTorch/CUDA stack require it.
 - Profiles in the first version are `original` and `phone-guy`.
 - A profile assignment is snapshotted when a call is admitted. Admin changes
   apply to new calls; they do not rewire active calls.
-- VPN-only access, separate admin authentication, fail-closed audio handling,
+- VPN-only access, explicit admin authentication mode, fail-closed audio handling,
   no call recording, and no VM208/Frigate changes remain mandatory.
 
 ## Current state and scope boundary
@@ -91,11 +91,16 @@ validate the extension and profile, reject stale revisions, atomically persist
 the update, and return the accepted revision. The runtime reads the latest
 validated revision before admitting each new call.
 
-Use one configured operator credential stored outside Git. The web application
-is reachable only through the private VPN/Caddy path and binds only to its
-intended private interface. Admin login uses a short-lived Secure, HttpOnly,
-SameSite cookie; mutating requests require same-origin/CSRF validation. Neither
-the password nor session tokens are logged or returned by APIs.
+Use one configured operator credential stored outside Git by default. A
+temporary passwordless mode may be enabled only on VM209 with
+`VOICE_ADMIN_AUTH_DISABLED=true`; it relies on the existing private LAN/VPN
+firewall boundary, so every device able to reach the admin origin can change
+phone profiles. Keep the credential and default authenticated mode available
+for immediate restoration. In both modes, mutating requests require an exact
+allowed HTTPS Origin. When authentication is enabled, admin login uses a
+short-lived Secure, HttpOnly, SameSite cookie and writes also require CSRF
+validation. Neither the password nor session tokens are logged or returned by
+APIs.
 
 ## Call and audio behavior
 

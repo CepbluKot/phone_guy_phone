@@ -17,6 +17,7 @@ services:
       - "${CONFERENCE_RUNTIME}/asterisk/pjsip.conf:/etc/asterisk/pjsip.conf:ro"
       - "${CONFERENCE_RUNTIME}/asterisk/extensions.conf:/etc/asterisk/extensions.conf:ro"
       - "${CONFERENCE_RUNTIME}/asterisk/modules.conf:/etc/asterisk/modules.conf:ro"
+      - "${CONFERENCE_RUNTIME}/asterisk/sorcery.conf:/etc/asterisk/sorcery.conf:ro"
       - "${CONFERENCE_RUNTIME}/asterisk/sounds:/var/lib/asterisk/sounds/phoneguy-bot:ro"
     read_only: true
     tmpfs:

@@ -13,6 +13,10 @@ real SIP account after it fetches its configuration.
 
 ## Accepted direction
 
+- Current phase: an editable MAC-to-extension phonebook is an administrative
+  inventory only. Saving a phonebook assignment does not modify handset SIP
+  credentials or Asterisk endpoints. Provisioning remains a separate future
+  capability gated on the prerequisites below.
 - Use Asterisk's open-source `res_phoneprov` and
   `res_pjsip_phoneprov_provider` modules, not a new provisioning product.
 - Keep the React admin and Go control plane already in the project.

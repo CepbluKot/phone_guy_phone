@@ -8,6 +8,14 @@ bind=0.0.0.0:5060
 local_net=192.168.20.0/24
 local_net=10.19.87.0/24
 
+; SIP over WebSocket uses Asterisk's existing HTTP /ws handler. The host
+; publication for that HTTP server remains loopback-only; private Caddy
+; proxies only the phone signaling path to it.
+[transport-wss]
+type=transport
+protocol=wss
+bind=0.0.0.0
+
 [phone-endpoint](!)
 type=endpoint
 context=phoneguy-sip

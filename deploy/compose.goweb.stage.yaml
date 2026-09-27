@@ -10,6 +10,7 @@ services:
       VOICE_WEB_ROOT: /opt/voice-changer/web
       VOICE_WEB_ADDR: 127.0.0.1:8081
       VOICE_ROUTE_CONFIG_FILE: /var/lib/voice-go-stage/voice-routing.json
+      VOICE_PHONE_DIRECTORY_FILE: /var/lib/voice-go-stage/webphone-directory.json
       VOICE_ADMIN_PASSWORD_FILE: /run/secrets/voice-admin-password
       VOICE_ADMIN_ORIGIN: https://voice.lan.awesomeio.ru,https://vm-voice-1.lan.awesomeio.ru
       VOICE_ARI_URL: http://127.0.0.1:8092/ari

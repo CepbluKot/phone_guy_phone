@@ -1,7 +1,7 @@
 # Browser Softphone and Internal Calling
 
-Status: proposed written design; conversational sections approved on 2026-09-26.
-This document describes a feature that is not yet implemented or deployed.
+Status: implemented and deployed to VM209 in release `20260926T180933Z`.
+Private browser SIP registration was verified. Real call/media acceptance remains pending.
 
 ## Goal
 
@@ -58,8 +58,16 @@ These are source observations, not claims about current live deployment:
   against configured numeric extensions.
 - `conference/asterisk/pjsip.conf.template` defines a UDP PJSIP transport and
   physical endpoints. The shared endpoint template has `ice_support=no`; the
-  Asterisk HTTP configuration has TLS disabled and binds to loopback through
-  the existing ARI listener. No PJSIP WebSocket/WebRTC endpoint is configured.
+  source `http.conf` binds to loopback, while the deployed container's HTTP
+  process binds inside its container and Docker publishes that port only on
+  host loopback. No PJSIP WebSocket/WebRTC endpoint is configured.
+- The deployed Asterisk 22.11.0 container currently has no
+  `/etc/asterisk/sorcery.conf` and does not load
+  `res_pjsip_transport_websocket`; ARI dynamic PJSIP object creation is not
+  enabled until a volatile memory mapping is added for browser auth/AOR/
+  endpoints while retaining the static `pjsip.conf` mappings.
+  The browser's dynamic AOR ID must equal its SIP URI user so Asterisk resolves
+  REGISTER to the intended AOR.
 - Asterisk's RTP range is `10000-10019/udp`; the Compose deployment publishes
   that range only on the private VM address. The browser media path must remain
   reachable only through the existing VPN/LAN routes.

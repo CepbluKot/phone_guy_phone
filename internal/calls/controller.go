@@ -23,29 +23,33 @@ type Outcome struct{ Code string }
 const outcomeQueueSize = 128
 
 type managedCall struct {
-	id             string
-	route          *Route
-	callerID       string
-	peerID         string
-	flow           string
-	attempt        int
-	main           Bridge
-	voice          *Session
-	playbackID     string
-	playbackDone   chan struct{}
-	playbackErr    error
-	callerAnswered bool
-	retrying       bool
-	attemptCancel  context.CancelFunc
-	ctx            context.Context
-	cancel         context.CancelFunc
-	mu             sync.Mutex
-	closed         bool
-	connecting     bool
-	connected      bool
-	connectDone    chan struct{}
-	closeOnce      sync.Once
-	closeErr       error
+	id              string
+	route           *Route
+	callerID        string
+	callerEndpoint  string
+	peerID          string
+	targetEndpoints map[string]string
+	targetGone      map[string]bool
+	winnerID        string
+	flow            string
+	attempt         int
+	main            Bridge
+	voice           *Session
+	playbackID      string
+	playbackDone    chan struct{}
+	playbackErr     error
+	callerAnswered  bool
+	retrying        bool
+	attemptCancel   context.CancelFunc
+	ctx             context.Context
+	cancel          context.CancelFunc
+	mu              sync.Mutex
+	closed          bool
+	connecting      bool
+	connected       bool
+	connectDone     chan struct{}
+	closeOnce       sync.Once
+	closeErr        error
 }
 
 type Controller struct {
@@ -316,7 +320,12 @@ func (controller *Controller) start(ctx context.Context, event ari.Event) error 
 		peerID += "-1"
 	}
 	callCtx, callCancel := context.WithCancel(ctx)
-	call := &managedCall{id: callID, route: route, callerID: event.Channel.ID, peerID: peerID, flow: route.Flow, attempt: 1, main: main, ctx: callCtx, cancel: callCancel}
+	targets := map[string]string{peerID: route.Peer}
+	if route.BrowserTarget != "" {
+		targets["call-peer-"+callID+"-browser"] = route.BrowserTarget
+	}
+	callerEndpoint, _ := pjsipEndpoint(event.Channel.Name)
+	call := &managedCall{id: callID, route: route, callerID: event.Channel.ID, callerEndpoint: callerEndpoint, peerID: peerID, targetEndpoints: targets, targetGone: map[string]bool{}, flow: route.Flow, attempt: 1, main: main, ctx: callCtx, cancel: callCancel}
 	controller.mu.Lock()
 	controller.calls[callID] = call
 	controller.mu.Unlock()
@@ -339,16 +348,54 @@ func (controller *Controller) start(ctx context.Context, event ari.Event) error 
 
 func (controller *Controller) originatePeer(call *managedCall, timeout int) error {
 	call.mu.Lock()
-	peerID, attempt, flow := call.peerID, call.attempt, call.flow
+	peerID, attempt, flow, peerEndpoint := call.peerID, call.attempt, call.flow, call.route.Peer
 	call.mu.Unlock()
 	if peerID == "" {
+		return ErrInvalidCallEvent
+	}
+	primaryErr := controller.originateTarget(call, peerEndpoint, peerID, flow, attempt, timeout)
+	if primaryErr != nil {
+		controller.markTargetFailed(call, peerID)
+	}
+	call.mu.Lock()
+	browserID := "call-peer-" + call.id + "-browser"
+	browserEndpoint := call.route.BrowserTarget
+	skip := browserEndpoint == "" || call.closed || call.winnerID != ""
+	call.mu.Unlock()
+	if skip {
+		return primaryErr
+	}
+	if err := controller.originateTarget(call, browserEndpoint, browserID, flow, attempt, timeout); err != nil {
+		controller.markTargetFailed(call, browserID)
+		if primaryErr != nil {
+			return errors.Join(primaryErr, err)
+		}
+		return nil
+	}
+	return nil
+}
+
+func (controller *Controller) markTargetFailed(call *managedCall, id string) bool {
+	call.mu.Lock()
+	defer call.mu.Unlock()
+	call.targetGone[id] = true
+	for target := range call.targetEndpoints {
+		if !call.targetGone[target] {
+			return false
+		}
+	}
+	return true
+}
+
+func (controller *Controller) originateTarget(call *managedCall, endpoint, peerID, flow string, attempt, timeout int) error {
+	if endpoint == "" || peerID == "" {
 		return ErrInvalidCallEvent
 	}
 	args := "call=" + call.id + ",role=peer"
 	if flow == "callback-1900" {
 		args += ",attempt=" + strconv.Itoa(attempt)
 	}
-	return controller.ari.OriginateChannel(call.ctx, call.route.Peer, peerID, args, call.route.Source, timeout)
+	return controller.ari.OriginateChannel(call.ctx, endpoint, peerID, args, call.route.Source, timeout)
 }
 
 func (controller *Controller) peerStarted(ctx context.Context, callID string, attempt int, event ari.Event) error {
@@ -362,7 +409,9 @@ func (controller *Controller) peerStarted(ctx context.Context, callID string, at
 		return ErrInvalidCallEvent
 	}
 	call.mu.Lock()
-	matches := event.Channel.ID == call.peerID && attempt == call.attempt
+	endpoint := call.targetEndpoints[event.Channel.ID]
+	matches := endpoint != "" && attempt == call.attempt
+	winner := call.winnerID
 	call.mu.Unlock()
 	if !matches {
 		cleanupCtx, cancel := cleanupCallContext(ctx)
@@ -373,14 +422,19 @@ func (controller *Controller) peerStarted(ctx context.Context, callID string, at
 	if event.Channel.State != "Up" {
 		return nil
 	}
-	endpoint, ok := pjsipEndpoint(event.Channel.Name)
-	if !ok || endpoint != call.route.Peer {
+	actual, ok := pjsipEndpoint(event.Channel.Name)
+	if !ok || actual != endpoint {
 		cleanupCtx, cancel := cleanupCallContext(ctx)
 		_ = controller.closeCall(cleanupCtx, call)
 		cancel()
 		return ErrInvalidCallEvent
 	}
-	return controller.beginConnect(call)
+	if winner != "" && winner != event.Channel.ID {
+		cleanupCtx, cancel := cleanupCallContext(ctx)
+		defer cancel()
+		return controller.ari.DeleteChannel(cleanupCtx, event.Channel.ID)
+	}
+	return controller.beginConnect(call, event.Channel.ID)
 }
 
 func (controller *Controller) peerUp(ctx context.Context, event ari.Event) error {
@@ -388,7 +442,8 @@ func (controller *Controller) peerUp(ctx context.Context, event ari.Event) error
 	var found *managedCall
 	for _, call := range controller.calls {
 		call.mu.Lock()
-		matches := call.peerID == event.Channel.ID
+		endpoint := call.targetEndpoints[event.Channel.ID]
+		matches := endpoint != ""
 		call.mu.Unlock()
 		if matches {
 			found = call
@@ -399,33 +454,60 @@ func (controller *Controller) peerUp(ctx context.Context, event ari.Event) error
 	if found == nil {
 		return nil
 	}
+	found.mu.Lock()
+	expected := found.targetEndpoints[event.Channel.ID]
+	winner := found.winnerID
+	found.mu.Unlock()
 	endpoint, ok := pjsipEndpoint(event.Channel.Name)
-	if !ok || endpoint != found.route.Peer {
+	if !ok || endpoint != expected {
 		cleanupCtx, cancel := cleanupCallContext(ctx)
 		defer cancel()
 		return controller.closeCall(cleanupCtx, found)
 	}
-	return controller.beginConnect(found)
+	if winner != "" && winner != event.Channel.ID {
+		cleanupCtx, cancel := cleanupCallContext(ctx)
+		defer cancel()
+		return controller.ari.DeleteChannel(cleanupCtx, event.Channel.ID)
+	}
+	return controller.beginConnect(found, event.Channel.ID)
 }
 
-func (controller *Controller) beginConnect(call *managedCall) error {
+func (controller *Controller) beginConnect(call *managedCall, winnerID string) error {
 	call.mu.Lock()
 	if call.closed {
 		call.mu.Unlock()
 		return ErrInvalidCallEvent
 	}
+	if call.winnerID != "" && call.winnerID != winnerID {
+		call.mu.Unlock()
+		cleanupCtx, cancel := cleanupCallContext(context.Background())
+		defer cancel()
+		return controller.ari.DeleteChannel(cleanupCtx, winnerID)
+	}
 	if call.connecting || call.connected || call.retrying {
 		call.mu.Unlock()
 		return nil
 	}
+	call.winnerID = winnerID
 	call.connecting = true
 	attempt := call.attempt
-	peerID := call.peerID
+	peerID := winnerID
+	losers := make([]string, 0, len(call.targetEndpoints))
+	for id := range call.targetEndpoints {
+		if id != winnerID {
+			losers = append(losers, id)
+		}
+	}
 	attemptCtx, attemptCancel := context.WithCancel(call.ctx)
 	call.attemptCancel = attemptCancel
 	call.connectDone = make(chan struct{})
 	done := call.connectDone
 	call.mu.Unlock()
+	cleanupCtx, cancelCleanup := cleanupCallContext(call.ctx)
+	for _, id := range losers {
+		_ = controller.ari.DeleteChannel(cleanupCtx, id)
+	}
+	cancelCleanup()
 	go func() {
 		err := controller.connect(attemptCtx, call, attempt, peerID)
 		attemptCancel()
@@ -674,10 +756,35 @@ func (controller *Controller) destroyed(ctx context.Context, channelID string) e
 	for _, call := range controller.calls {
 		call.mu.Lock()
 		callerID, peerID := call.callerID, call.peerID
+		_, isTarget := call.targetEndpoints[channelID]
+		winner := call.winnerID
 		call.mu.Unlock()
-		if callerID == channelID || peerID == channelID {
+		if isTarget && winner != "" && winner != channelID {
+			continue
+		}
+		if isTarget && winner == "" && call.flow != "callback-1900" {
+			call.mu.Lock()
+			call.targetGone[channelID] = true
+			allGone := true
+			for id := range call.targetEndpoints {
+				if !call.targetGone[id] {
+					allGone = false
+					break
+				}
+			}
+			call.mu.Unlock()
+			controller.mu.Unlock()
+			if allGone {
+				cleanupCtx, cancel := cleanupCallContext(ctx)
+				defer cancel()
+				controller.recordOutcome("call_ended")
+				return controller.closeCall(cleanupCtx, call)
+			}
+			return nil
+		}
+		if callerID == channelID || isTarget {
 			found = call
-			peerDestroyed = peerID == channelID
+			peerDestroyed = isTarget && peerID == channelID
 			break
 		}
 	}
@@ -779,6 +886,10 @@ func (controller *Controller) retryCallback(ctx context.Context, call *managedCa
 		return nil
 	}
 	call.peerID = "call-peer-" + call.id + "-2"
+	delete(call.targetEndpoints, oldPeerID)
+	call.targetEndpoints[call.peerID] = call.route.Peer
+	call.targetGone[call.peerID] = false
+	call.winnerID = ""
 	call.connecting = false
 	call.connected = false
 	call.connectDone = nil
@@ -832,14 +943,26 @@ func (controller *Controller) closeCall(ctx context.Context, call *managedCall) 
 		call.mu.Lock()
 		voice := call.voice
 		peerID := call.peerID
+		targetIDs := make([]string, 0, len(call.targetEndpoints))
+		for id := range call.targetEndpoints {
+			if id != peerID {
+				targetIDs = append(targetIDs, id)
+			}
+		}
 		call.mu.Unlock()
 		if voice != nil {
 			if err := voice.Close(ctx); err != nil && call.closeErr == nil {
 				call.closeErr = err
 			}
 		}
-		for _, id := range []string{call.callerID, peerID} {
+		allIDs := append([]string{call.callerID, peerID}, targetIDs...)
+		seen := map[string]struct{}{}
+		for _, id := range allIDs {
 			if id != "" {
+				if _, ok := seen[id]; ok {
+					continue
+				}
+				seen[id] = struct{}{}
 				if err := controller.ari.DeleteChannel(ctx, id); err != nil && call.closeErr == nil {
 					call.closeErr = err
 				}
@@ -856,6 +979,35 @@ func (controller *Controller) closeCall(ctx context.Context, call *managedCall) 
 		controller.mu.Unlock()
 	})
 	return call.closeErr
+}
+
+// HangupBrowserEndpoint ends calls originated by one ephemeral browser SIP
+// identity. Matching the PJSIP endpoint keeps this separate from a physical
+// handset that may share the same logical extension.
+func (controller *Controller) HangupBrowserEndpoint(ctx context.Context, endpoint string) error {
+	if !validBrowserEndpoint(endpoint) {
+		return ErrInvalidCallEvent
+	}
+	controller.mu.Lock()
+	calls := make([]*managedCall, 0, len(controller.calls))
+	for _, call := range controller.calls {
+		call.mu.Lock()
+		matches := call.callerEndpoint == endpoint
+		call.mu.Unlock()
+		if matches {
+			calls = append(calls, call)
+		}
+	}
+	controller.mu.Unlock()
+	var first error
+	for _, call := range calls {
+		cleanupCtx, cancel := cleanupCallContext(ctx)
+		if err := controller.closeCall(cleanupCtx, call); err != nil && first == nil {
+			first = err
+		}
+		cancel()
+	}
+	return first
 }
 
 func cleanupCallContext(ctx context.Context) (context.Context, context.CancelFunc) {

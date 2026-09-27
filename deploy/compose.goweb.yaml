@@ -13,7 +13,10 @@ services:
       VOICE_WEB_ROOT: /opt/voice-changer/web
       VOICE_WEB_ADDR: 192.168.20.70:8080
       VOICE_ROUTE_CONFIG_FILE: /etc/voice-changer/voice-routing.json
+      VOICE_PHONEBOOK_FILE: /etc/voice-changer/phonebook.json
+      VOICE_PHONE_DIRECTORY_FILE: /etc/voice-changer/webphone-directory.json
       VOICE_ADMIN_PASSWORD_FILE: /run/secrets/voice-admin-password
+      VOICE_ADMIN_AUTH_DISABLED: "true"
       VOICE_ADMIN_ORIGIN: https://voice.lan.awesomeio.ru,https://vm-voice-1.lan.awesomeio.ru
       VOICE_ARI_URL: http://127.0.0.1:8092/ari
       VOICE_ARI_USERNAME: phoneguy
@@ -25,6 +28,9 @@ services:
       CONFERENCE_FIXTURE_DIR: /var/lib/voice-changer/conference-fixtures
     volumes:
       - /etc/voice-changer:/etc/voice-changer:rw
+      - /proc/stat:/host/proc/stat:ro
+      - /proc/meminfo:/host/proc/meminfo:ro
+      - /sys/fs/cgroup/system.slice/voice-rvc.service:/host/cgroup/voice-rvc.service:ro
       - /etc/voice-changer-admin/password:/run/secrets/voice-admin-password:ro
       - "${VOICE_ARI_RUNTIME:?VOICE_ARI_RUNTIME is required}/asterisk/ari-password:/run/secrets/ari-password:ro"
       - "${VOICE_CONFERENCE_FIXTURES:?VOICE_CONFERENCE_FIXTURES is required}:/var/lib/voice-changer/conference-fixtures:ro"

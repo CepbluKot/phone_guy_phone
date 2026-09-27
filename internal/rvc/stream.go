@@ -3,6 +3,7 @@ package rvc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -26,11 +27,12 @@ type Stream struct {
 	err          error
 	closeErr     error
 	pacer        pacer
+	observer     Observer
 }
 
 type pacer struct{ next time.Time }
 
-func newStream(connection *websocket.Conn, ioTimeout, closeTimeout time.Duration) *Stream {
+func newStream(connection *websocket.Conn, ioTimeout, closeTimeout time.Duration, observers ...Observer) *Stream {
 	stream := &Stream{
 		connection:   connection,
 		ioTimeout:    ioTimeout,
@@ -39,6 +41,9 @@ func newStream(connection *websocket.Conn, ioTimeout, closeTimeout time.Duration
 		done:         make(chan struct{}),
 		writer:       make(chan struct{}, 1),
 		ready:        true,
+	}
+	if len(observers) > 0 {
+		stream.observer = observers[0]
 	}
 	stream.writer <- struct{}{}
 	go stream.readOutputs()
@@ -181,6 +186,11 @@ func (s *Stream) readOutputs() {
 		if !s.isReady() {
 			return
 		}
+		if s.observer != nil {
+			processing, _ := control.fields["processingMs"].(json.Number)
+			millis, _ := processing.Float64()
+			s.observer.ObserveRVCBlockMillis(millis)
+		}
 		select {
 		case s.outputs <- block:
 			outputStart += BlockSamples
@@ -224,13 +234,54 @@ func (s *Stream) fail(err error) {
 		err = ErrDisconnected
 	}
 	s.mu.Lock()
-	if !s.closed {
+	firstFailure := !s.closed
+	if firstFailure {
 		s.err = err
 		s.ready = false
 		s.closed = true
 	}
 	s.mu.Unlock()
+	if firstFailure && s.observer != nil {
+		s.observer.ObserveRVCError(errorCode(err))
+	}
 	_ = s.connection.Close()
+}
+
+func errorCode(err error) string {
+	switch {
+	case errors.Is(err, ErrInvalidEndpoint):
+		return "invalid_endpoint"
+	case errors.Is(err, ErrInvalidStart):
+		return "invalid_start"
+	case errors.Is(err, ErrInvalidReady):
+		return "invalid_ready"
+	case errors.Is(err, ErrInvalidFrame):
+		return "invalid_frame"
+	case errors.Is(err, ErrInvalidControl):
+		return "invalid_control"
+	case errors.Is(err, ErrInvalidMetrics):
+		return "invalid_metrics"
+	case errors.Is(err, ErrInvalidBlock):
+		return "invalid_block"
+	case errors.Is(err, ErrBackpressure):
+		return "backpressure"
+	case errors.Is(err, ErrTimeout):
+		return "timeout"
+	case errors.Is(err, ErrBusy):
+		return "busy"
+	case errors.Is(err, ErrModelUnavailable):
+		return "model_unavailable"
+	case errors.Is(err, ErrOverloaded):
+		return "overloaded"
+	case errors.Is(err, ErrStalled):
+		return "stalled"
+	case errors.Is(err, ErrClose):
+		return "close_failed"
+	case errors.Is(err, ErrRemote):
+		return "remote"
+	default:
+		return "disconnected"
+	}
 }
 
 func (s *Stream) isClosing() bool {

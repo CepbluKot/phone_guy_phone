@@ -12,22 +12,40 @@ import (
 	"net/url"
 	"strings"
 
+	"voice-changer/internal/phonebook"
+	"voice-changer/internal/telemetry"
 	"voice-changer/internal/voiceconfig"
 )
 
 const maxBodyBytes = 4 << 10
 
 type Handler struct {
-	store    voiceconfig.RouteStore
-	password []byte
-	origins  map[string]struct{}
-	sessions *sessions
-	logger   *log.Logger
+	store        voiceconfig.RouteStore
+	password     []byte
+	origins      map[string]struct{}
+	sessions     *sessions
+	logger       *log.Logger
+	authDisabled bool
+	metrics      func() telemetry.TelemetrySnapshot
+	phones       *phonebook.Store
 }
 
-func NewHandler(store voiceconfig.RouteStore, password, origins string, logger *log.Logger) http.Handler {
+func NewHandler(store voiceconfig.RouteStore, password, origins string, logger *log.Logger, authDisabled ...bool) http.Handler {
+	return newHandler(store, password, origins, logger, authDisabled, nil)
+}
+
+func NewHandlerWithMetrics(store voiceconfig.RouteStore, password, origins string, logger *log.Logger, authDisabled bool, metrics func() telemetry.TelemetrySnapshot, phoneStores ...*phonebook.Store) http.Handler {
+	var phones *phonebook.Store
+	if len(phoneStores) > 0 {
+		phones = phoneStores[0]
+	}
+	return newHandler(store, password, origins, logger, []bool{authDisabled}, metrics, phones)
+}
+
+func newHandler(store voiceconfig.RouteStore, password, origins string, logger *log.Logger, authDisabled []bool, metrics func() telemetry.TelemetrySnapshot, phones ...*phonebook.Store) http.Handler {
 	allowedOrigins, validOrigins := parseOrigins(origins)
-	if !validOrigins || store == nil || password == "" {
+	disabled := len(authDisabled) > 0 && authDisabled[0]
+	if !validOrigins || store == nil || (!disabled && password == "") {
 		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			writeError(w, http.StatusServiceUnavailable, "config_unavailable")
 		})
@@ -35,19 +53,51 @@ func NewHandler(store voiceconfig.RouteStore, password, origins string, logger *
 	if logger == nil {
 		logger = log.New(io.Discard, "", 0)
 	}
-	state, err := newSessions()
-	if err != nil {
-		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			writeError(w, http.StatusServiceUnavailable, "config_unavailable")
-		})
+	var state *sessions
+	if !disabled {
+		var err error
+		state, err = newSessions()
+		if err != nil {
+			return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				writeError(w, http.StatusServiceUnavailable, "config_unavailable")
+			})
+		}
 	}
-	h := &Handler{store: store, password: []byte(password), origins: allowedOrigins, sessions: state, logger: logger}
+	h := &Handler{store: store, password: []byte(password), origins: allowedOrigins, sessions: state, logger: logger, authDisabled: disabled, metrics: metrics}
+	if len(phones) > 0 {
+		h.phones = phones[0]
+	}
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /admin/api/v1/auth-mode", h.authMode)
 	mux.HandleFunc("POST /admin/api/v1/session", h.login)
 	mux.HandleFunc("DELETE /admin/api/v1/session", h.logout)
 	mux.HandleFunc("GET /admin/api/v1/voice-routes", h.getRoutes)
+	if metrics != nil {
+		mux.HandleFunc("GET /admin/api/v1/metrics", h.getMetrics)
+	}
+	if h.phones != nil {
+		mux.HandleFunc("GET /admin/api/v1/phones", h.getPhones)
+		mux.HandleFunc("POST /admin/api/v1/phones", h.addPhone)
+		mux.HandleFunc("PUT /admin/api/v1/phones/{mac}", h.updatePhone)
+	}
 	mux.HandleFunc("PUT /admin/api/v1/voice-routes/{extension}", h.putRoute)
 	return mux
+}
+
+func (h *Handler) getMetrics(w http.ResponseWriter, r *http.Request) {
+	if _, _, ok := h.authorize(w, r, false); !ok {
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(h.metrics())
+}
+
+func (h *Handler) authMode(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(struct {
+		Required bool `json:"required"`
+	}{Required: !h.authDisabled})
 }
 
 func parseOrigins(raw string) (map[string]struct{}, bool) {
@@ -64,6 +114,10 @@ func parseOrigins(raw string) (map[string]struct{}, bool) {
 }
 
 func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
+	if h.authDisabled {
+		writeError(w, http.StatusNotFound, "not_found")
+		return
+	}
 	if !h.validOrigin(r) {
 		writeError(w, http.StatusForbidden, "unauthorized")
 		return
@@ -96,6 +150,10 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
+	if h.authDisabled {
+		writeError(w, http.StatusNotFound, "not_found")
+		return
+	}
 	id, _, ok := h.authorize(w, r, true)
 	if !ok {
 		return
@@ -153,6 +211,9 @@ func (h *Handler) authorize(w http.ResponseWriter, r *http.Request, write bool) 
 	if write && !h.validOrigin(r) {
 		writeError(w, http.StatusForbidden, "unauthorized")
 		return "", session{}, false
+	}
+	if h.authDisabled {
+		return "", session{}, true
 	}
 	cookie, err := r.Cookie(sessionCookieName)
 	if err != nil {

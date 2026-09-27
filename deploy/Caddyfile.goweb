@@ -11,6 +11,10 @@ https://vm-voice-1.lan.awesomeio.ru {
 	handle /ws/live-mirror {
 		reverse_proxy 192.168.20.70:8080
 	}
+	handle /ws/phone-signaling {
+		rewrite * /ws
+		reverse_proxy 127.0.0.1:8092
+	}
 	handle /ws/rvc-v2 {
 		reverse_proxy 127.0.0.1:8090
 	}

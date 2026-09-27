@@ -20,9 +20,13 @@ import (
 	"voice-changer/internal/ari"
 	"voice-changer/internal/calls"
 	"voice-changer/internal/conference"
+	"voice-changer/internal/hostmetrics"
+	"voice-changer/internal/phonebook"
 	"voice-changer/internal/rvc"
 	"voice-changer/internal/selfmonitor"
+	"voice-changer/internal/telemetry"
 	"voice-changer/internal/voiceconfig"
+	"voice-changer/internal/webphone"
 )
 
 const contentSecurityPolicy = "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' wss://vm-voice-1.lan.awesomeio.ru; frame-ancestors 'none'; base-uri 'none'"
@@ -67,31 +71,46 @@ func run() error {
 	if routesPath == "" {
 		routesPath = "/etc/voice-changer/voice-routing.json"
 	}
-	routes, err := voiceconfig.Open(routesPath, []string{"1983", "1987", "1988", "2014"})
+	configuredExtensions := []string{"1983", "1987", "1988", "2014"}
+	routes, err := voiceconfig.Open(routesPath, configuredExtensions)
 	if err != nil {
 		return errors.New("route configuration unavailable")
 	}
-	passwordPath := os.Getenv("VOICE_ADMIN_PASSWORD_FILE")
-	if passwordPath == "" {
-		return errors.New("admin password file unavailable")
+	phonebookPath := os.Getenv("VOICE_PHONEBOOK_FILE")
+	if phonebookPath == "" {
+		phonebookPath = "/etc/voice-changer/phonebook.json"
 	}
-	passwordInfo, err := os.Stat(passwordPath)
-	if err != nil || !passwordInfo.Mode().IsRegular() || passwordInfo.Mode().Perm()&0o077 != 0 {
-		return errors.New("admin password file unavailable")
-	}
-	passwordBytes, err := os.ReadFile(passwordPath)
+	phones, err := phonebook.Open(phonebookPath, configuredExtensions)
 	if err != nil {
-		return errors.New("admin password file unavailable")
+		return errors.New("phonebook configuration unavailable")
 	}
-	password := strings.TrimSuffix(strings.TrimSuffix(string(passwordBytes), "\n"), "\r")
+	authDisabled := os.Getenv("VOICE_ADMIN_AUTH_DISABLED") == "true"
+	passwordPath := os.Getenv("VOICE_ADMIN_PASSWORD_FILE")
+	var passwordBytes []byte
+	var password string
+	if !authDisabled {
+		if passwordPath == "" {
+			return errors.New("admin password file unavailable")
+		}
+		passwordInfo, err := os.Stat(passwordPath)
+		if err != nil || !passwordInfo.Mode().IsRegular() || passwordInfo.Mode().Perm()&0o077 != 0 {
+			return errors.New("admin password file unavailable")
+		}
+		passwordBytes, err = os.ReadFile(passwordPath)
+		if err != nil {
+			return errors.New("admin password file unavailable")
+		}
+		password = strings.TrimSuffix(strings.TrimSuffix(string(passwordBytes), "\n"), "\r")
+		if len(passwordBytes) == 0 || password == "" {
+			return errors.New("admin password file unavailable")
+		}
+	}
 	origin := os.Getenv("VOICE_ADMIN_ORIGIN")
 	if origin == "" {
 		return errors.New("admin origin allowlist unavailable")
 	}
-	adminAPI := admin.NewHandler(routes, password, origin, log.Default())
-	if len(passwordBytes) == 0 || password == "" {
-		return errors.New("admin password file unavailable")
-	}
+	metrics := telemetry.NewCollector()
+	adminAPI := admin.NewHandlerWithMetrics(routes, password, origin, log.Default(), authDisabled, func() telemetry.TelemetrySnapshot { return metrics.Snapshot(time.Now()) }, phones)
 	for i := range passwordBytes {
 		passwordBytes[i] = 0
 	}
@@ -120,18 +139,55 @@ func run() error {
 		address = ":8080"
 	}
 
-	conferenceHandler, mirrorHandler, voiceControl, mirrorControl, closeVoice, err := setupVoiceControl(routes, origin)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	conferenceHandler, mirrorHandler, voiceControl, mirrorControl, closeVoice, callRouter, hangupBrowser, err := setupVoiceControl(routes, origin, metrics, ctx)
 	if err != nil {
 		return errors.New("voice control unavailable")
 	}
 	defer closeVoice()
+	var phoneAPI http.Handler
+	var phoneARI *ari.Client
+	if os.Getenv("VOICE_ARI_PASSWORD_FILE") != "" {
+		phoneARI, err = newPhoneARIClient()
+		if err != nil {
+			return errors.New("browser phone ARI unavailable")
+		}
+		defer phoneARI.Close(context.Background())
+		directoryPath := envOr("VOICE_PHONE_DIRECTORY_FILE", "/etc/voice-changer/webphone-directory.json")
+		directory, openErr := webphone.OpenDirectory(directoryPath, configuredExtensions)
+		if openErr != nil {
+			return errors.New("browser phone directory unavailable")
+		}
+		sessions, sessionErr := webphone.NewSessions(directory, phoneARI, "wss://vm-voice-1.lan.awesomeio.ru/ws/phone-signaling")
+		if sessionErr != nil {
+			return errors.New("browser phone session unavailable")
+		}
+		if callRouter != nil {
+			sessions.SetEndpointObserver(callRouter.SetBrowserEndpoint)
+		}
+		phoneHandler, apiErr := webphone.NewAPI(sessions, origin, func() map[string]string {
+			labels := make(map[string]string)
+			for _, device := range phones.Snapshot().Devices {
+				if device.Extension != "" {
+					labels[device.Extension] = device.Label
+				}
+			}
+			return labels
+		})
+		if apiErr != nil {
+			return errors.New("browser phone API unavailable")
+		}
+		phoneHandler.(*webphone.API).SetBrowserHangupHandler(hangupBrowser)
+		phoneAPI = phoneHandler
+		defer sessions.Close(context.Background())
+		go sessions.RunSweeper(ctx)
+	}
 	server := &http.Server{
 		Addr:              address,
-		Handler:           newAppHandler(root, adminAPI, conferenceHandler, mirrorHandler),
+		Handler:           newAppHandler(root, adminAPI, conferenceHandler, mirrorHandler, phoneAPI),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
 
 	result := make(chan error, 1)
 	controlResult := make(chan error, 1)
@@ -141,6 +197,8 @@ func run() error {
 			controlResult <- voiceControl(ctx, func(err error) { log.Printf("voice-control: %v", err) })
 		}()
 	}
+	go rvc.PollHealth(ctx, metrics, os.Getenv("VOICE_RVC_HEALTH_URL"))
+	go hostmetrics.Poll(ctx, metrics)
 	if mirrorControl != nil {
 		go func() { mirrorResult <- mirrorControl(ctx, func(err error) { log.Printf("selfmonitor: %v", err) }) }()
 	}
@@ -201,6 +259,28 @@ func envOr(name, fallback string) string {
 	return fallback
 }
 
+func newPhoneARIClient() (*ari.Client, error) {
+	path := os.Getenv("VOICE_ARI_PASSWORD_FILE")
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 || info.Size() == 0 || info.Size() > 4096 {
+		return nil, errors.New("ari password unavailable")
+	}
+	passwordBytes, err := os.ReadFile(path)
+	if err != nil {
+		return nil, errors.New("ari password unavailable")
+	}
+	password := strings.TrimRight(string(passwordBytes), "\r\n")
+	for i := range passwordBytes {
+		passwordBytes[i] = 0
+	}
+	if password == "" {
+		return nil, errors.New("ari password unavailable")
+	}
+	client, err := ari.NewClient(envOr("VOICE_ARI_URL", "http://127.0.0.1:8092/ari"), envOr("VOICE_ARI_USERNAME", "phoneguy"), password, "voice-control")
+	password = ""
+	return client, err
+}
+
 func loopbackTCPAddress(address string) bool {
 	host, port, err := net.SplitHostPort(address)
 	if err != nil {
@@ -211,25 +291,25 @@ func loopbackTCPAddress(address string) bool {
 	return err == nil && ip != nil && ip.IsLoopback() && portNumber > 0 && portNumber <= 65535
 }
 
-func setupVoiceControl(routes *voiceconfig.Store, adminOrigins string) (http.Handler, http.Handler, serveVoiceControl, serveVoiceControl, func() error, error) {
+func setupVoiceControl(routes *voiceconfig.Store, adminOrigins string, metrics *telemetry.Collector, ctx context.Context) (http.Handler, http.Handler, serveVoiceControl, serveVoiceControl, func() error, *calls.Router, func(context.Context, string) error, error) {
 	passwordPath := os.Getenv("VOICE_ARI_PASSWORD_FILE")
 	if passwordPath == "" {
-		return nil, nil, nil, nil, func() error { return nil }, nil
+		return nil, nil, nil, nil, func() error { return nil }, nil, nil, nil
 	}
 	passwordInfo, err := os.Stat(passwordPath)
 	if err != nil || !passwordInfo.Mode().IsRegular() || passwordInfo.Mode().Perm()&0o077 != 0 || passwordInfo.Size() == 0 || passwordInfo.Size() > 4096 {
-		return nil, nil, nil, nil, nil, errors.New("ari password unavailable")
+		return nil, nil, nil, nil, nil, nil, nil, errors.New("ari password unavailable")
 	}
 	passwordBytes, err := os.ReadFile(passwordPath)
 	if err != nil {
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, nil, err
 	}
 	password := strings.TrimRight(string(passwordBytes), "\r\n")
 	for index := range passwordBytes {
 		passwordBytes[index] = 0
 	}
 	if password == "" {
-		return nil, nil, nil, nil, nil, errors.New("ari password unavailable")
+		return nil, nil, nil, nil, nil, nil, nil, errors.New("ari password unavailable")
 	}
 	ariURL := os.Getenv("VOICE_ARI_URL")
 	if ariURL == "" {
@@ -242,25 +322,40 @@ func setupVoiceControl(routes *voiceconfig.Store, adminOrigins string) (http.Han
 	client, err := ari.NewClient(ariURL, username, password, "voice-control")
 	if err != nil {
 		password = ""
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, nil, err
 	}
 	mirrorSettings, err := selfmonitorRuntimeSettings()
 	if err != nil {
 		password = ""
 		_ = client.Close(context.Background())
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, nil, err
 	}
 	mirrorClient, err := ari.NewClient(ariURL, username, password, mirrorSettings.app)
 	password = ""
 	if err != nil {
 		_ = client.Close(context.Background())
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, nil, err
 	}
 	router, err := calls.NewRouter(routes, []string{"1983", "1987", "1988", "2014"})
 	if err != nil {
 		_ = client.Close(context.Background())
 		_ = mirrorClient.Close(context.Background())
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, nil, err
+	}
+	if metrics != nil {
+		go func() {
+			ticker := time.NewTicker(time.Second)
+			defer ticker.Stop()
+			for {
+				active, limit := router.ProcessingCapacity()
+				metrics.SetCallState(active, limit)
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+				}
+			}
+		}()
 	}
 	modelURL := os.Getenv("VOICE_RVC_URL")
 	var model *rvc.Client
@@ -272,26 +367,29 @@ func setupVoiceControl(routes *voiceconfig.Store, adminOrigins string) (http.Han
 	if err != nil {
 		_ = client.Close(context.Background())
 		_ = mirrorClient.Close(context.Background())
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, nil, err
+	}
+	if metrics != nil {
+		model.SetObserver(metrics)
 	}
 	controller, err := calls.NewController("voice-control", calls.ARIAdapter{Client: client}, router, model)
 	if err != nil {
 		_ = client.Close(context.Background())
 		_ = mirrorClient.Close(context.Background())
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, nil, err
 	}
 	events, err := client.Subscribe(context.Background())
 	if err != nil {
 		_ = client.Close(context.Background())
 		_ = mirrorClient.Close(context.Background())
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, nil, err
 	}
 	mirrorEvents, err := mirrorClient.Subscribe(context.Background())
 	if err != nil {
 		_ = events.Close()
 		_ = client.Close(context.Background())
 		_ = mirrorClient.Close(context.Background())
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, nil, err
 	}
 	monitor, err := selfmonitor.New(calls.ARIAdapter{Client: mirrorClient}, selfmonitor.NewRelay())
 	if err != nil {
@@ -299,7 +397,7 @@ func setupVoiceControl(routes *voiceconfig.Store, adminOrigins string) (http.Han
 		_ = mirrorEvents.Close()
 		_ = client.Close(context.Background())
 		_ = mirrorClient.Close(context.Background())
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, nil, err
 	}
 	var manager *conference.Manager
 	var socket http.Handler
@@ -312,7 +410,7 @@ func setupVoiceControl(routes *voiceconfig.Store, adminOrigins string) (http.Han
 			_ = mirrorEvents.Close()
 			_ = client.Close(context.Background())
 			_ = mirrorClient.Close(context.Background())
-			return nil, nil, nil, nil, nil, sourceErr
+			return nil, nil, nil, nil, nil, nil, nil, sourceErr
 		}
 		manager, err = conference.NewManager(calls.ARIAdapter{Client: client}, model, source, conference.Options{})
 		if err != nil {
@@ -320,7 +418,7 @@ func setupVoiceControl(routes *voiceconfig.Store, adminOrigins string) (http.Han
 			_ = mirrorEvents.Close()
 			_ = client.Close(context.Background())
 			_ = mirrorClient.Close(context.Background())
-			return nil, nil, nil, nil, nil, err
+			return nil, nil, nil, nil, nil, nil, nil, err
 		}
 		controller.SetConferenceJoiner(manager)
 		socket = conference.NewHandler(manager, "https://voice.lan.awesomeio.ru", "https://vm-voice-1.lan.awesomeio.ru")
@@ -351,7 +449,7 @@ func setupVoiceControl(routes *voiceconfig.Store, adminOrigins string) (http.Han
 	mirrorServe := func(ctx context.Context, _ func(error)) error {
 		return monitor.ServeAt(ctx, mirrorEvents, mirrorSettings.publisherAddr, mirrorSettings.healthAddr)
 	}
-	return socket, mirrorSocket, serve, mirrorServe, closer, nil
+	return socket, mirrorSocket, serve, mirrorServe, closer, router, controller.HangupBrowserEndpoint, nil
 }
 
 func newHandler(webRoot string) http.Handler {
@@ -398,6 +496,13 @@ func newAppHandler(webRoot string, adminAPI http.Handler, realtimeHandlers ...ht
 		}
 		serveFile(webRoot, "live/index.html", w, r)
 	})
+	mux.HandleFunc("GET /phone/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/phone/" {
+			http.NotFound(w, r)
+			return
+		}
+		serveFile(webRoot, "phone.html", w, r)
+	})
 	mux.HandleFunc("GET /admin/assets/", func(w http.ResponseWriter, r *http.Request) {
 		rel := strings.TrimPrefix(r.URL.Path, "/admin/assets/")
 		if !fs.ValidPath(rel) {
@@ -423,7 +528,7 @@ func newAppHandler(webRoot string, adminAPI http.Handler, realtimeHandlers ...ht
 		serveFile(webRoot, rel, w, r)
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/" || r.URL.Path == "/healthz" || r.URL.Path == "/conference/" || r.URL.Path == "/live/" || r.URL.Path == "/admin" || r.URL.Path == "/ws/conference" || r.URL.Path == "/ws/live-mirror" || strings.HasPrefix(r.URL.Path, "/static/") || strings.HasPrefix(r.URL.Path, "/admin/") {
+		if r.URL.Path == "/" || r.URL.Path == "/healthz" || r.URL.Path == "/conference/" || r.URL.Path == "/live/" || r.URL.Path == "/phone" || r.URL.Path == "/admin" || r.URL.Path == "/ws/conference" || r.URL.Path == "/ws/live-mirror" || strings.HasPrefix(r.URL.Path, "/static/") || strings.HasPrefix(r.URL.Path, "/admin/") || strings.HasPrefix(r.URL.Path, "/phone/") {
 			w.Header().Set("Allow", "GET, HEAD")
 			http.Error(w, `{"detail":"Method Not Allowed"}`, http.StatusMethodNotAllowed)
 			return
@@ -441,6 +546,16 @@ func newAppHandler(webRoot string, adminAPI http.Handler, realtimeHandlers ...ht
 		}
 		if r.URL.Path == "/admin/api/v1" || strings.HasPrefix(r.URL.Path, "/admin/api/v1/") {
 			adminAPI.ServeHTTP(w, r)
+			return
+		}
+		if r.URL.Path == "/phone/api/v1" || strings.HasPrefix(r.URL.Path, "/phone/api/v1/") {
+			phoneAPI := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				http.Error(w, `{"error":"phone_unavailable"}`, http.StatusServiceUnavailable)
+			}))
+			if len(realtimeHandlers) > 2 && realtimeHandlers[2] != nil {
+				phoneAPI = realtimeHandlers[2]
+			}
+			phoneAPI.ServeHTTP(w, r)
 			return
 		}
 		mux.ServeHTTP(w, r)

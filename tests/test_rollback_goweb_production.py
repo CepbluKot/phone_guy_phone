@@ -50,7 +50,9 @@ def fixture(tmp_path):
         "selfmonitor_was_active=active\n"
         "selfmonitor_was_enabled=enabled\n"
         "http_container_was_running=stopped\n"
+        "phonebook_was_present=false\n"
     )
+    (backup / "phonebook-absent").write_text("")
     owner = root / "opt" / "voice-changer" / ".go-runtime-owner"
     owner.parent.mkdir(parents=True, exist_ok=True)
     owner.write_text(STAMP + "\n")

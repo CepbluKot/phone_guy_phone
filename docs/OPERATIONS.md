@@ -11,6 +11,49 @@ UI: https://voice.lan.awesomeio.ru/ через VPN. Наушники → обн�
 
 ## Возможности и ограничения
 
+### Admin load dashboard (implementation status: local source only)
+
+The React admin now has a Load page backed by `GET /admin/api/v1/metrics`.
+It reports the one-call Go admission limit, read-only gate occupancy, RVC
+health/queue freshness, a bounded five-minute p50/p95 of validated RVC
+`processingMs` observations, and host/RVC CPU and RAM when their read-only
+sources are mounted. The handler uses the same admin authorization policy as
+phone routes and returns `Cache-Control: no-store`.
+
+The measured capacity estimate intentionally remains **not measured**. No
+isolated multi-session run has been accepted. GPU/VRAM remains unavailable
+because there is no restricted live metrics source. The Go container receives
+only read-only `/proc/stat`, `/proc/meminfo`, and the `voice-rvc.service`
+cgroup mounts; it has no Docker socket or host PID access. RVC CPU usage is
+normalized to the service CPU quota, and RVC RAM is compared with its memory
+limit. These mounts have
+not been validated in a deployed container yet. This feature has not been
+deployed to VM209; do not treat a successful local build as evidence about the
+live admin.
+
+The Go service polls only its loopback RVC health URL (five-second interval,
+two-second timeout; stale after 15 seconds). Processing samples and error
+codes are bounded in memory, and the metrics path does not collect PCM, SIP
+credentials, caller IDs, or provisioning responses. The existing production
+limit remains one in both Go and Python.
+
+### Physical phone discovery and provisioning prerequisites
+
+The Go admin's phonebook maps MAC addresses to configured SIP extensions for
+administrative tracking only. It does not change a handset account, Asterisk
+endpoint, or voice route. Initial rows are seeded from point-in-time PJSIP and
+neighbor observations; the UI labels their IP and observation date as history.
+Additional phones can be entered manually. Do not interpret those rows as live
+registration or automatic discovery.
+
+Do not enable a credential-bearing provisioning URL until handset model and
+firmware, certificate trust, stable approved source IP, and a constrained
+Asterisk apply/reload path have been verified. The current deployment has no
+verified read-only DHCP lease API and no confirmed AMI contact reader. Existing
+PJSIP registrations can be inspected operationally, but an IP address alone is
+not sufficient to identify or enroll a physical handset. Keep provisioning
+disabled while these prerequisites are unresolved.
+
 RVC меняет тембр моделью PhoneGuyfnaf1V1 на GPU VM209. Capture48kHz mono PCM16,
 20мс кадры; выход2с фрагментами. Одновременно допускается одна RVC-сессия.
 «Доп. задержка»0–10с, шаг.5с, default5. Это сдвиг непрерывного потока, не ожидание
@@ -121,6 +164,56 @@ rvc_service/requirements.lock — отдельные точные pins нейр�
   для ограничения одной сессии.
 - VM: 4 vCPU, 4 GiB RAM, 64 GiB local-lvm. Frigate имеет свою VM 208;
   физический Proxmox хост остаётся общим.
+
+## Браузерный внутренний телефон
+
+**Статус:** размещено на VM209, release `20260926T180933Z`. Проверены `/phone/`
+через `voice.lan`, Go API, WSS через Caddy VM, успешная SIP-регистрация браузера
+и немедленное освобождение lease. После проверки временный ник удалён, каталог
+восстановлен, Go перезапущен; сессий и динамических `web-*` endpoint нет.
+Физические регистрации `1983` и `1988` сохранены; активных каналов нет.
+
+React-страница `/phone/` использует Go API на том же HTTPS origin для каталога,
+выдачи временной сессии, heartbeat и освобождения. SIP.js подключается напрямую
+по `wss://vm-voice-1.lan.awesomeio.ru/ws/phone-signaling`; Caddy VM переписывает
+только этот маршрут на loopback Asterisk HTTP `/ws`. ARI остаётся на
+`127.0.0.1:8092`, RTP — в существующем частном диапазоне `10000-10019/udp`.
+
+Go хранит каталог в `/etc/voice-changer/webphone-directory.json` (schemaVersion
+1, mode `0600`, UID/GID `10001`). Там только ник и настроенный внутренний номер.
+На один номер разрешена одна браузерная сессия; физический телефон остаётся
+зарегистрированным. Go продлевает lease каждые 10 секунд, истёкший lease
+отзывает динамические PJSIP endpoint/AOR/auth через ARI до освобождения номера.
+Временный пароль выдаётся только в ответе claim по HTTPS и находится в памяти
+страницы. Не копировать claim-ответы, пароли, SIP payload или аудио в логи и
+файлы.
+
+Проверка при диагностике:
+
+```bash
+ssh ubuntu@192.168.20.70 'sudo docker exec voice-conference-asterisk-1 asterisk -rx "pjsip show transports"'
+ssh ubuntu@192.168.20.70 'sudo docker exec voice-conference-asterisk-1 asterisk -rx "pjsip show endpoints"'
+curl -fsS https://voice.lan.awesomeio.ru/phone/api/v1/directory
+```
+
+Не открывать публичные SIP/RTP/ARI порты ради браузера. Если WSS-регистрация,
+DTLS-SRTP или приватный RTP путь не подтверждаются, отключить браузерную сессию
+и использовать Go production rollback stamp из deployment output.
+
+На VM первые две попытки update были автоматически отменены preflight/smoke:
+runtime Asterisk переопределил модульный список и smoke обращался не к тому
+приватному адресу. Исправленный update прошёл полностью; сохранённая точка
+возврата: `/opt/voice-go/updates/20260926T180933Z`. Для отката именно этого
+обновления из checkout выполнить:
+
+```bash
+./deploy/rollback-goweb-update.sh 20260926T180933Z
+```
+
+Регистрация в браузере подтверждает SIP signaling/authentication. Реальный
+звонок, DTLS-SRTP/RTP аудио, параллельный ответ двух устройств и обработку RVC
+в разговоре ещё не проверяли: такая проверка позвонила бы подключённым физическим
+аппаратам. Не считать эти call/media сценарии принятой live-приёмкой.
 
 ```bash
 curl -fsS https://voice.lan.awesomeio.ru/healthz

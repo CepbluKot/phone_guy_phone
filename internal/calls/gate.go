@@ -16,6 +16,16 @@ type sessionLease struct {
 
 func newSessionGate() *sessionGate { return &sessionGate{token: make(chan struct{}, 1)} }
 
+// Active returns current lease occupancy without changing admission state.
+func (gate *sessionGate) Active() int {
+	if gate == nil {
+		return 0
+	}
+	return len(gate.token)
+}
+
+func (gate *sessionGate) Limit() int { return 1 }
+
 func (gate *sessionGate) Acquire(ctx context.Context) (*sessionLease, error) {
 	if ctx == nil {
 		ctx = context.Background()
