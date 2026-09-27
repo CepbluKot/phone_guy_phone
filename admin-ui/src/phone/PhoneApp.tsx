@@ -41,6 +41,7 @@ export function PhoneApp() {
   const sipRef = useRef<BrowserSIPSession | undefined>(undefined);
   const sessionIdRef = useRef("");
   const connected = registration === "registered";
+  const callModalVisible = callStatus === "ringing" || callStatus === "connected";
   const targetOptions = useMemo(() => people.filter((person) => person.extension !== extension), [people, extension]);
   const activePeer = people.find((person) => person.extension === peerExtension);
   const activePeerName = activePeer?.nickname || peerExtension || "Внутренний номер";
@@ -287,9 +288,9 @@ export function PhoneApp() {
   return (
     <main className="phone-shell">
       <div
-        className={`phone-app-background${callStatus === "connected" ? " is-blurred" : ""}`}
-        aria-hidden={callStatus === "connected" ? true : undefined}
-        inert={callStatus === "connected"}
+        className={`phone-app-background${callModalVisible ? " is-blurred" : ""}`}
+        aria-hidden={callModalVisible ? true : undefined}
+        inert={callModalVisible}
       >
         <header className="phone-topbar">
           <a className="phone-brand" href="/phone/" aria-label="Voice phone home"><span className="phone-mark">V</span><span>Voice desk</span></a>
@@ -331,26 +332,39 @@ export function PhoneApp() {
           <footer className="phone-footer"><span><i className={connected ? "is-online" : ""} />{connected ? "Сигнализация защищена TLS" : "Подключение доступно в частной сети"}</span><a href="/admin/">Управление профилями →</a></footer>
         </div>
       </div>
-      {callStatus === "connected" && (
+      {callModalVisible && (
         <div className="phone-call-overlay">
-          <section className="phone-call-modal" role="dialog" aria-modal="true" aria-labelledby="active-call-name">
-            <div className="phone-call-avatar" aria-hidden="true">{activePeerName.slice(0, 1).toLocaleUpperCase()}</div>
-            <span className="phone-call-connected"><i /> Идёт разговор</span>
-            <h2 id="active-call-name">{activePeerName}</h2>
-            <p className="phone-call-extension">Внутренний номер · {peerExtension || target}</p>
-            <p className="phone-call-duration" aria-label={`Длительность звонка ${formatElapsed(elapsedSeconds)}`}>{formatElapsed(elapsedSeconds)}</p>
-            <div className="phone-call-audio-controls" aria-label="Управление звуком звонка">
-              <button type="button" className={`phone-call-audio-toggle${microphoneMuted ? " is-muted" : ""}`} aria-pressed={microphoneMuted} onClick={toggleMicrophone}>
-                {microphoneMuted ? "Включить микрофон" : "Выключить микрофон"}
-              </button>
-              <button type="button" className={`phone-call-audio-toggle${speakerMuted ? " is-muted" : ""}`} aria-pressed={speakerMuted} onClick={toggleSpeaker}>
-                {speakerMuted ? "Включить звук собеседника" : "Выключить звук собеседника"}
-              </button>
-            </div>
-            {audioSettings}
-            {audioPlaybackError && <><p className="phone-call-audio-error" role="alert">{audioPlaybackError}</p><button className="phone-audio-retry" onClick={() => void sipRef.current?.resumeAudio()}>Включить звук</button></>}
-            <button className="phone-hangup-button phone-modal-hangup" onClick={() => void stopCall()} disabled={busy}>Завершить звонок <span>×</span></button>
-          </section>
+          {callStatus === "ringing" ? (
+            <section className="phone-call-modal phone-incoming-call-modal" role="dialog" aria-modal="true" aria-labelledby="incoming-call-name">
+              <div className="phone-call-avatar" aria-hidden="true">{activePeerName.slice(0, 1).toLocaleUpperCase()}</div>
+              <span className="phone-call-ringing"><i /> Входящий вызов</span>
+              <h2 id="incoming-call-name">{activePeerName}</h2>
+              <p className="phone-call-extension">Внутренний номер · {peerExtension || "неизвестен"}</p>
+              <div className="phone-incoming-actions">
+                <button className="phone-answer-button" onClick={() => void sipRef.current?.answer()} disabled={busy}>Ответить <span>✓</span></button>
+                <button className="phone-reject-button" onClick={() => void sipRef.current?.decline()} disabled={busy}>Отклонить <span>×</span></button>
+              </div>
+            </section>
+          ) : (
+            <section className="phone-call-modal" role="dialog" aria-modal="true" aria-labelledby="active-call-name">
+              <div className="phone-call-avatar" aria-hidden="true">{activePeerName.slice(0, 1).toLocaleUpperCase()}</div>
+              <span className="phone-call-connected"><i /> Идёт разговор</span>
+              <h2 id="active-call-name">{activePeerName}</h2>
+              <p className="phone-call-extension">Внутренний номер · {peerExtension || target}</p>
+              <p className="phone-call-duration" aria-label={`Длительность звонка ${formatElapsed(elapsedSeconds)}`}>{formatElapsed(elapsedSeconds)}</p>
+              <div className="phone-call-audio-controls" aria-label="Управление звуком звонка">
+                <button type="button" className={`phone-call-audio-toggle${microphoneMuted ? " is-muted" : ""}`} aria-pressed={microphoneMuted} onClick={toggleMicrophone}>
+                  {microphoneMuted ? "Включить микрофон" : "Выключить микрофон"}
+                </button>
+                <button type="button" className={`phone-call-audio-toggle${speakerMuted ? " is-muted" : ""}`} aria-pressed={speakerMuted} onClick={toggleSpeaker}>
+                  {speakerMuted ? "Включить звук собеседника" : "Выключить звук собеседника"}
+                </button>
+              </div>
+              {audioSettings}
+              {audioPlaybackError && <><p className="phone-call-audio-error" role="alert">{audioPlaybackError}</p><button className="phone-audio-retry" onClick={() => void sipRef.current?.resumeAudio()}>Включить звук</button></>}
+              <button className="phone-hangup-button phone-modal-hangup" onClick={() => void stopCall()} disabled={busy}>Завершить звонок <span>×</span></button>
+            </section>
+          )}
         </div>
       )}
       <audio ref={audioRef} autoPlay playsInline muted={speakerMuted} />
