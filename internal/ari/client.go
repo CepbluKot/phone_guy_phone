@@ -29,8 +29,10 @@ var dynamicPJSIPFields = map[string]map[string]struct{}{
 }
 
 const (
-	defaultTimeout = 10 * time.Second
-	secretLimit    = 4 << 10
+	defaultTimeout    = 10 * time.Second
+	secretLimit       = 4 << 10
+	eventReadTimeout  = 60 * time.Second
+	eventPingInterval = 25 * time.Second
 )
 
 var (
@@ -72,6 +74,8 @@ type Client struct {
 	username           string
 	password           string
 	timeout            time.Duration
+	eventReadTimeout   time.Duration
+	eventPingInterval  time.Duration
 	http               *http.Client
 	mu                 sync.Mutex
 	closed             bool
@@ -135,6 +139,7 @@ func NewClient(baseURL, username, password, app string) (*Client, error) {
 	}
 	return &Client{
 		baseURL: parsed, app: app, username: username, password: password, timeout: defaultTimeout,
+		eventReadTimeout: eventReadTimeout, eventPingInterval: eventPingInterval,
 		http:    &http.Client{Transport: transport, Timeout: defaultTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
 		bridges: make(map[string]*Bridge), channels: make(map[string]*MediaChannel), resources: make(map[string]resourceKind), channelUp: make(map[string]bool), channelGone: make(map[string]bool), channelWaiters: make(map[string]chan error), receiveQueueFrames: defaultMediaQueue,
 	}, nil

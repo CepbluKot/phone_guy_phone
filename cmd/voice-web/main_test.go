@@ -54,6 +54,19 @@ func TestPhonePageAndAPIStayOnTheGoOrigin(t *testing.T) {
 	}
 }
 
+func TestRootRedirectsToBrowserPhone(t *testing.T) {
+	handler := newHandler(testWebRoot(t))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	if response.Code != http.StatusPermanentRedirect {
+		t.Fatalf("GET / status=%d, want %d", response.Code, http.StatusPermanentRedirect)
+	}
+	if got := response.Header().Get("Location"); got != "/phone/" {
+		t.Fatalf("GET / Location=%q, want /phone/", got)
+	}
+}
+
 func TestAdminStaticRoutesStayInsideWebRoot(t *testing.T) {
 	root := testWebRoot(t)
 	secretPath := filepath.Join(root, "outside-admin-secret.txt")
@@ -255,9 +268,11 @@ func TestWebRoutesAndSecurityHeaders(t *testing.T) {
 		path            string
 		wantBody        string
 		wantPermissions string
+		wantStatus      int
+		wantLocation    string
 	}{
 		{path: "/healthz", wantBody: `{"status":"ok"}`, wantPermissions: "microphone=(self)"},
-		{path: "/", wantBody: "main page", wantPermissions: "microphone=(self)"},
+		{path: "/", wantBody: "/phone/", wantPermissions: "microphone=(self)", wantStatus: http.StatusPermanentRedirect, wantLocation: "/phone/"},
 		{path: "/conference/", wantBody: "conference page", wantPermissions: "microphone=()"},
 		{path: "/static/app.js", wantBody: "voiceApp = true", wantPermissions: "microphone=(self)"},
 	}
@@ -265,11 +280,18 @@ func TestWebRoutesAndSecurityHeaders(t *testing.T) {
 		t.Run(tc.path, func(t *testing.T) {
 			recorder := httptest.NewRecorder()
 			handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, tc.path, nil))
-			if recorder.Code != http.StatusOK {
-				t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+			wantStatus := tc.wantStatus
+			if wantStatus == 0 {
+				wantStatus = http.StatusOK
+			}
+			if recorder.Code != wantStatus {
+				t.Fatalf("status = %d, want %d", recorder.Code, wantStatus)
 			}
 			if !strings.Contains(recorder.Body.String(), tc.wantBody) {
 				t.Fatalf("body %q does not contain %q", recorder.Body.String(), tc.wantBody)
+			}
+			if got := recorder.Header().Get("Location"); got != tc.wantLocation {
+				t.Errorf("Location = %q, want %q", got, tc.wantLocation)
 			}
 			if got := recorder.Header().Get("Cache-Control"); got != "no-store" {
 				t.Errorf("Cache-Control = %q, want no-store", got)

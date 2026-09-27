@@ -1,6 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DirectoryEntry, PhoneSession, phoneAPI } from "./api";
 import { BrowserSIPSession, CallStatus, SIPStatus } from "./sipSession";
+import "../design-system.css";
 import "./phone.css";
 
 const labels: Record<string, string> = {
@@ -15,6 +16,11 @@ const labels: Record<string, string> = {
 
 export function PhoneApp() {
   const [people, setPeople] = useState<DirectoryEntry[]>([]);
+  const [audioInputs, setAudioInputs] = useState<MediaDeviceInfo[]>([]);
+  const [audioOutputs, setAudioOutputs] = useState<MediaDeviceInfo[]>([]);
+  const [inputDeviceId, setInputDeviceId] = useState("");
+  const [outputDeviceId, setOutputDeviceId] = useState("");
+  const [audioDeviceError, setAudioDeviceError] = useState("");
   const [nickname, setNickname] = useState("");
   const [extension, setExtension] = useState("");
   const [newExtensionMode, setNewExtensionMode] = useState(false);
@@ -24,10 +30,13 @@ export function PhoneApp() {
   const [registration, setRegistration] = useState<SIPStatus>("offline");
   const [callStatus, setCallStatus] = useState<CallStatus>("idle");
   const [peerExtension, setPeerExtension] = useState("");
+  const [microphoneMuted, setMicrophoneMuted] = useState(false);
+  const [speakerMuted, setSpeakerMuted] = useState(false);
   const [connectedAt, setConnectedAt] = useState<number>();
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [audioPlaybackError, setAudioPlaybackError] = useState("");
   const audioRef = useRef<HTMLAudioElement>(null);
   const sipRef = useRef<BrowserSIPSession | undefined>(undefined);
   const sessionIdRef = useRef("");
@@ -35,6 +44,27 @@ export function PhoneApp() {
   const targetOptions = useMemo(() => people.filter((person) => person.extension !== extension), [people, extension]);
   const activePeer = people.find((person) => person.extension === peerExtension);
   const activePeerName = activePeer?.nickname || peerExtension || "Внутренний номер";
+  const mediaDevices = navigator.mediaDevices as (MediaDevices & { selectAudioOutput?: () => Promise<MediaDeviceInfo> }) | undefined;
+  const supportsOutputSelection = typeof (audioRef.current as (HTMLAudioElement & { setSinkId?: (deviceId: string) => Promise<void> }) | null)?.setSinkId === "function";
+
+  const refreshAudioDevices = useCallback(async () => {
+    if (!navigator.mediaDevices?.enumerateDevices) return;
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const inputs = devices.filter((device) => device.kind === "audioinput");
+    const outputs = devices.filter((device) => device.kind === "audiooutput");
+    setAudioInputs(inputs);
+    setAudioOutputs(outputs);
+    setInputDeviceId((current) => inputs.some((device) => device.deviceId === current) ? current : "");
+    setOutputDeviceId((current) => outputs.some((device) => device.deviceId === current) ? current : "");
+  }, []);
+
+  useEffect(() => {
+    void refreshAudioDevices().catch(() => undefined);
+    const devices = navigator.mediaDevices;
+    const onDeviceChange = () => void refreshAudioDevices().catch(() => undefined);
+    devices?.addEventListener?.("devicechange", onDeviceChange);
+    return () => devices?.removeEventListener?.("devicechange", onDeviceChange);
+  }, [refreshAudioDevices]);
 
   useEffect(() => {
     if (!connectedAt) {
@@ -113,8 +143,14 @@ export function PhoneApp() {
         if (from) setPeerExtension(from);
         if (status === "connected") setConnectedAt(Date.now());
         else setConnectedAt(undefined);
-        if (status === "idle") setPeerExtension("");
-      });
+        if (status === "idle") {
+          setPeerExtension("");
+          setAudioPlaybackError("");
+          setMicrophoneMuted(false);
+          setSpeakerMuted(false);
+          if (audioRef.current) audioRef.current.muted = false;
+        }
+      }, setAudioPlaybackError);
       sipRef.current = sip;
       await sip.connect(claimed.sip, audioRef.current!);
       setSession(claimed.session);
@@ -153,6 +189,18 @@ export function PhoneApp() {
     } finally { setBusy(false); }
   };
 
+  const toggleMicrophone = () => {
+    const muted = !microphoneMuted;
+    sipRef.current?.setMicrophoneMuted(muted);
+    setMicrophoneMuted(muted);
+  };
+
+  const toggleSpeaker = () => {
+    const muted = !speakerMuted;
+    if (audioRef.current) audioRef.current.muted = muted;
+    setSpeakerMuted(muted);
+  };
+
   const labelFor = (person: DirectoryEntry) => {
     const endpoints: string[] = [];
     if (person.physicalPhone) endpoints.push(`физический телефон · ${person.physicalPhone}`);
@@ -166,6 +214,75 @@ export function PhoneApp() {
     const remainder = (seconds % 60).toString().padStart(2, "0");
     return `${minutes}:${remainder}`;
   };
+
+  const showAudioDevices = async () => {
+    const devices = navigator.mediaDevices;
+    if (!devices?.getUserMedia) {
+      setAudioDeviceError("Браузер не предоставляет доступ к аудиоустройствам.");
+      return;
+    }
+    try {
+      const stream = await devices.getUserMedia({ audio: true, video: false });
+      stream.getTracks().forEach((track) => track.stop());
+      await refreshAudioDevices();
+      setAudioDeviceError("");
+    } catch {
+      setAudioDeviceError("Не удалось получить список микрофонов. Проверьте разрешение на микрофон в браузере.");
+    }
+  };
+
+  const chooseInputDevice = async (deviceId: string) => {
+    try {
+      await sipRef.current?.setInputDevice(deviceId);
+      setInputDeviceId(deviceId);
+      setAudioDeviceError("");
+      await refreshAudioDevices();
+    } catch {
+      setAudioDeviceError("Не удалось переключить микрофон. Проверьте доступ к выбранному устройству.");
+    }
+  };
+
+  const chooseOutputDevice = async (deviceId: string) => {
+    const audio = audioRef.current as (HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }) | null;
+    if (!audio?.setSinkId) {
+      setAudioDeviceError("Выбор колонок не поддерживается этим браузером.");
+      return;
+    }
+    try {
+      await audio.setSinkId(deviceId);
+      setOutputDeviceId(deviceId);
+      setAudioDeviceError("");
+    } catch {
+      setAudioDeviceError("Не удалось переключить колонки. Выберите устройство, доступное этому сайту.");
+    }
+  };
+
+  const chooseAnotherOutput = async () => {
+    if (!mediaDevices?.selectAudioOutput) {
+      setAudioDeviceError("Браузер не поддерживает выбор дополнительных колонок.");
+      return;
+    }
+    try {
+      const device = await mediaDevices.selectAudioOutput();
+      await refreshAudioDevices();
+      await chooseOutputDevice(device.deviceId);
+    } catch {
+      setAudioDeviceError("Не удалось открыть выбор колонок. Проверьте разрешение браузера на выбор устройства вывода.");
+    }
+  };
+
+  const audioSettings = (
+    <div className="phone-audio-settings">
+      <div className="phone-audio-settings-heading"><h3>Аудиоустройства</h3><button className="phone-device-refresh" type="button" onClick={() => void showAudioDevices()}>Показать устройства</button></div>
+      <div className="phone-audio-device-grid">
+        <label>Микрофон<select aria-label="Микрофон" value={inputDeviceId} onChange={(event) => void chooseInputDevice(event.target.value)}><option value="">Системный по умолчанию</option>{audioInputs.filter((device) => device.deviceId).map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Микрофон ${index + 1}`}</option>)}</select></label>
+        <label>Колонки<select aria-label="Колонки" value={outputDeviceId} disabled={!supportsOutputSelection} onChange={(event) => void chooseOutputDevice(event.target.value)}><option value="">Системные по умолчанию</option>{audioOutputs.filter((device) => device.deviceId).map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Колонки ${index + 1}`}</option>)}</select></label>
+      </div>
+      {mediaDevices?.selectAudioOutput && supportsOutputSelection && <button className="phone-device-refresh phone-output-picker" type="button" onClick={() => void chooseAnotherOutput()}>Другие колонки…</button>}
+      {!supportsOutputSelection && <p className="phone-device-hint">Этот браузер использует системные колонки по умолчанию.</p>}
+      {audioDeviceError && <p className="phone-device-error" role="alert">{audioDeviceError}</p>}
+    </div>
+  );
 
   return (
     <main className="phone-shell">
@@ -205,6 +322,7 @@ export function PhoneApp() {
               <section className="phone-card phone-call-card">
               <div className="phone-card-heading"><div><span className="phone-step">02</span><h2>Звонок</h2></div><span className="phone-call-state">{callStatus === "idle" ? "Нет активного вызова" : callStatus === "calling" ? `Вызываем ${target}` : callStatus === "ringing" ? `Входящий · ${peerExtension || "внутренний номер"}` : "Разговор"}</span></div>
                 {callStatus === "ringing" ? <div className="phone-call-actions"><button className="phone-primary-button" onClick={() => void sipRef.current?.answer()}>Ответить <span>↗</span></button><button className="phone-secondary-button" onClick={() => void sipRef.current?.decline()}>Отклонить</button></div> : callStatus !== "idle" ? <button className="phone-hangup-button" onClick={() => void stopCall()} disabled={busy}>Завершить звонок <span>×</span></button> : <div className="phone-dial-row"><label className="phone-target-select">Кому позвонить<select value={target} onChange={(event) => setTarget(event.target.value)}>{targetOptions.map((person) => <option key={person.extension} value={person.extension}>{labelFor(person)}</option>)}</select></label><button className="phone-primary-button" onClick={() => void makeCall()} disabled={!connected || busy || !target}>Позвонить <span>↗</span></button></div>}
+                {callStatus !== "connected" && audioSettings}
               </section>
             </>
           )}
@@ -221,11 +339,21 @@ export function PhoneApp() {
             <h2 id="active-call-name">{activePeerName}</h2>
             <p className="phone-call-extension">Внутренний номер · {peerExtension || target}</p>
             <p className="phone-call-duration" aria-label={`Длительность звонка ${formatElapsed(elapsedSeconds)}`}>{formatElapsed(elapsedSeconds)}</p>
+            <div className="phone-call-audio-controls" aria-label="Управление звуком звонка">
+              <button type="button" className={`phone-call-audio-toggle${microphoneMuted ? " is-muted" : ""}`} aria-pressed={microphoneMuted} onClick={toggleMicrophone}>
+                {microphoneMuted ? "Включить микрофон" : "Выключить микрофон"}
+              </button>
+              <button type="button" className={`phone-call-audio-toggle${speakerMuted ? " is-muted" : ""}`} aria-pressed={speakerMuted} onClick={toggleSpeaker}>
+                {speakerMuted ? "Включить звук собеседника" : "Выключить звук собеседника"}
+              </button>
+            </div>
+            {audioSettings}
+            {audioPlaybackError && <><p className="phone-call-audio-error" role="alert">{audioPlaybackError}</p><button className="phone-audio-retry" onClick={() => void sipRef.current?.resumeAudio()}>Включить звук</button></>}
             <button className="phone-hangup-button phone-modal-hangup" onClick={() => void stopCall()} disabled={busy}>Завершить звонок <span>×</span></button>
           </section>
         </div>
       )}
-      <audio ref={audioRef} autoPlay playsInline />
+      <audio ref={audioRef} autoPlay playsInline muted={speakerMuted} />
     </main>
   );
 }

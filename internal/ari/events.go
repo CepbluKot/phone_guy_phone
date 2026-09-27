@@ -154,9 +154,16 @@ func (stream *EventStream) run(connection *websocket.Conn) {
 		}
 		current := connection
 		stopClose := context.AfterFunc(stream.ctx, func() { _ = current.Close() })
-		current.SetReadDeadline(time.Now().Add(60 * time.Second))
-		current.SetPongHandler(func(string) error { return current.SetReadDeadline(time.Now().Add(60 * time.Second)) })
+		pingCtx, stopPing := context.WithCancel(stream.ctx)
+		pingDone := make(chan struct{})
+		go stream.keepAlive(pingCtx, current, pingDone)
+		current.SetReadDeadline(time.Now().Add(stream.client.eventReadTimeout))
+		current.SetPongHandler(func(string) error {
+			return current.SetReadDeadline(time.Now().Add(stream.client.eventReadTimeout))
+		})
 		_, payload, err := current.ReadMessage()
+		stopPing()
+		<-pingDone
 		stopClose()
 		if err != nil {
 			_ = current.Close()
@@ -187,6 +194,28 @@ func (stream *EventStream) run(connection *websocket.Conn) {
 			stream.setError(ErrEventBackpressure)
 			_ = connection.Close()
 			return
+		}
+	}
+}
+
+func (stream *EventStream) keepAlive(ctx context.Context, connection *websocket.Conn, done chan<- struct{}) {
+	defer close(done)
+	interval := stream.client.eventPingInterval
+	if interval <= 0 {
+		return
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			deadline := time.Now().Add(stream.client.timeout)
+			if err := connection.WriteControl(websocket.PingMessage, nil, deadline); err != nil {
+				_ = connection.Close()
+				return
+			}
 		}
 	}
 }
