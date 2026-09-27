@@ -28,13 +28,30 @@ describe("browser phone",()=>{
     vi.mocked(phoneAPI.heartbeat).mockResolvedValue(sessionResponse.session);
     sipMocks.connect.mockResolvedValue(undefined);sipMocks.disconnect.mockResolvedValue(undefined);sipMocks.call.mockResolvedValue(undefined);sipMocks.hangup.mockResolvedValue(undefined);
   });
-  afterEach(()=>{cleanup();vi.clearAllMocks();if(originalMediaDevices)Object.defineProperty(navigator,"mediaDevices",originalMediaDevices);else delete (navigator as unknown as {mediaDevices?:MediaDevices}).mediaDevices;if(originalSetSinkId)Object.defineProperty(HTMLMediaElement.prototype,"setSinkId",originalSetSinkId);else delete (HTMLMediaElement.prototype as unknown as {setSinkId?:unknown}).setSinkId});
+  afterEach(()=>{cleanup();vi.useRealTimers();vi.clearAllMocks();if(originalMediaDevices)Object.defineProperty(navigator,"mediaDevices",originalMediaDevices);else delete (navigator as unknown as {mediaDevices?:MediaDevices}).mediaDevices;if(originalSetSinkId)Object.defineProperty(HTMLMediaElement.prototype,"setSinkId",originalSetSinkId);else delete (HTMLMediaElement.prototype as unknown as {setSinkId?:unknown}).setSinkId});
   it("requires a nickname and a configured extension",async()=>{
     render(<PhoneApp/>);await screen.findByLabelText("Ваш ник");fireEvent.change(screen.getByLabelText("Внутренний номер"),{target:{value:"1983"}});fireEvent.click(screen.getByRole("button",{name:/Подключиться/}));expect(phoneAPI.claim).not.toHaveBeenCalled();
   });
   it("registers the browser and calls only another configured internal number",async()=>{
     render(<PhoneApp/>);await screen.findByLabelText("Ваш ник");fireEvent.change(screen.getByLabelText("Ваш ник"),{target:{value:"Alice"}});fireEvent.change(screen.getByLabelText("Внутренний номер"),{target:{value:"1983"}});fireEvent.click(screen.getByRole("button",{name:/Подключиться/}));await screen.findByText("Готов принимать звонки");expect(BrowserSIPSession).toBeDefined();
     expect(screen.getByRole("option",{name:/Bob/})).not.toBeNull();expect(screen.queryByRole("option",{name:/Alice/})).toBeNull();fireEvent.click(screen.getByRole("button",{name:/Позвонить/}));await waitFor(()=>expect(sipMocks.call).toHaveBeenCalledWith("1988"));
+  });
+  it("refreshes browser presence while the phone page stays open",async()=>{
+    vi.useFakeTimers();
+    vi.mocked(phoneAPI.directory)
+      .mockResolvedValueOnce({people:[{nickname:"Alice",extension:"1983",active:false},{nickname:"Bob",extension:"1988",active:false,physicalPhone:"Grandstream",physicalStatus:"offline"}]})
+      .mockResolvedValueOnce({people:[{nickname:"Alice",extension:"1983",active:false},{nickname:"Bob",extension:"1988",active:false,physicalPhone:"Grandstream",physicalStatus:"offline"}]})
+      .mockResolvedValue({people:[{nickname:"Alice",extension:"1983",active:false},{nickname:"Bob",extension:"1988",active:true,physicalPhone:"Grandstream",physicalStatus:"online"}]});
+    render(<PhoneApp/>);
+    await act(async()=>{await Promise.resolve()});
+    fireEvent.change(screen.getByLabelText("Ваш ник"),{target:{value:"Alice"}});
+    fireEvent.change(screen.getByLabelText("Внутренний номер"),{target:{value:"1983"}});
+    fireEvent.click(screen.getByRole("button",{name:/Подключиться/}));
+    await act(async()=>{await Promise.resolve();await Promise.resolve()});
+    expect(screen.getByRole("option",{name:/1988 · физический телефон · Grandstream · не в сети/})).not.toBeNull();
+    await act(async()=>{await vi.advanceTimersByTimeAsync(2000)});
+    expect(phoneAPI.directory).toHaveBeenCalledTimes(3);
+    expect(screen.getByRole("option",{name:/1988 · физический телефон · Grandstream · в сети.*браузер · Bob · в сети/})).not.toBeNull();
   });
   it("opens a blurred active-call modal only after the call connects",async()=>{
     render(<PhoneApp/>);await screen.findByLabelText("Ваш ник");fireEvent.change(screen.getByLabelText("Ваш ник"),{target:{value:"Alice"}});fireEvent.change(screen.getByLabelText("Внутренний номер"),{target:{value:"1983"}});fireEvent.click(screen.getByRole("button",{name:/Подключиться/}));await screen.findByText("Готов принимать звонки");

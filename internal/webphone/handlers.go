@@ -12,12 +12,13 @@ import (
 )
 
 type API struct {
-	sessions       *Sessions
-	origins        map[string]struct{}
-	signalURL      string
-	physicalPhones func() map[string]string
-	browserHangup  func(context.Context, string) error
-	handler        http.Handler
+	sessions            *Sessions
+	origins             map[string]struct{}
+	signalURL           string
+	physicalPhones      func() map[string]string
+	physicalPhoneStatus func(context.Context) (map[string]string, error)
+	browserHangup       func(context.Context, string) error
+	handler             http.Handler
 }
 
 func NewAPI(sessions *Sessions, allowedOrigins string, physicalPhoneLookup ...func() map[string]string) (http.Handler, error) {
@@ -60,6 +61,10 @@ func (a *API) SetBrowserHangupHandler(handler func(context.Context, string) erro
 	a.browserHangup = handler
 }
 
+func (a *API) SetPhysicalPhoneStatusLookup(lookup func(context.Context) (map[string]string, error)) {
+	a.physicalPhoneStatus = lookup
+}
+
 func (a *API) config(w http.ResponseWriter, r *http.Request) {
 	a.json(w)
 	_ = json.NewEncoder(w).Encode(map[string]string{"signalingUrl": a.signalURL})
@@ -67,10 +72,23 @@ func (a *API) config(w http.ResponseWriter, r *http.Request) {
 func (a *API) directory(w http.ResponseWriter, r *http.Request) {
 	a.json(w)
 	people := a.sessions.Directory()
+	physicalStatus := map[string]string(nil)
+	if a.physicalPhoneStatus != nil {
+		if states, err := a.physicalPhoneStatus(r.Context()); err == nil {
+			physicalStatus = states
+		}
+	}
 	if a.physicalPhones != nil {
 		phones := a.physicalPhones()
 		for index := range people {
 			people[index].PhysicalPhone = phones[people[index].Extension]
+			if people[index].PhysicalPhone != "" {
+				state := physicalStatus[people[index].Extension]
+				if state != "online" && state != "offline" {
+					state = "unknown"
+				}
+				people[index].PhysicalStatus = state
+			}
 		}
 	}
 	_ = json.NewEncoder(w).Encode(map[string]any{"people": people})

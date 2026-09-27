@@ -90,6 +90,13 @@ export function PhoneApp() {
   }, [refreshDirectory]);
 
   useEffect(() => {
+    const timer = window.setInterval(() => {
+      void refreshDirectory().catch(() => undefined);
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [refreshDirectory]);
+
+  useEffect(() => {
     if (target && target !== extension && people.some((person) => person.extension === target)) return;
     setTarget(people.find((person) => person.extension !== extension)?.extension || "");
   }, [people, extension, target]);
@@ -204,7 +211,10 @@ export function PhoneApp() {
 
   const labelFor = (person: DirectoryEntry) => {
     const endpoints: string[] = [];
-    if (person.physicalPhone) endpoints.push(`физический телефон · ${person.physicalPhone}`);
+    if (person.physicalPhone) {
+      const status = person.physicalStatus === "online" ? "в сети" : person.physicalStatus === "offline" ? "не в сети" : "статус неизвестен";
+      endpoints.push(`физический телефон · ${person.physicalPhone} · ${status}`);
+    }
     if (person.nickname) endpoints.push(`браузер · ${person.nickname} · ${person.active ? "в сети" : "не в сети"}`);
     if (!endpoints.length) endpoints.push("нет подключённого устройства");
     return `${person.extension} · ${endpoints.join(" + ")}`;

@@ -21,6 +21,7 @@ for required_module in \
     res_ari_bridges \
     res_ari_channels \
     res_ari_events \
+    res_ari_endpoints \
     res_ari_model \
     res_http_websocket \
     res_crypto \

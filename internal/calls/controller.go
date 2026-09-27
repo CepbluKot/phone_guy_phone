@@ -299,6 +299,13 @@ func (controller *Controller) start(ctx context.Context, event ari.Event) error 
 		}
 		return nil
 	}
+	if !route.PhysicalPeer && route.BrowserTarget == "" {
+		cleanupCtx, cancel := cleanupCallContext(ctx)
+		_ = controller.ari.DeleteChannel(cleanupCtx, event.Channel.ID)
+		cancel()
+		route.Close()
+		return ErrUnknownEndpoint
+	}
 	callID, err := sessionID()
 	if err != nil {
 		cleanupCtx, cancel := cleanupCallContext(ctx)
@@ -320,7 +327,10 @@ func (controller *Controller) start(ctx context.Context, event ari.Event) error 
 		peerID += "-1"
 	}
 	callCtx, callCancel := context.WithCancel(ctx)
-	targets := map[string]string{peerID: route.Peer}
+	targets := make(map[string]string, 2)
+	if route.PhysicalPeer {
+		targets[peerID] = route.Peer
+	}
 	if route.BrowserTarget != "" {
 		targets["call-peer-"+callID+"-browser"] = route.BrowserTarget
 	}
@@ -353,9 +363,12 @@ func (controller *Controller) originatePeer(call *managedCall, timeout int) erro
 	if peerID == "" {
 		return ErrInvalidCallEvent
 	}
-	primaryErr := controller.originateTarget(call, peerEndpoint, peerID, flow, attempt, timeout)
-	if primaryErr != nil {
-		controller.markTargetFailed(call, peerID)
+	var primaryErr error
+	if call.route.PhysicalPeer {
+		primaryErr = controller.originateTarget(call, peerEndpoint, peerID, flow, attempt, timeout)
+		if primaryErr != nil {
+			controller.markTargetFailed(call, peerID)
+		}
 	}
 	call.mu.Lock()
 	browserID := "call-peer-" + call.id + "-browser"

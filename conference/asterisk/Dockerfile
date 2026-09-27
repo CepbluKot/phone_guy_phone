@@ -57,6 +57,7 @@ RUN ./configure \
         --enable res_ari_bridges \
         --enable res_ari_channels \
         --enable res_ari_events \
+        --enable res_ari_endpoints \
         --enable res_ari_model \
         --enable res_crypto \
         --enable res_http_websocket \

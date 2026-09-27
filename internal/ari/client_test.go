@@ -45,6 +45,24 @@ func requireARIAuth(t *testing.T, request *http.Request) {
 	}
 }
 
+func TestPJSIPEndpointStatesReturnsOnlyConfiguredNumericEndpoints(t *testing.T) {
+	client, _ := newARIClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requireARIAuth(t, r)
+		if r.Method != http.MethodGet || r.URL.Path != "/ari/endpoints/PJSIP" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`[{"technology":"PJSIP","resource":"1983","state":"online","channel_ids":[]},{"technology":"PJSIP","resource":"1988","state":"offline","channel_ids":[]},{"technology":"PJSIP","resource":"web-volatile","state":"online","channel_ids":[]}]`))
+	}))
+	states, err := client.PJSIPEndpointStates(context.Background(), []string{"1983", "1988"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if states["1983"] != "online" || states["1988"] != "offline" || len(states) != 2 {
+		t.Fatalf("endpoint states=%v", states)
+	}
+}
+
 func TestRESTAuthenticationAndBridgeOwnership(t *testing.T) {
 	var deleteCount atomic.Int32
 	client, _ := newARIClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

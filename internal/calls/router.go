@@ -27,6 +27,7 @@ type endpoints struct {
 type Route struct {
 	Source        string
 	Peer          string
+	PhysicalPeer  bool
 	Profile       voiceconfig.Profile
 	PeerProfile   voiceconfig.Profile
 	Revision      uint64
@@ -52,6 +53,7 @@ func (route *Route) ProcessingLease() ProcessingLease {
 type Router struct {
 	store        voiceconfig.RouteStore
 	allowed      map[string]struct{}
+	physical     map[string]struct{}
 	gate         *sessionGate
 	browserMu    sync.RWMutex
 	browsers     map[string]string
@@ -73,7 +75,11 @@ func NewRouter(store voiceconfig.RouteStore, endpointIDs []string) (*Router, err
 		}
 		allowed[endpoint] = struct{}{}
 	}
-	return &Router{store: store, allowed: allowed, gate: newSessionGate(), browsers: map[string]string{}, browserByExt: map[string]string{}, dynamicExts: map[string]struct{}{}}, nil
+	physical := make(map[string]struct{}, len(allowed))
+	for endpoint := range allowed {
+		physical[endpoint] = struct{}{}
+	}
+	return &Router{store: store, allowed: allowed, physical: physical, gate: newSessionGate(), browsers: map[string]string{}, browserByExt: map[string]string{}, dynamicExts: map[string]struct{}{}}, nil
 }
 
 // SetBrowserEndpoint binds a server-generated ephemeral PJSIP identity to a
@@ -161,6 +167,11 @@ func (router *Router) Resolve(ctx context.Context, event ari.Event) (*Route, err
 		return nil, err
 	}
 	route := &Route{Source: identity.Source, Peer: identity.Peer, Profile: profile, Revision: snapshot.Revision, Flow: identity.Flow}
+	if identity.Peer != "conference" {
+		router.browserMu.RLock()
+		_, route.PhysicalPeer = router.physical[identity.Peer]
+		router.browserMu.RUnlock()
+	}
 	processed := profile == voiceconfig.ProfilePhoneGuy
 	if identity.Peer != "conference" {
 		route.PeerProfile, err = profileForRouteExtension(snapshot, identity.Peer, dynamicExts)

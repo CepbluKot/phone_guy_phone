@@ -2,12 +2,52 @@ package webphone
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 )
+
+func TestDirectoryReturnsLivePhysicalAndBrowserPresence(t *testing.T) {
+	s, _, _ := testSessions(t)
+	handler, err := NewAPI(s, "https://voice.lan.awesomeio.ru", func() map[string]string {
+		return map[string]string{"1983": "Yealink"}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := handler.(*API)
+	api.SetPhysicalPhoneStatusLookup(func(context.Context) (map[string]string, error) {
+		return map[string]string{"1983": "online"}, nil
+	})
+	request := httptest.NewRequest(http.MethodPost, "/phone/api/v1/claim", strings.NewReader(`{"nickname":"Alice","extension":"1983"}`))
+	request.Header.Set("Origin", "https://voice.lan.awesomeio.ru")
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	api.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("claim status=%d", response.Code)
+	}
+	response = httptest.NewRecorder()
+	api.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/phone/api/v1/directory", nil))
+	var body struct {
+		People []DirectoryEntry `json:"people"`
+	}
+	if json.Unmarshal(response.Body.Bytes(), &body) != nil {
+		t.Fatalf("invalid directory response: %s", response.Body.String())
+	}
+	for _, person := range body.People {
+		if person.Extension == "1983" {
+			if !person.Active || person.PhysicalStatus != "online" {
+				t.Fatalf("presence not current: %+v", person)
+			}
+			return
+		}
+	}
+	t.Fatal("physical endpoint missing from directory")
+}
 
 func TestClaimRequiresSameOriginAndReturnsSessionCredential(t *testing.T) {
 	s, _, _ := testSessions(t)
