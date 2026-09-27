@@ -337,7 +337,7 @@ export function PhoneApp() {
           {callStatus === "ringing" ? (
             <section className="phone-call-modal phone-incoming-call-modal" role="dialog" aria-modal="true" aria-labelledby="incoming-call-name">
               <div className="phone-call-avatar" aria-hidden="true">{activePeerName.slice(0, 1).toLocaleUpperCase()}</div>
-              <span className="phone-call-ringing"><i /> Входящий вызов</span>
+              <span className="phone-call-ringing"><i /> Вам звонят</span>
               <h2 id="incoming-call-name">{activePeerName}</h2>
               <p className="phone-call-extension">Внутренний номер · {peerExtension || "неизвестен"}</p>
               <div className="phone-incoming-actions">
