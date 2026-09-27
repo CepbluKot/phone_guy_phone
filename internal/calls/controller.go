@@ -148,7 +148,10 @@ func (controller *Controller) HandleEvent(ctx context.Context, event ari.Event) 
 	if event.Type == "StasisStart" && event.App != controller.app {
 		return ErrInvalidCallEvent
 	}
-	if event.Type == "ChannelDestroyed" {
+	// StasisEnd is the reliable signal that a call leg left ARI control,
+	// including when a phone hangs up. ChannelDestroyed is not guaranteed for
+	// channels that were only subscribed through their Stasis application.
+	if event.Type == "StasisEnd" || event.Type == "ChannelDestroyed" {
 		return controller.destroyed(ctx, event.Channel.ID)
 	}
 	if event.Type == "PlaybackFinished" {

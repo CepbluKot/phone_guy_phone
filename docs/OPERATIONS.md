@@ -12,6 +12,22 @@ UI: https://voice.lan.awesomeio.ru/ перенаправляет на /phone/ ч
 
 ## Возможности и ограничения
 
+### Browser calls and per-phone voice profiles
+
+The Go call controller treats both `StasisEnd` and `ChannelDestroyed` as a
+call-leg termination. Asterisk emits `StasisEnd` when a channel leaves the ARI
+application; `ChannelDestroyed` is not guaranteed for application-scoped
+channels. Ending either leg closes the browser/physical peer legs, the bridge,
+and any active RVC session.
+
+Voice profiles are resolved by configured SIP extension for both call
+directions. A `phone-guy` profile on extension `1988` processes speech from that
+phone whether it starts or answers the call; other participants should hear
+the converted speech. While a processed call is active, `/admin/` → Load should
+show an active processed call and fresh RVC processing samples. These
+operational samples are short-lived and are not a call recording or durable
+history.
+
 ### Admin load dashboard (implementation status: local source only)
 
 The React admin now has a Load page backed by `GET /admin/api/v1/metrics`.
