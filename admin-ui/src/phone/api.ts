@@ -1,4 +1,4 @@
-export type DirectoryEntry = { nickname: string; extension: string; active: boolean; physicalPhone?: string };
+export type DirectoryEntry = { nickname: string; extension: string; active: boolean; physicalPhone?: string; physicalStatus?: "online" | "offline" | "unknown" };
 export type PhoneSession = { sessionId: string; nickname: string; extension: string; expiresAt: string };
 export type SIPCredentials = { uri: string; username: string; password: string; endpoint: string };
 

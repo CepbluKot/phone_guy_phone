@@ -178,7 +178,13 @@ func run() error {
 		if apiErr != nil {
 			return errors.New("browser phone API unavailable")
 		}
-		phoneHandler.(*webphone.API).SetBrowserHangupHandler(hangupBrowser)
+		phoneAPIHandler := phoneHandler.(*webphone.API)
+		phoneAPIHandler.SetBrowserHangupHandler(hangupBrowser)
+		phoneAPIHandler.SetPhysicalPhoneStatusLookup(func(requestCtx context.Context) (map[string]string, error) {
+			lookupCtx, cancel := context.WithTimeout(requestCtx, 2*time.Second)
+			defer cancel()
+			return phoneARI.PJSIPEndpointStates(lookupCtx, configuredExtensions)
+		})
 		phoneAPI = phoneHandler
 		defer sessions.Close(context.Background())
 		go sessions.RunSweeper(ctx)

@@ -25,10 +25,11 @@ var (
 const directorySchemaVersion = 1
 
 type DirectoryEntry struct {
-	Nickname      string `json:"nickname"`
-	Extension     string `json:"extension"`
-	Active        bool   `json:"active"`
-	PhysicalPhone string `json:"physicalPhone,omitempty"`
+	Nickname       string `json:"nickname"`
+	Extension      string `json:"extension"`
+	Active         bool   `json:"active"`
+	PhysicalPhone  string `json:"physicalPhone,omitempty"`
+	PhysicalStatus string `json:"physicalStatus,omitempty"`
 }
 
 type directoryFile struct {

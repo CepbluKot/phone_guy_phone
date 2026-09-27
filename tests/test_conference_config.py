@@ -44,15 +44,19 @@ def test_module_allowlist_is_exact_and_contains_release_dependencies():
         "codec_alaw",
         "codec_resample",
         "format_wav",
+        "func_channel",
         "pbx_config",
         "res_ari",
         "res_ari_asterisk",
         "res_ari_bridges",
         "res_ari_channels",
         "res_ari_events",
+        "res_ari_endpoints",
         "res_ari_model",
+        "res_crypto",
         "res_http_websocket",
         "res_pjsip",
+        "res_pjsip_transport_websocket",
         "res_pjsip_authenticator_digest",
         "res_pjsip_endpoint_identifier_user",
         "res_pjsip_nat",
@@ -65,6 +69,7 @@ def test_module_allowlist_is_exact_and_contains_release_dependencies():
         "res_sorcery_astdb",
         "res_sorcery_config",
         "res_sorcery_memory",
+        "res_srtp",
         "res_stasis",
         "res_stasis_answer",
         "res_stasis_playback",
@@ -91,6 +96,17 @@ def test_ari_events_is_built_allowlisted_and_health_checked():
     assert "--enable res_ari_events" in dockerfile
     assert "load => res_ari_events.so" in modules
     assert re.search(r"^    res_ari_events \\$", healthcheck, re.MULTILINE)
+
+
+def test_ari_endpoint_presence_is_built_allowlisted_and_health_checked():
+    """Physical handset presence depends on the Asterisk ARI endpoints resource."""
+    dockerfile = read("Dockerfile")
+    modules = read("modules.conf")
+    healthcheck = read("healthcheck.sh")
+
+    assert "--enable res_ari_endpoints" in dockerfile
+    assert "load => res_ari_endpoints.so" in modules
+    assert re.search(r"^    res_ari_endpoints \\$", healthcheck, re.MULTILINE)
 
 
 def test_ari_channel_creation_builds_allowlists_and_health_checks_app_stasis():

@@ -285,6 +285,43 @@ func TestParallelRingIncludesActiveBrowserAndSelectsOneWinner(t *testing.T) {
 	}
 }
 
+func TestBrowserOnlyExtensionDoesNotOriginateMissingPhysicalEndpoint(t *testing.T) {
+	store := snapshotStore{snapshot: voiceconfig.RouteSnapshot{Revision: 2, Extensions: map[string]voiceconfig.Profile{"1983": voiceconfig.ProfileOriginal}}}
+	router, err := NewRouter(store, []string{"1983", "1988"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := router.SetBrowserEndpoint("web-browser1234", "3454", true); err != nil {
+		t.Fatal(err)
+	}
+	client := &fakeARI{}
+	controller, err := NewController("voice-control", client, router, fakeRVC{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := ari.Event{Type: "StasisStart", App: "voice-control", Args: []string{"source=1983", "peer=3454"}}
+	start.Channel.ID = "caller-browser-only"
+	start.Channel.Name = "PJSIP/1983-00001"
+	if err := controller.HandleEvent(context.Background(), start); err != nil {
+		t.Fatal(err)
+	}
+	actions := client.logSnapshot()
+	physicalTarget, browserTarget := false, false
+	for _, action := range actions {
+		physicalTarget = physicalTarget || strings.HasPrefix(action, "originate:3454:")
+		browserTarget = browserTarget || strings.HasPrefix(action, "originate:web-browser1234:")
+	}
+	if physicalTarget {
+		t.Fatalf("browser-only extension was incorrectly dialed as a physical PJSIP endpoint: %v", actions)
+	}
+	if !browserTarget {
+		t.Fatalf("active browser was not called: %v", actions)
+	}
+	if err := controller.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func firstCall(t *testing.T, controller *Controller) *managedCall {
 	t.Helper()
 	controller.mu.Lock()

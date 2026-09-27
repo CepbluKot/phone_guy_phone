@@ -278,6 +278,47 @@ func (c *Client) DeleteDynamicPJSIP(ctx context.Context, kind, id string) error 
 	return nil
 }
 
+// PJSIPEndpointStates returns only the requested numeric endpoint states. ARI
+// also reports the volatile browser endpoints, so non-whitelisted resources
+// are discarded before the caller can expose presence to the phone UI.
+func (c *Client) PJSIPEndpointStates(ctx context.Context, endpointIDs []string) (map[string]string, error) {
+	allowed := make(map[string]struct{}, len(endpointIDs))
+	for _, id := range endpointIDs {
+		if !validEndpointID(id) {
+			return nil, ErrARIFailure
+		}
+		allowed[id] = struct{}{}
+	}
+	if len(allowed) == 0 {
+		return map[string]string{}, nil
+	}
+	if err := c.ensureOpen(); err != nil {
+		return nil, err
+	}
+	response, err := c.request(ctx, http.MethodGet, "/endpoints/PJSIP", nil)
+	if err != nil {
+		return nil, err
+	}
+	var endpoints []struct {
+		Technology string `json:"technology"`
+		Resource   string `json:"resource"`
+		State      string `json:"state"`
+	}
+	if err := readResponseJSON(response, &endpoints); err != nil {
+		return nil, err
+	}
+	states := make(map[string]string, len(allowed))
+	for _, endpoint := range endpoints {
+		if endpoint.Technology != "PJSIP" || endpoint.State == "" {
+			continue
+		}
+		if _, ok := allowed[endpoint.Resource]; ok {
+			states[endpoint.Resource] = endpoint.State
+		}
+	}
+	return states, nil
+}
+
 func validDynamicID(id string) bool {
 	if id == "" || len(id) > 64 {
 		return false
