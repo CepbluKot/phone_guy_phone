@@ -727,6 +727,56 @@ func TestControllerRoutesDirectCallAndCleansOnHangup(t *testing.T) {
 	}
 }
 
+func TestProcessedCallKeepsVoiceSessionUntilHangup(t *testing.T) {
+	store := snapshotStore{snapshot: voiceconfig.RouteSnapshot{Revision: 1, Extensions: map[string]voiceconfig.Profile{
+		"4101": voiceconfig.ProfilePhoneGuy, "4102": voiceconfig.ProfileOriginal,
+	}}}
+	router, err := NewRouter(store, []string{"4101", "4102"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	controller, err := NewController("voice-control", &fakeARI{}, router, fakeRVC{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := ari.Event{Type: "StasisStart", App: "voice-control", Args: []string{"source=4101", "peer=4102"}}
+	start.Channel.ID = "processed-caller"
+	start.Channel.Name = "PJSIP/4101-00001"
+	if err := controller.HandleEvent(context.Background(), start); err != nil {
+		t.Fatal(err)
+	}
+	call := callbackCall(t, controller)
+	peer := ari.Event{Type: "StasisStart", App: "voice-control", Args: []string{"call=" + call.id, "role=peer"}}
+	peer.Channel.ID = call.peerID
+	peer.Channel.Name = "PJSIP/4102-00002"
+	peer.Channel.State = "Up"
+	if err := controller.HandleEvent(context.Background(), peer); err != nil {
+		t.Fatal(err)
+	}
+	waitCallConnect(t, call)
+	call.mu.Lock()
+	voice := call.voice
+	call.mu.Unlock()
+	if voice == nil {
+		t.Fatal("processed call has no voice session")
+	}
+	select {
+	case <-voice.Done():
+		t.Fatal("voice session stopped when call setup completed")
+	case <-time.After(50 * time.Millisecond):
+	}
+	destroyed := ari.Event{Type: "ChannelDestroyed"}
+	destroyed.Channel.ID = start.Channel.ID
+	if err := controller.HandleEvent(context.Background(), destroyed); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-voice.Done():
+	case <-time.After(time.Second):
+		t.Fatal("voice session survived call hangup")
+	}
+}
+
 type fakeConferenceJoiner struct {
 	event ari.Event
 	route *Route
