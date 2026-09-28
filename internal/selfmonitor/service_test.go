@@ -86,7 +86,8 @@ func (a *testARI) CreateBridge(_ context.Context, id string) (calls.Bridge, erro
 	a.bridge = &testBridge{id: id}
 	return a.bridge, nil
 }
-func (*testARI) SnoopChannel(context.Context, string, string) (string, error) { return "", nil }
+func (*testARI) SnoopChannel(context.Context, string, string) (string, error)   { return "", nil }
+func (*testARI) WhisperChannel(context.Context, string, string) (string, error) { return "", nil }
 func (a *testARI) CreateMediaChannel(context.Context, string, bool) (calls.Media, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()

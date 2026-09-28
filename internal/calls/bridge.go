@@ -31,6 +31,7 @@ type ARI interface {
 	OriginateChannel(context.Context, string, string, string, string, int) error
 	CreateBridge(context.Context, string) (Bridge, error)
 	SnoopChannel(context.Context, string, string) (string, error)
+	WhisperChannel(context.Context, string, string) (string, error)
 	CreateMediaChannel(context.Context, string, bool) (Media, error)
 	DeleteChannel(context.Context, string) error
 }
@@ -61,6 +62,9 @@ func (adapter ARIAdapter) CreateBridge(ctx context.Context, id string) (Bridge, 
 }
 func (adapter ARIAdapter) SnoopChannel(ctx context.Context, target, id string) (string, error) {
 	return adapter.Client.SnoopChannel(ctx, target, id)
+}
+func (adapter ARIAdapter) WhisperChannel(ctx context.Context, target, id string) (string, error) {
+	return adapter.Client.WhisperChannel(ctx, target, id)
 }
 func (adapter ARIAdapter) CreateMediaChannel(ctx context.Context, role string, receive bool) (Media, error) {
 	return adapter.Client.CreateMediaChannel(ctx, role, receive)

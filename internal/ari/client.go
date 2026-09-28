@@ -434,6 +434,15 @@ func (c *Client) failChannelWaiters(err error) {
 // The dialplan app name and generated snoop ID are supplied by this process;
 // no caller-provided ARI URL or channel ID is sent back to the browser.
 func (c *Client) SnoopChannel(ctx context.Context, targetID, snoopID string) (string, error) {
+	return c.createSnoopChannel(ctx, targetID, snoopID, "in", "none")
+}
+
+// WhisperChannel accepts bridge audio and writes it toward the target phone.
+func (c *Client) WhisperChannel(ctx context.Context, targetID, snoopID string) (string, error) {
+	return c.createSnoopChannel(ctx, targetID, snoopID, "none", "out")
+}
+
+func (c *Client) createSnoopChannel(ctx context.Context, targetID, snoopID, spy, whisper string) (string, error) {
 	if err := c.ensureOpen(); err != nil {
 		return "", err
 	}
@@ -441,8 +450,8 @@ func (c *Client) SnoopChannel(ctx context.Context, targetID, snoopID string) (st
 		return "", ErrNotOwned
 	}
 	query := url.Values{
-		"spy":     []string{"in"},
-		"whisper": []string{"none"},
+		"spy":     []string{spy},
+		"whisper": []string{whisper},
 		"app":     []string{c.app},
 	}
 	response, err := c.request(ctx, http.MethodPost, "/channels/"+url.PathEscape(targetID)+"/snoop/"+url.PathEscape(snoopID), query)

@@ -579,7 +579,7 @@ func (controller *Controller) connect(ctx context.Context, call *managedCall, at
 		return controller.connectCallback(ctx, call, attempt, peerID)
 	}
 	if call.route.Profile == voiceconfig.ProfilePhoneGuy {
-		voice, err := StartPhoneGuy(call.ctx, controller.ari, call.main, call.callerID, controller.rvc, call.route.lease)
+		voice, err := StartPhoneGuy(call.ctx, controller.ari, call.main, call.callerID, peerID, controller.rvc, call.route.lease)
 		if err != nil {
 			return err
 		}
@@ -596,7 +596,7 @@ func (controller *Controller) connect(ctx context.Context, call *managedCall, at
 		return nil
 	}
 	if call.route.PeerProfile == voiceconfig.ProfilePhoneGuy {
-		voice, err := StartPhoneGuy(call.ctx, controller.ari, call.main, peerID, controller.rvc, call.route.lease)
+		voice, err := StartPhoneGuy(call.ctx, controller.ari, call.main, peerID, call.callerID, controller.rvc, call.route.lease)
 		if err != nil {
 			return err
 		}
@@ -636,7 +636,7 @@ func (controller *Controller) connectCallback(ctx context.Context, call *managed
 	}
 	if call.route.Profile == voiceconfig.ProfilePhoneGuy && voice == nil {
 		lease := call.route.ProcessingLease()
-		voiceSession, err := StartPhoneGuy(call.ctx, controller.ari, call.main, call.callerID, controller.rvc, retainedProcessingLease{})
+		voiceSession, err := StartPhoneGuy(call.ctx, controller.ari, call.main, call.callerID, peerID, controller.rvc, retainedProcessingLease{})
 		if err != nil {
 			return err
 		}
@@ -655,7 +655,7 @@ func (controller *Controller) connectCallback(ctx context.Context, call *managed
 		if lease == nil {
 			return ErrInvalidCallEvent
 		}
-		voiceSession, err := StartPhoneGuy(call.ctx, controller.ari, call.main, peerID, controller.rvc, retainedProcessingLease{})
+		voiceSession, err := StartPhoneGuy(call.ctx, controller.ari, call.main, peerID, call.callerID, controller.rvc, retainedProcessingLease{})
 		if err != nil {
 			return err
 		}

@@ -3,8 +3,10 @@ package calls
 import (
 	"context"
 	"crypto/rand"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
+	"log"
 	"sync"
 	"time"
 
@@ -18,8 +20,11 @@ type Session struct {
 	ari          ARI
 	main         Bridge
 	private      Bridge
+	returnBridge Bridge
 	sourceID     string
-	snoopID      string
+	peerID       string
+	peerSnoopID  string
+	whisperID    string
 	listener     Media
 	injection    Media
 	model        rvc.RVCStream
@@ -42,11 +47,11 @@ func JoinOriginal(ctx context.Context, main Bridge, sourceID string) error {
 	return main.AddChannel(ctx, sourceID, false)
 }
 
-func StartPhoneGuy(ctx context.Context, ariClient ARI, main Bridge, sourceID string, rvcClient RVC, lease ProcessingLease) (*Session, error) {
+func StartPhoneGuy(ctx context.Context, ariClient ARI, main Bridge, sourceID, peerID string, rvcClient RVC, lease ProcessingLease) (*Session, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if ariClient == nil || main == nil || sourceID == "" || rvcClient == nil || lease == nil {
+	if ariClient == nil || main == nil || sourceID == "" || peerID == "" || sourceID == peerID || rvcClient == nil || lease == nil {
 		if lease != nil {
 			lease.Release()
 		}
@@ -60,7 +65,7 @@ func StartPhoneGuy(ctx context.Context, ariClient ARI, main Bridge, sourceID str
 		return nil, err
 	}
 	sessionCtx, cancel := context.WithCancel(ctx)
-	session := &Session{ari: ariClient, main: main, sourceID: sourceID, snoopID: "call-snoop-" + callID, lease: lease, ctx: sessionCtx, cancel: cancel, done: make(chan struct{})}
+	session := &Session{ari: ariClient, main: main, sourceID: sourceID, peerID: peerID, lease: lease, ctx: sessionCtx, cancel: cancel, done: make(chan struct{})}
 	if err := session.setup(ctx, callID, rvcClient); err != nil {
 		cancel()
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
@@ -86,9 +91,6 @@ func (session *Session) setup(ctx context.Context, callID string, rvcClient RVC)
 		return err
 	}
 	session.private = private
-	if _, err := session.ari.SnoopChannel(ctx, session.sourceID, session.snoopID); err != nil {
-		return err
-	}
 	listener, err := session.ari.CreateMediaChannel(ctx, "call-listen-"+callID, true)
 	if err != nil {
 		return err
@@ -104,20 +106,36 @@ func (session *Session) setup(ctx context.Context, callID string, rvcClient RVC)
 		return err
 	}
 	session.injection = injection
-	// Join the source muted before adding any processed output. If any later
-	// setup step fails, the raw source can never become audible in the room.
-	if err := session.main.AddChannel(ctx, session.sourceID, true); err != nil {
+	// Keep the raw source in its own bridge. Asterisk reads muted bridge
+	// channels without audio, which also starves a snoop audiohook.
+	if err := private.AddChannel(ctx, session.sourceID, false); err != nil {
+		return err
+	}
+	if err := private.AddChannel(ctx, listener.ID(), false); err != nil {
 		return err
 	}
 	if err := session.main.AddChannel(ctx, injection.ID(), false); err != nil {
 		return err
 	}
-	// Connect capture only after the RVC reader and both output channels are
-	// ready, keeping all setup audio bounded without dropping warmup frames.
-	if err := private.AddChannel(ctx, session.snoopID, false); err != nil {
+	returnBridge, err := session.ari.CreateBridge(ctx, "call-return-"+callID)
+	if err != nil {
 		return err
 	}
-	return private.AddChannel(ctx, listener.ID(), false)
+	session.returnBridge = returnBridge
+	peerSnoopID, err := session.ari.SnoopChannel(ctx, session.peerID, "call-peer-snoop-"+callID)
+	if err != nil {
+		return err
+	}
+	session.peerSnoopID = peerSnoopID
+	whisperID, err := session.ari.WhisperChannel(ctx, session.sourceID, "call-whisper-"+callID)
+	if err != nil {
+		return err
+	}
+	session.whisperID = whisperID
+	if err := returnBridge.AddChannel(ctx, session.peerSnoopID, false); err != nil {
+		return err
+	}
+	return returnBridge.AddChannel(ctx, session.whisperID, false)
 }
 
 func (session *Session) run() {
@@ -142,6 +160,8 @@ func (session *Session) run() {
 }
 
 func (session *Session) forwardInput() error {
+	var frames, nonzero uint64
+	var peak int16
 	for {
 		frame, err := session.listener.ReadFrame(session.ctx)
 		if err != nil {
@@ -150,6 +170,20 @@ func (session *Session) forwardInput() error {
 		if len(frame) != rvc.FrameBytes {
 			return rvc.ErrInvalidFrame
 		}
+		frames++
+		for i := 0; i < len(frame); i += 2 {
+			sample := int16(binary.LittleEndian.Uint16(frame[i:]))
+			if sample != 0 {
+				nonzero++
+			}
+			if sample > peak {
+				peak = sample
+			}
+		}
+		if frames%250 == 0 {
+			log.Printf("voice input signal: frames=%d nonzero_samples=%d positive_peak=%d", frames, nonzero, peak)
+			nonzero, peak = 0, 0
+		}
 		if err := session.model.SendFrame(session.ctx, frame); err != nil {
 			return err
 		}
@@ -157,6 +191,7 @@ func (session *Session) forwardInput() error {
 }
 
 func (session *Session) forwardOutput() error {
+	var blocks uint64
 	for {
 		select {
 		case <-session.ctx.Done():
@@ -170,6 +205,16 @@ func (session *Session) forwardOutput() error {
 			}
 			if len(block) != rvc.BlockBytes {
 				return rvc.ErrInvalidBlock
+			}
+			blocks++
+			if blocks%5 == 0 {
+				var nonzero uint64
+				for i := 0; i < len(block); i += 2 {
+					if binary.LittleEndian.Uint16(block[i:]) != 0 {
+						nonzero++
+					}
+				}
+				log.Printf("voice output signal: blocks=%d nonzero_samples=%d", blocks, nonzero)
 			}
 			for offset := 0; offset < len(block); offset += rvc.FrameBytes {
 				if err := session.waitFrameTick(); err != nil {
@@ -234,8 +279,16 @@ func (session *Session) cleanup(ctx context.Context) {
 			}
 		}
 	}
-	if session.snoopID != "" {
-		if err := session.ari.DeleteChannel(ctx, session.snoopID); err != nil && session.cleanupError == nil {
+	for _, id := range []string{session.peerSnoopID, session.whisperID} {
+		if id == "" {
+			continue
+		}
+		if err := session.ari.DeleteChannel(ctx, id); err != nil && session.cleanupError == nil {
+			session.cleanupError = err
+		}
+	}
+	if session.returnBridge != nil {
+		if err := session.returnBridge.Close(ctx); err != nil && session.cleanupError == nil {
 			session.cleanupError = err
 		}
 	}
