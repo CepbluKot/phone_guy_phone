@@ -110,6 +110,7 @@ type fakeARI struct {
 	deleteErrFor string
 	main         *fakeBridge
 	private      *fakeBridge
+	returnBridge *fakeBridge
 	media        []*fakeMedia
 	openError    error
 	playCalls    chan playbackRequest
@@ -526,11 +527,20 @@ func (client *fakeARI) OriginateChannel(_ context.Context, endpoint, id, args, c
 }
 func (client *fakeARI) CreateBridge(_ context.Context, id string) (Bridge, error) {
 	client.addLog("bridge:" + id)
-	client.private = &fakeBridge{id: id, log: &client.log, logMu: &client.logMu}
-	return client.private, nil
+	bridge := &fakeBridge{id: id, log: &client.log, logMu: &client.logMu}
+	if strings.HasPrefix(id, "call-return-") {
+		client.returnBridge = bridge
+	} else {
+		client.private = bridge
+	}
+	return bridge, nil
 }
 func (client *fakeARI) SnoopChannel(_ context.Context, source, id string) (string, error) {
 	client.addLog("snoop:" + source + ":" + id)
+	return id, nil
+}
+func (client *fakeARI) WhisperChannel(_ context.Context, source, id string) (string, error) {
+	client.addLog("whisper:" + source + ":" + id)
 	return id, nil
 }
 func (client *fakeARI) CreateMediaChannel(_ context.Context, role string, receive bool) (Media, error) {
@@ -575,7 +585,7 @@ func (stream *fakeRVCStream) Outputs() <-chan []byte           { return stream.o
 func (*fakeRVCStream) Close(context.Context) error             { return nil }
 func (*fakeRVCStream) Err() error                              { return nil }
 
-func TestPhoneGuySetupMutesSourceBeforeAudibleProcessedChannel(t *testing.T) {
+func TestPhoneGuySetupIsolatesRawSourceFromAudibleProcessedChannel(t *testing.T) {
 	client := &fakeARI{}
 	main := &fakeBridge{id: "main", log: &client.log, logMu: &client.logMu}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -583,15 +593,17 @@ func TestPhoneGuySetupMutesSourceBeforeAudibleProcessedChannel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, err := StartPhoneGuy(ctx, client, main, "PJSIP/4101-00001", fakeRVC{}, lease)
+	session, err := StartPhoneGuy(ctx, client, main, "PJSIP/4101-00001", "PJSIP/4102-00001", fakeRVC{}, lease)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(main.joined, []string{"PJSIP/4101-00001", client.media[1].ID()}) {
+	if !reflect.DeepEqual(main.joined, []string{client.media[1].ID()}) {
 		t.Fatalf("main bridge members=%v", main.joined)
 	}
+	if !reflect.DeepEqual(client.private.joined, []string{"PJSIP/4101-00001", client.media[0].ID()}) {
+		t.Fatalf("source bridge members=%v", client.private.joined)
+	}
 	wantTail := []string{
-		"add:main:PJSIP/4101-00001:muted",
 		"add:main:" + client.media[1].ID() + ":open",
 	}
 	var mainActions []string
@@ -607,7 +619,7 @@ func TestPhoneGuySetupMutesSourceBeforeAudibleProcessedChannel(t *testing.T) {
 		t.Fatal(err)
 	}
 	cancel()
-	if !client.private.isClosed() || !client.media[0].isClosed() || !client.media[1].isClosed() {
+	if !client.private.isClosed() || !client.returnBridge.isClosed() || !client.media[0].isClosed() || !client.media[1].isClosed() {
 		t.Fatal("session did not close all owned media resources")
 	}
 }
@@ -620,7 +632,7 @@ func TestPhoneGuySetupFailureCleansOwnedResourcesWithoutJoiningRawSource(t *test
 		t.Fatal(err)
 	}
 	wantFailure := errors.New("rvc unavailable")
-	if _, err := StartPhoneGuy(context.Background(), client, main, "PJSIP/4101-00001", fakeRVC{openError: wantFailure}, lease); !errors.Is(err, wantFailure) {
+	if _, err := StartPhoneGuy(context.Background(), client, main, "PJSIP/4101-00001", "PJSIP/4102-00001", fakeRVC{openError: wantFailure}, lease); !errors.Is(err, wantFailure) {
 		t.Fatalf("setup error=%v", err)
 	}
 	if len(main.joined) != 0 {
@@ -845,9 +857,8 @@ func TestControllerProcessesPhoneGuyCalleeAndMutesBeforeOtherLeg(t *testing.T) {
 	}
 	waitCallConnect(t, call)
 	main := call.main.(*fakeBridge)
-	want := []string{call.peerID, "call-output-", "caller-original"}
-	if len(main.joined) != 3 || main.joined[0] != want[0] || !strings.HasPrefix(main.joined[1], want[1]) || main.joined[2] != want[2] {
-		t.Fatalf("main bridge members=%v; expected muted phone-guy and processed output", main.joined)
+	if len(main.joined) != 2 || !strings.HasPrefix(main.joined[0], "call-output-") || main.joined[1] != "caller-original" {
+		t.Fatalf("main bridge members=%v; expected only processed output and caller", main.joined)
 	}
 	var mainActions []string
 	for _, action := range client.logSnapshot() {
@@ -856,8 +867,7 @@ func TestControllerProcessesPhoneGuyCalleeAndMutesBeforeOtherLeg(t *testing.T) {
 		}
 	}
 	if !reflect.DeepEqual(mainActions, []string{
-		"add:" + main.id + ":" + call.peerID + ":muted",
-		"add:" + main.id + ":" + main.joined[1] + ":open",
+		"add:" + main.id + ":" + main.joined[0] + ":open",
 		"add:" + main.id + ":caller-original:open",
 	}) {
 		t.Fatalf("bridge admission order=%v", mainActions)

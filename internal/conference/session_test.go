@@ -77,7 +77,10 @@ func (client *fakeARI) OriginateChannel(context.Context, string, string, string,
 	return nil
 }
 func (client *fakeARI) SnoopChannel(context.Context, string, string) (string, error) { return "", nil }
-func (client *fakeARI) DeleteChannel(context.Context, string) error                  { return nil }
+func (client *fakeARI) WhisperChannel(context.Context, string, string) (string, error) {
+	return "", nil
+}
+func (client *fakeARI) DeleteChannel(context.Context, string) error { return nil }
 func (client *fakeARI) CreateBridge(_ context.Context, id string) (calls.Bridge, error) {
 	bridge := &fakeBridge{id: id}
 	client.mu.Lock()
