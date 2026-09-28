@@ -53,9 +53,9 @@ describe("browser phone",()=>{
     expect(phoneAPI.directory).toHaveBeenCalledTimes(3);
     expect(screen.getByRole("option",{name:/1988 · физический телефон · Grandstream · в сети.*браузер · Bob · в сети/})).not.toBeNull();
   });
-  it("opens a blurred active-call modal only after the call connects",async()=>{
+  it("shows an outgoing-call modal and switches it to the active-call modal",async()=>{
     render(<PhoneApp/>);await screen.findByLabelText("Ваш ник");fireEvent.change(screen.getByLabelText("Ваш ник"),{target:{value:"Alice"}});fireEvent.change(screen.getByLabelText("Внутренний номер"),{target:{value:"1983"}});fireEvent.click(screen.getByRole("button",{name:/Подключиться/}));await screen.findByText("Готов принимать звонки");
-    fireEvent.click(screen.getByRole("button",{name:/Позвонить/}));await waitFor(()=>expect(sipMocks.call).toHaveBeenCalledWith("1988"));expect(screen.queryByRole("dialog")).toBeNull();
+    fireEvent.click(screen.getByRole("button",{name:/Позвонить/}));await waitFor(()=>expect(sipMocks.call).toHaveBeenCalledWith("1988"));act(()=>sipMocks.onCall?.("calling","1988"));expect(screen.getByRole("dialog").textContent).toContain("Звоним");expect(screen.getByRole("dialog").textContent).toContain("Отменить вызов");
     act(()=>sipMocks.onCall?.("connected"));
     const dialog=await screen.findByRole("dialog");expect(dialog.getAttribute("aria-modal")).toBe("true");expect(dialog.textContent).toContain("Bob");expect(dialog.textContent).toContain("00:00");expect(screen.getByRole("button",{name:/Завершить звонок/})).not.toBeNull();expect(document.querySelector(".phone-app-background")?.getAttribute("aria-hidden")).toBe("true");expect(screen.getByLabelText("Микрофон")).not.toBeNull();
     fireEvent.change(screen.getByLabelText("Микрофон"),{target:{value:"mic-usb"}});await waitFor(()=>expect(sipMocks.setInputDevice).toHaveBeenCalledWith("mic-usb"));
