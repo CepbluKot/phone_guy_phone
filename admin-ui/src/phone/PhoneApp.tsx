@@ -41,7 +41,7 @@ export function PhoneApp() {
   const sipRef = useRef<BrowserSIPSession | undefined>(undefined);
   const sessionIdRef = useRef("");
   const connected = registration === "registered";
-  const callModalVisible = callStatus === "ringing" || callStatus === "connected";
+  const callModalVisible = callStatus === "calling" || callStatus === "ringing" || callStatus === "connected";
   const targetOptions = useMemo(() => people.filter((person) => person.extension !== extension), [people, extension]);
   const activePeer = people.find((person) => person.extension === peerExtension);
   const activePeerName = activePeer?.nickname || peerExtension || "Внутренний номер";
@@ -354,6 +354,14 @@ export function PhoneApp() {
                 <button className="phone-answer-button" onClick={() => void sipRef.current?.answer()} disabled={busy}>Ответить <span>✓</span></button>
                 <button className="phone-reject-button" onClick={() => void sipRef.current?.decline()} disabled={busy}>Отклонить <span>×</span></button>
               </div>
+            </section>
+          ) : callStatus === "calling" ? (
+            <section className="phone-call-modal phone-outgoing-call-modal" role="dialog" aria-modal="true" aria-labelledby="outgoing-call-name">
+              <div className="phone-call-avatar" aria-hidden="true">{activePeerName.slice(0, 1).toLocaleUpperCase()}</div>
+              <span className="phone-call-ringing"><i /> Звоним</span>
+              <h2 id="outgoing-call-name">{activePeerName}</h2>
+              <p className="phone-call-extension">Внутренний номер · {peerExtension || target}</p>
+              <button className="phone-hangup-button phone-modal-hangup" onClick={() => void stopCall()} disabled={busy}>Отменить вызов <span>×</span></button>
             </section>
           ) : (
             <section className="phone-call-modal" role="dialog" aria-modal="true" aria-labelledby="active-call-name">
