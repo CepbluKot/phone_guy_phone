@@ -77,13 +77,82 @@ func TestActiveBrowserEndpointResolvesOnlyToItsConfiguredExtension(t *testing.T)
 	event.Channel.ID = "browser-inbound"
 	event.Channel.Name = "PJSIP/web-abcd1234-0001"
 	got, err := resolveEndpointsWithBrowsers(event, allowed, browsers)
-	if err != nil || got.Source != "4101" || got.Peer != "4102" {
+	if err != nil || got.Source != "4101" || got.Peer != "4102" || !got.BrowserSource {
 		t.Fatalf("resolved=%+v err=%v", got, err)
 	}
 	event.Args = []string{"source=web-forged", "peer=4102"}
 	event.Channel.Name = "PJSIP/web-forged-0002"
 	if _, err := resolveEndpointsWithBrowsers(event, allowed, browsers); !errors.Is(err, ErrUnknownEndpoint) {
 		t.Fatalf("forged browser accepted: %v", err)
+	}
+}
+
+func TestBrowserProfileAppliesOnlyToBrowserEndpoint(t *testing.T) {
+	store := snapshotStore{snapshot: voiceconfig.RouteSnapshot{Revision: 3, Extensions: map[string]voiceconfig.Profile{"4101": voiceconfig.ProfileOriginal, "4102": voiceconfig.ProfileOriginal}, BrowserExtensions: map[string]voiceconfig.Profile{"4101": voiceconfig.ProfilePhoneGuy}}}
+	router, err := NewRouter(store, []string{"4101", "4102"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := router.SetBrowserEndpoint("web-abcd1234", "4101", true); err != nil {
+		t.Fatal(err)
+	}
+	browserEvent := ari.Event{Type: "StasisStart", Args: []string{"source=web-abcd1234", "peer=4102"}}
+	browserEvent.Channel.ID = "browser-channel"
+	browserEvent.Channel.Name = "PJSIP/web-abcd1234-0001"
+	browserRoute, err := router.Resolve(context.Background(), browserEvent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer browserRoute.Close()
+	if browserRoute.Profile != voiceconfig.ProfilePhoneGuy {
+		t.Fatalf("browser profile=%q", browserRoute.Profile)
+	}
+	physicalEvent := ari.Event{Type: "StasisStart", Args: []string{"source=4101", "peer=4102"}}
+	physicalEvent.Channel.ID = "physical-channel"
+	physicalEvent.Channel.Name = "PJSIP/4101-0002"
+	physicalRoute, err := router.Resolve(context.Background(), physicalEvent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer physicalRoute.Close()
+	if physicalRoute.Profile != voiceconfig.ProfileOriginal {
+		t.Fatalf("physical profile changed with browser profile: %q", physicalRoute.Profile)
+	}
+}
+
+func TestRouterUsesCallerProfileWhenBothCallersHavePhoneGuy(t *testing.T) {
+	store := snapshotStore{snapshot: voiceconfig.RouteSnapshot{
+		Revision: 4,
+		Extensions: map[string]voiceconfig.Profile{
+			"4101": voiceconfig.ProfilePhoneGuy,
+			"4102": voiceconfig.ProfilePhoneGuy,
+		},
+		BrowserExtensions: map[string]voiceconfig.Profile{"4101": voiceconfig.ProfilePhoneGuy},
+	}}
+	router, err := NewRouter(store, []string{"4101", "4102"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := router.SetBrowserEndpoint("web-abcd1234", "4101", true); err != nil {
+		t.Fatal(err)
+	}
+	event := ari.Event{Type: "StasisStart", Args: []string{"source=web-abcd1234", "peer=4102"}}
+	event.Channel.ID = "browser-channel"
+	event.Channel.Name = "PJSIP/web-abcd1234-0001"
+
+	route, err := router.Resolve(context.Background(), event)
+	if err != nil {
+		t.Fatalf("call with two Phone Guy profiles was rejected: %v", err)
+	}
+	defer route.Close()
+	if route.Profile != voiceconfig.ProfilePhoneGuy || route.PeerProfile != voiceconfig.ProfilePhoneGuy {
+		t.Fatalf("configured profiles were not preserved: caller=%q peer=%q", route.Profile, route.PeerProfile)
+	}
+	if route.ProcessedPeer {
+		t.Fatal("peer must not take a second RVC stream when the caller is already processed")
+	}
+	if route.ProcessingLease() == nil {
+		t.Fatal("caller Phone Guy profile must reserve the RVC stream")
 	}
 }
 

@@ -62,3 +62,66 @@
 @media(max-width:420px){.phone-audio-device-grid{grid-template-columns:1fr}}
 @media(max-width:420px){.phone-call-audio-controls{grid-template-columns:1fr}}
 @media(prefers-reduced-motion:reduce){.phone-call-overlay,.phone-call-ringing i{animation:none}}
+
+/* Phone screens share the bold paper, ink, yellow and cobalt visual system. */
+.phone-shell { background: var(--pm-canvas); color: #111; }
+.phone-topbar { background: #fffef9; border-bottom: 3px solid #111; }
+.phone-brand { color: #111; font-family: Arial Black, Arial, sans-serif; font-weight: 900; }
+.phone-mark { color: #111; background: #ffe600; border: 2px solid #111; border-radius: 2px; box-shadow: 3px 3px 0 #064bff; }
+.phone-admin-link { color: #064bff; font-weight: 800; }
+.phone-content { width: min(1000px, calc(100% - 48px)); padding-top: 48px; }
+.phone-heading h1 { color: #090909; font: 900 clamp(38px, 6vw, 54px)/1 Arial Black, Arial, sans-serif; letter-spacing: -.06em; }
+.phone-eyebrow { color: #064bff; font-weight: 900; letter-spacing: .16em; }
+.phone-heading > p:last-child { color: #45433d; }
+.phone-card { background: #fffef9; border: 3px solid #111; border-radius: 3px; box-shadow: 7px 7px 0 #111; }
+.phone-card-heading { margin-bottom: 22px; }
+.phone-step { color: #fff; background: #064bff; border: 2px solid #111; border-radius: 2px; font-weight: 900; }
+.phone-card h2 { color: #111; font: 900 18px Arial, sans-serif; }
+.phone-card h2 small { color: #45433d; }
+.phone-status-pill { border: 2px solid #111; border-radius: 2px; background: #f0eddf; color: #333; font-weight: 800; }
+.phone-status-pill.is-online { background: #e5f4e9; color: #075d31; }
+.phone-form label, .phone-target-select { color: #111; font-weight: 800; }
+.phone-form input, .phone-form select, .phone-target-select select { border: 2px solid #111; border-radius: 2px; background: #fff; color: #111; box-shadow: 2px 2px 0 #c8c3b6; }
+.phone-form input:focus, .phone-form select:focus, .phone-target-select select:focus, .phone-audio-device-grid select:focus { border-color: #064bff; box-shadow: 3px 3px 0 #064bff; }
+.phone-primary-button { background: #ffe600; border: 3px solid #111; border-radius: 2px; color: #111; box-shadow: 4px 4px 0 #111; font-weight: 900; }
+.phone-primary-button:hover:not(:disabled) { background: #064bff; color: #fff; box-shadow: 4px 4px 0 #111; }
+.phone-primary-button:disabled { color: #555248; background: #dedacd; border-color: #555248; box-shadow: none; opacity: 1; }
+.phone-secondary-button { background: #fff; border: 2px solid #111; border-radius: 2px; color: #111; box-shadow: 3px 3px 0 #111; }
+.phone-hangup-button { background: #064bff; border: 3px solid #111; border-radius: 2px; color: #fff; box-shadow: 4px 4px 0 #111; }
+.phone-helper { border-top: 2px solid #d4d0c4; color: #4c4940; }
+.phone-number-hint, .phone-call-state, .phone-call-extension { color: #55524a; }
+.phone-text-button, .phone-device-refresh { color: #064bff; font-weight: 800; }
+.phone-error { border: 2px solid #111; border-radius: 2px; background: #fff0ef; color: #941726; }
+.phone-call-overlay { background: rgb(17 17 17 / .24); }
+.phone-call-modal { border: 3px solid #111; border-radius: 4px; background: #fffef9; box-shadow: 9px 9px 0 #ffe600, 15px 15px 0 #111; }
+.phone-call-avatar { color: #111; background: #ffe600; border: 3px solid #111; box-shadow: 5px 5px 0 #064bff; }
+.phone-call-connected { color: #075d31; font-weight: 900; }
+.phone-call-ringing { color: #064bff; font-weight: 900; }
+.phone-call-modal h2 { color: #111; font: 900 26px Arial Black, Arial, sans-serif; letter-spacing: -.045em; }
+.phone-call-duration { color: #111; font-weight: 900; }
+.phone-incoming-actions { gap: 12px; }
+.phone-answer-button, .phone-reject-button { min-height: 50px; border: 3px solid #111; border-radius: 2px; color: #111; box-shadow: 4px 4px 0 #111; font: 900 13px Arial, sans-serif; }
+.phone-answer-button { background: #ffe600; }
+.phone-reject-button { background: #064bff; color: #fff; }
+.phone-answer-button:hover:not(:disabled), .phone-reject-button:hover:not(:disabled) { filter: brightness(.93); transform: translate(2px, 2px); box-shadow: 2px 2px 0 #111; }
+.phone-call-audio-toggle { border: 2px solid #111; border-radius: 2px; background: #fff; color: #111; box-shadow: 2px 2px 0 #111; font: 800 12px Arial, sans-serif; }
+.phone-call-audio-toggle:hover { background: #e5edff; border-color: #111; }
+.phone-call-audio-toggle.is-muted { border-color: #111; background: #ffe600; color: #111; }
+.phone-modal-hangup { background: #064bff; color: #fff; }
+.phone-modal-hangup:hover:not(:disabled) { background: #0038c9; }
+.phone-audio-settings { border-top: 2px solid #d4d0c4; }
+.phone-audio-settings-heading h3, .phone-audio-device-grid label { color: #111; font-weight: 900; }
+.phone-audio-device-grid select { border: 2px solid #111; border-radius: 2px; background: #fff; color: #111; box-shadow: 2px 2px 0 #c8c3b6; }
+.phone-device-hint { color: #55524a; }
+.phone-call-audio-error, .phone-device-error { color: #941726; font-weight: 700; }
+.phone-audio-retry { border: 2px solid #111; border-radius: 2px; background: #ffe600; color: #111; font-weight: 900; }
+.phone-footer { color: #4c4940; }
+.phone-footer a { color: #064bff; font-weight: 800; }
+@media (max-width: 620px) {
+  .phone-content { width: min(100% - 28px, 1000px); padding-top: 36px; }
+  .phone-card { padding: 20px 17px; box-shadow: 5px 5px 0 #111; }
+}
+@media (max-width: 420px) {
+  .phone-call-modal { padding: 28px 18px 22px; box-shadow: 6px 6px 0 #ffe600, 10px 10px 0 #111; }
+  .phone-call-modal h2 { font-size: 23px; }
+}

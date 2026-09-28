@@ -21,8 +21,9 @@ const (
 var ErrInvalidConfig = errors.New("invalid_route_config")
 
 type RouteSnapshot struct {
-	Revision   uint64             `json:"revision"`
-	Extensions map[string]Profile `json:"extensions"`
+	Revision          uint64             `json:"revision"`
+	Extensions        map[string]Profile `json:"extensions"`
+	BrowserExtensions map[string]Profile `json:"browserExtensions,omitempty"`
 }
 
 type RouteStore interface {
@@ -31,9 +32,10 @@ type RouteStore interface {
 }
 
 type routeFile struct {
-	SchemaVersion int                `json:"schemaVersion"`
-	Revision      uint64             `json:"revision"`
-	Extensions    map[string]Profile `json:"extensions"`
+	SchemaVersion     int                `json:"schemaVersion"`
+	Revision          uint64             `json:"revision"`
+	Extensions        map[string]Profile `json:"extensions"`
+	BrowserExtensions map[string]Profile `json:"browserExtensions,omitempty"`
 }
 
 func validProfile(profile Profile) bool {
@@ -89,7 +91,12 @@ func decodeConfig(data []byte, allowed map[string]struct{}) (RouteSnapshot, erro
 			return RouteSnapshot{}, ErrInvalidConfig
 		}
 	}
-	return RouteSnapshot{Revision: file.Revision, Extensions: cloneRoutes(file.Extensions)}, nil
+	for extension, profile := range file.BrowserExtensions {
+		if !validExtension(extension) || !validProfile(profile) {
+			return RouteSnapshot{}, ErrInvalidConfig
+		}
+	}
+	return RouteSnapshot{Revision: file.Revision, Extensions: cloneRoutes(file.Extensions), BrowserExtensions: cloneRoutes(file.BrowserExtensions)}, nil
 }
 
 func rejectDuplicateKeys(data []byte) error {

@@ -51,6 +51,11 @@ voice-conversion limit and measured capacity.
   phone. Incoming speech from the other participants remains clear at the
   assigned phone. Do not process unrelated phones based on caller ID text or IP
   address.
+- The production RVC worker allows one stream per call. If both caller and
+  callee select `phone-guy`, process the caller's speech for that call; retain
+  the callee's profile for calls where the other endpoint is not also selected.
+  This keeps calls connected without pretending that two streams are being
+  converted simultaneously.
 - Resolve a phone by its verified PJSIP identity. Snapshot the selected profile
   when the call is admitted; edits apply to new calls, not active calls.
 - Processing is fail-closed: if routing, conversion, validation, or the RVC

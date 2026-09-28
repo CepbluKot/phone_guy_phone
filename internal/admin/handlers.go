@@ -20,18 +20,19 @@ import (
 const maxBodyBytes = 4 << 10
 
 type Handler struct {
-	store        voiceconfig.RouteStore
-	password     []byte
-	origins      map[string]struct{}
-	sessions     *sessions
-	logger       *log.Logger
-	authDisabled bool
-	metrics      func() telemetry.TelemetrySnapshot
-	phones       *phonebook.Store
+	store         voiceconfig.RouteStore
+	password      []byte
+	origins       map[string]struct{}
+	sessions      *sessions
+	logger        *log.Logger
+	authDisabled  bool
+	metrics       func() telemetry.TelemetrySnapshot
+	phones        *phonebook.Store
+	activeBrowser func(string) bool
 }
 
 func NewHandler(store voiceconfig.RouteStore, password, origins string, logger *log.Logger, authDisabled ...bool) http.Handler {
-	return newHandler(store, password, origins, logger, authDisabled, nil)
+	return newHandler(store, password, origins, logger, authDisabled, nil, nil, nil)
 }
 
 func NewHandlerWithMetrics(store voiceconfig.RouteStore, password, origins string, logger *log.Logger, authDisabled bool, metrics func() telemetry.TelemetrySnapshot, phoneStores ...*phonebook.Store) http.Handler {
@@ -39,10 +40,20 @@ func NewHandlerWithMetrics(store voiceconfig.RouteStore, password, origins strin
 	if len(phoneStores) > 0 {
 		phones = phoneStores[0]
 	}
-	return newHandler(store, password, origins, logger, []bool{authDisabled}, metrics, phones)
+	return newHandler(store, password, origins, logger, []bool{authDisabled}, metrics, phones, nil)
 }
 
-func newHandler(store voiceconfig.RouteStore, password, origins string, logger *log.Logger, authDisabled []bool, metrics func() telemetry.TelemetrySnapshot, phones ...*phonebook.Store) http.Handler {
+// NewHandlerWithBrowserProfiles enables profile updates for currently active
+// softphones while keeping their settings separate from physical extensions.
+func NewHandlerWithBrowserProfiles(store voiceconfig.RouteStore, password, origins string, logger *log.Logger, authDisabled bool, metrics func() telemetry.TelemetrySnapshot, activeBrowser func(string) bool, phoneStores ...*phonebook.Store) http.Handler {
+	var phones *phonebook.Store
+	if len(phoneStores) > 0 {
+		phones = phoneStores[0]
+	}
+	return newHandler(store, password, origins, logger, []bool{authDisabled}, metrics, phones, activeBrowser)
+}
+
+func newHandler(store voiceconfig.RouteStore, password, origins string, logger *log.Logger, authDisabled []bool, metrics func() telemetry.TelemetrySnapshot, phones *phonebook.Store, activeBrowser func(string) bool) http.Handler {
 	allowedOrigins, validOrigins := parseOrigins(origins)
 	disabled := len(authDisabled) > 0 && authDisabled[0]
 	if !validOrigins || store == nil || (!disabled && password == "") {
@@ -63,10 +74,7 @@ func newHandler(store voiceconfig.RouteStore, password, origins string, logger *
 			})
 		}
 	}
-	h := &Handler{store: store, password: []byte(password), origins: allowedOrigins, sessions: state, logger: logger, authDisabled: disabled, metrics: metrics}
-	if len(phones) > 0 {
-		h.phones = phones[0]
-	}
+	h := &Handler{store: store, password: []byte(password), origins: allowedOrigins, sessions: state, logger: logger, authDisabled: disabled, metrics: metrics, phones: phones, activeBrowser: activeBrowser}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /admin/api/v1/auth-mode", h.authMode)
 	mux.HandleFunc("POST /admin/api/v1/session", h.login)
@@ -81,6 +89,7 @@ func newHandler(store voiceconfig.RouteStore, password, origins string, logger *
 		mux.HandleFunc("PUT /admin/api/v1/phones/{mac}", h.updatePhone)
 	}
 	mux.HandleFunc("PUT /admin/api/v1/voice-routes/{extension}", h.putRoute)
+	mux.HandleFunc("PUT /admin/api/v1/voice-routes/{extension}/browser", h.putBrowserRoute)
 	return mux
 }
 
@@ -190,6 +199,48 @@ func (h *Handler) putRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	snapshot, err := h.store.Update(r.PathValue("extension"), request.Profile, request.Revision)
+	if errors.Is(err, voiceconfig.ErrRevisionConflict) {
+		writeError(w, http.StatusConflict, "stale_revision")
+		return
+	}
+	if errors.Is(err, voiceconfig.ErrUnknownExtension) || errors.Is(err, voiceconfig.ErrInvalidProfile) {
+		writeError(w, http.StatusUnprocessableEntity, "invalid_route")
+		return
+	}
+	if err != nil {
+		h.log("route_config_write_failed")
+		writeError(w, http.StatusServiceUnavailable, "config_unavailable")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(snapshot)
+}
+
+func (h *Handler) putBrowserRoute(w http.ResponseWriter, r *http.Request) {
+	if _, _, ok := h.authorize(w, r, true); !ok {
+		return
+	}
+	extension := r.PathValue("extension")
+	if h.activeBrowser == nil || !h.activeBrowser(extension) {
+		writeError(w, http.StatusUnprocessableEntity, "inactive_browser_phone")
+		return
+	}
+	store, ok := h.store.(interface {
+		UpdateBrowser(string, voiceconfig.Profile, uint64) (voiceconfig.RouteSnapshot, error)
+	})
+	if !ok {
+		writeError(w, http.StatusServiceUnavailable, "config_unavailable")
+		return
+	}
+	var request struct {
+		Profile  voiceconfig.Profile `json:"profile"`
+		Revision uint64              `json:"revision"`
+	}
+	if decodeRequest(w, r, &request) != nil {
+		writeError(w, http.StatusUnprocessableEntity, "invalid_route")
+		return
+	}
+	snapshot, err := store.UpdateBrowser(extension, request.Profile, request.Revision)
 	if errors.Is(err, voiceconfig.ErrRevisionConflict) {
 		writeError(w, http.StatusConflict, "stale_revision")
 		return
