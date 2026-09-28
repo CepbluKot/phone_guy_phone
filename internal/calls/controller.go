@@ -554,6 +554,8 @@ func outcomeCode(err error) string {
 	switch {
 	case errors.Is(err, ErrProcessingBusy), errors.Is(err, rvc.ErrBusy):
 		return "rvc_busy"
+	case errors.Is(err, rvc.ErrBackpressure):
+		return "rvc_output_backpressure"
 	case errors.Is(err, rvc.ErrModelUnavailable), errors.Is(err, rvc.ErrDisconnected), errors.Is(err, rvc.ErrTimeout):
 		return "rvc_unavailable"
 	case errors.Is(err, rvc.ErrInvalidBlock), errors.Is(err, rvc.ErrInvalidMetrics), errors.Is(err, rvc.ErrInvalidReady):
@@ -758,6 +760,7 @@ func (controller *Controller) monitorVoice(call *managedCall, voice *Session) {
 		expectedPeerHangup := call.flow == "callback-1900" && call.route.PeerProfile == voiceconfig.ProfilePhoneGuy && errors.Is(voiceErr, ari.ErrMediaHangup)
 		call.mu.Unlock()
 		if voiceErr != nil && !expectedPeerHangup {
+			controller.recordOutcome(outcomeCode(voiceErr))
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
 			_ = controller.closeCall(ctx, call)
