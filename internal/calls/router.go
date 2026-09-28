@@ -11,17 +11,17 @@ import (
 )
 
 var (
-	ErrUnknownEndpoint        = errors.New("unknown_sip_endpoint")
-	ErrInvalidProfile         = errors.New("invalid_voice_profile")
-	ErrDualProcessedEndpoints = errors.New("multiple_processed_endpoints_unsupported")
+	ErrUnknownEndpoint = errors.New("unknown_sip_endpoint")
+	ErrInvalidProfile  = errors.New("invalid_voice_profile")
 )
 
 var playbackServices = map[string]struct{}{"1987": {}, "2014": {}, "1993": {}}
 
 type endpoints struct {
-	Source string
-	Peer   string
-	Flow   string
+	Source        string
+	Peer          string
+	Flow          string
+	BrowserSource bool
 }
 
 type Route struct {
@@ -163,10 +163,13 @@ func (router *Router) Resolve(ctx context.Context, event ari.Event) (*Route, err
 		return nil, err
 	}
 	profile, err := profileForRouteExtension(snapshot, identity.Source, dynamicExts)
+	if identity.BrowserSource {
+		profile, err = profileForBrowserExtension(snapshot, identity.Source)
+	}
 	if err != nil {
 		return nil, err
 	}
-	route := &Route{Source: identity.Source, Peer: identity.Peer, Profile: profile, Revision: snapshot.Revision, Flow: identity.Flow}
+	route := &Route{Source: identity.Source, Peer: identity.Peer, Profile: profile, Revision: snapshot.Revision, Flow: identity.Flow, BrowserTarget: router.browserTarget(identity.Peer)}
 	if identity.Peer != "conference" {
 		router.browserMu.RLock()
 		_, route.PhysicalPeer = router.physical[identity.Peer]
@@ -175,19 +178,20 @@ func (router *Router) Resolve(ctx context.Context, event ari.Event) (*Route, err
 	processed := profile == voiceconfig.ProfilePhoneGuy
 	if identity.Peer != "conference" {
 		route.PeerProfile, err = profileForRouteExtension(snapshot, identity.Peer, dynamicExts)
+		if route.BrowserTarget != "" {
+			route.PeerProfile, err = profileForBrowserExtension(snapshot, identity.Peer)
+		}
 		if err != nil {
 			return nil, err
 		}
-		route.ProcessedPeer = route.PeerProfile == voiceconfig.ProfilePhoneGuy
+		// The RVC worker supports one live stream. If both endpoints select
+		// Phone Guy, process the caller's voice and keep the call connected.
+		// When only the peer selects it, process the peer as before.
+		route.ProcessedPeer = route.PeerProfile == voiceconfig.ProfilePhoneGuy && profile != voiceconfig.ProfilePhoneGuy
 		processed = processed || route.ProcessedPeer
 	}
-	if profile == voiceconfig.ProfilePhoneGuy && route.ProcessedPeer {
-		return nil, ErrDualProcessedEndpoints
-	}
-	if route.Flow != "callback-1900" {
-		router.browserMu.RLock()
-		route.BrowserTarget = router.browserByExt[route.Peer]
-		router.browserMu.RUnlock()
+	if route.Flow == "callback-1900" {
+		route.BrowserTarget = ""
 	}
 	if processed {
 		route.lease, err = router.gate.Acquire(ctx)
@@ -196,6 +200,12 @@ func (router *Router) Resolve(ctx context.Context, event ari.Event) (*Route, err
 		}
 	}
 	return route, nil
+}
+
+func (router *Router) browserTarget(extension string) string {
+	router.browserMu.RLock()
+	defer router.browserMu.RUnlock()
+	return router.browserByExt[extension]
 }
 
 // ResolvePlaybackService validates the trusted caller before a one-way local
@@ -275,12 +285,14 @@ func resolveEndpointsWithBrowsers(event ari.Event, allowed map[string]struct{}, 
 		return endpoints{}, ErrUnknownEndpoint
 	}
 	rawSource := source
+	browserSource := false
 	if _, ok := allowed[source]; !ok {
 		logical, browser := browsers[source]
 		if !browser {
 			return endpoints{}, ErrUnknownEndpoint
 		}
 		source = logical
+		browserSource = true
 	}
 	if peer != "conference" {
 		if _, ok := allowed[peer]; !ok {
@@ -291,7 +303,7 @@ func resolveEndpointsWithBrowsers(event ari.Event, allowed map[string]struct{}, 
 	if event.Channel.ID == "" || !ok || (channelEndpoint != rawSource && channelEndpoint != peer) {
 		return endpoints{}, ErrUnknownEndpoint
 	}
-	return endpoints{Source: source, Peer: peer, Flow: flow}, nil
+	return endpoints{Source: source, Peer: peer, Flow: flow, BrowserSource: browserSource}, nil
 }
 
 func pjsipEndpoint(channelName string) (string, bool) {
@@ -326,4 +338,17 @@ func profileForRouteExtension(snapshot voiceconfig.RouteSnapshot, extension stri
 		}
 	}
 	return profileForSource(snapshot, extension)
+}
+
+func profileForBrowserExtension(snapshot voiceconfig.RouteSnapshot, extension string) (voiceconfig.Profile, error) {
+	profile, exists := snapshot.BrowserExtensions[extension]
+	if !exists {
+		return voiceconfig.ProfileOriginal, nil
+	}
+	switch profile {
+	case voiceconfig.ProfileOriginal, voiceconfig.ProfilePhoneGuy:
+		return profile, nil
+	default:
+		return "", ErrInvalidProfile
+	}
 }

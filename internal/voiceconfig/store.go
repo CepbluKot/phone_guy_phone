@@ -103,7 +103,7 @@ func defaultFileOps() fileOps {
 func (s *Store) Snapshot() (RouteSnapshot, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return RouteSnapshot{Revision: s.snapshot.Revision, Extensions: cloneRoutes(s.snapshot.Extensions)}, nil
+	return RouteSnapshot{Revision: s.snapshot.Revision, Extensions: cloneRoutes(s.snapshot.Extensions), BrowserExtensions: cloneRoutes(s.snapshot.BrowserExtensions)}, nil
 }
 
 func (s *Store) Update(extension string, profile Profile, expectedRevision uint64) (RouteSnapshot, error) {
@@ -121,17 +121,44 @@ func (s *Store) Update(extension string, profile Profile, expectedRevision uint6
 	if s.snapshot.Revision == math.MaxUint64 {
 		return RouteSnapshot{}, ErrInvalidConfig
 	}
-	next := RouteSnapshot{Revision: s.snapshot.Revision + 1, Extensions: cloneRoutes(s.snapshot.Extensions)}
+	next := RouteSnapshot{Revision: s.snapshot.Revision + 1, Extensions: cloneRoutes(s.snapshot.Extensions), BrowserExtensions: cloneRoutes(s.snapshot.BrowserExtensions)}
 	next.Extensions[extension] = profile
 	if err := s.persist(next); err != nil {
 		return RouteSnapshot{}, err
 	}
 	s.snapshot = next
-	return RouteSnapshot{Revision: next.Revision, Extensions: cloneRoutes(next.Extensions)}, nil
+	return RouteSnapshot{Revision: next.Revision, Extensions: cloneRoutes(next.Extensions), BrowserExtensions: cloneRoutes(next.BrowserExtensions)}, nil
+}
+
+// UpdateBrowser stores a browser softphone profile independently from the
+// physical SIP extension profile. The admin handler restricts writes to active
+// browser registrations; call routing still verifies the registered endpoint.
+func (s *Store) UpdateBrowser(extension string, profile Profile, expectedRevision uint64) (RouteSnapshot, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if expectedRevision != s.snapshot.Revision {
+		return RouteSnapshot{}, ErrRevisionConflict
+	}
+	if !validExtension(extension) {
+		return RouteSnapshot{}, ErrUnknownExtension
+	}
+	if !validProfile(profile) {
+		return RouteSnapshot{}, ErrInvalidProfile
+	}
+	if s.snapshot.Revision == math.MaxUint64 {
+		return RouteSnapshot{}, ErrInvalidConfig
+	}
+	next := RouteSnapshot{Revision: s.snapshot.Revision + 1, Extensions: cloneRoutes(s.snapshot.Extensions), BrowserExtensions: cloneRoutes(s.snapshot.BrowserExtensions)}
+	next.BrowserExtensions[extension] = profile
+	if err := s.persist(next); err != nil {
+		return RouteSnapshot{}, err
+	}
+	s.snapshot = next
+	return RouteSnapshot{Revision: next.Revision, Extensions: cloneRoutes(next.Extensions), BrowserExtensions: cloneRoutes(next.BrowserExtensions)}, nil
 }
 
 func (s *Store) persist(snapshot RouteSnapshot) error {
-	data, err := json.Marshal(routeFile{SchemaVersion: schemaVersion, Revision: snapshot.Revision, Extensions: snapshot.Extensions})
+	data, err := json.Marshal(routeFile{SchemaVersion: schemaVersion, Revision: snapshot.Revision, Extensions: snapshot.Extensions, BrowserExtensions: snapshot.BrowserExtensions})
 	if err != nil {
 		return ErrInvalidConfig
 	}

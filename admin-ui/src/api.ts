@@ -2,6 +2,7 @@ export type Profile = "original" | "phone-guy";
 export type RouteSnapshot = {
   revision: number;
   extensions: Record<string, Profile>;
+  browserExtensions?: Record<string, Profile>;
 };
 export type PhoneDevice = {
   mac: string;
@@ -80,6 +81,12 @@ export const api = {
         body: JSON.stringify({ profile, revision }),
       },
   ),
+  updateBrowser: (extension: string, profile: Profile, revision: number, csrfToken: string) =>
+    request<RouteSnapshot>(`/admin/api/v1/voice-routes/${encodeURIComponent(extension)}/browser`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
+      body: JSON.stringify({ profile, revision }),
+    }),
   addPhone: (device: PhoneDevice, revision: number, csrfToken: string) =>
     request<PhonebookSnapshot>("/admin/api/v1/phones", {
       method: "POST",

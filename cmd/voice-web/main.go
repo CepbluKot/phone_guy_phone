@@ -110,7 +110,14 @@ func run() error {
 		return errors.New("admin origin allowlist unavailable")
 	}
 	metrics := telemetry.NewCollector()
-	adminAPI := admin.NewHandlerWithMetrics(routes, password, origin, log.Default(), authDisabled, func() telemetry.TelemetrySnapshot { return metrics.Snapshot(time.Now()) }, phones)
+	var browserSessions *webphone.Sessions
+	adminAPI := admin.NewHandlerWithBrowserProfiles(routes, password, origin, log.Default(), authDisabled, func() telemetry.TelemetrySnapshot { return metrics.Snapshot(time.Now()) }, func(extension string) bool {
+		if browserSessions == nil {
+			return false
+		}
+		_, active := browserSessions.ActiveBrowser(extension)
+		return active
+	}, phones)
 	for i := range passwordBytes {
 		passwordBytes[i] = 0
 	}
@@ -163,6 +170,7 @@ func run() error {
 		if sessionErr != nil {
 			return errors.New("browser phone session unavailable")
 		}
+		browserSessions = sessions
 		if callRouter != nil {
 			sessions.SetEndpointObserver(callRouter.SetBrowserEndpoint)
 		}

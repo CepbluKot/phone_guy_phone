@@ -1,61 +1,46 @@
 import type { ReactNode } from "react";
 import {
-  Activity,
   AudioLines,
   ChevronLeft,
   ChevronRight,
   Headphones,
   LayoutGrid,
-  Smartphone,
-  UserRound,
   type LucideIcon,
 } from "lucide-react";
 
-export type VoicePage = "phones" | "existing" | "unassigned" | "profiles" | "load";
+export type VoicePage = "phones" | "profiles";
 
 type VoiceShellLabels = {
   appName: string;
   manage: string;
   phones: string;
-  existingPhones: string;
-  newUnassigned: string;
   voiceProfiles: string;
-  load: string;
+  adminHome: string;
   browserPhone: string;
-  service: string;
   signOut: string;
   collapseSidebar: string;
   expandSidebar: string;
 };
 
-const navigation: Array<{ page: VoicePage; label: keyof Pick<VoiceShellLabels, "phones" | "existingPhones" | "newUnassigned" | "voiceProfiles" | "load">; icon: LucideIcon }> = [
+const navigation: Array<{ page: VoicePage; label: keyof Pick<VoiceShellLabels, "phones" | "voiceProfiles">; icon: LucideIcon }> = [
   { page: "phones", label: "phones", icon: LayoutGrid },
-  { page: "existing", label: "existingPhones", icon: Smartphone },
-  { page: "unassigned", label: "newUnassigned", icon: UserRound },
   { page: "profiles", label: "voiceProfiles", icon: AudioLines },
-  { page: "load", label: "load", icon: Activity },
 ];
 
 export function VoiceShell({
   page,
-  pageTitle,
-  sectionTitle,
   labels,
   sidebarCollapsed,
   onSidebarCollapsedChange,
   onNavigate,
-  languageControl,
   onSignOut,
   children,
 }: {
   page: VoicePage;
-  pageTitle: string;
-  sectionTitle: string;
   labels: VoiceShellLabels;
   sidebarCollapsed: boolean;
   onSidebarCollapsedChange: (collapsed: boolean) => void;
   onNavigate: (page: VoicePage) => void;
-  languageControl: ReactNode;
   onSignOut?: () => void;
   children: ReactNode;
 }) {
@@ -108,21 +93,18 @@ export function VoiceShell({
         </a>
 
         <div className="sidebar-bottom">
-          <span className="online-dot" />
-          <span className="sidebar-bottom-label">{labels.service}</span>
+          <span className="online-dot" aria-hidden="true" />
         </div>
       </aside>
 
       <main className="main-content">
         <header className="topbar">
-          <div className="breadcrumb" aria-label="Breadcrumb">
-            <span>{sectionTitle}</span>
+          <nav className="breadcrumb" aria-label="Breadcrumb">
+            <a href="#/phones" onClick={(event) => { event.preventDefault(); onNavigate("phones"); }}>{labels.adminHome}</a>
             <span aria-hidden="true">/</span>
-            <strong>{pageTitle}</strong>
-          </div>
+            <strong>{page === "phones" ? labels.phones : labels.voiceProfiles}</strong>
+          </nav>
           <div className="top-actions">
-            <span className="service-badge"><span className="online-dot" />{labels.service}</span>
-            {languageControl}
             {onSignOut ? <button className="text-button" type="button" onClick={onSignOut}>{labels.signOut}</button> : null}
           </div>
         </header>

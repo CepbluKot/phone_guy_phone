@@ -274,7 +274,7 @@ func (controller *Controller) start(ctx context.Context, event ari.Event) error 
 	if err != nil {
 		if errors.Is(err, ErrProcessingBusy) {
 			controller.recordOutcome("rvc_busy")
-		} else if errors.Is(err, ErrUnknownEndpoint) || errors.Is(err, ErrInvalidProfile) || errors.Is(err, ErrDualProcessedEndpoints) {
+		} else if errors.Is(err, ErrUnknownEndpoint) || errors.Is(err, ErrInvalidProfile) {
 			controller.recordOutcome("route_rejected")
 		}
 		cleanupCtx, cancel := cleanupCallContext(ctx)

@@ -122,6 +122,30 @@ func TestUpdateUsesRevisionAndWritesAtomically(t *testing.T) {
 	}
 }
 
+func TestUpdateBrowserProfilePersistsSeparatelyFromPhysicalExtension(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "routes.json")
+	writeConfig(t, path, validConfig())
+	store := openTestStore(t, path)
+	updated, err := store.UpdateBrowser("1983", ProfilePhoneGuy, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Revision != 5 || updated.BrowserExtensions["1983"] != ProfilePhoneGuy || updated.Extensions["1983"] != ProfileOriginal {
+		t.Fatalf("browser profile changed wrong route: %+v", updated)
+	}
+	reopened, err := Open(path, testExtensions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := reopened.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.BrowserExtensions["1983"] != ProfilePhoneGuy || loaded.Extensions["1983"] != ProfileOriginal {
+		t.Fatalf("browser profile did not persist independently: %+v", loaded)
+	}
+}
+
 func TestUpdateRejectsStaleRevisionWithoutChangingFileOrSnapshot(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "routes.json")
 	writeConfig(t, path, validConfig())

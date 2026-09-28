@@ -207,6 +207,43 @@ func TestAdminAuthorizationAndRouteUpdates(t *testing.T) {
 	}
 }
 
+func TestBrowserProfileRequiresActiveSessionAndKeepsPhysicalRouteIndependent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "routes.json")
+	if err := os.WriteFile(path, []byte(`{"schemaVersion":1,"revision":7,"extensions":{"1983":"original","1987":"original"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := voiceconfig.Open(path, []string{"1983", "1987"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	active := false
+	server := httptest.NewTLSServer(NewHandlerWithBrowserProfiles(store, "known-test-password", testOrigin, nil, false, nil, func(extension string) bool { return active && extension == "1983" }))
+	defer server.Close()
+	client := server.Client()
+	client.Jar, err = cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	csrf, _ := login(t, server, client)
+	response := request(t, client, http.MethodPut, server.URL+"/admin/api/v1/voice-routes/1983/browser", `{"profile":"phone-guy","revision":7}`, testOrigin, csrf)
+	if response.StatusCode != http.StatusUnprocessableEntity {
+		response.Body.Close()
+		t.Fatalf("inactive browser update status=%d", response.StatusCode)
+	}
+	response.Body.Close()
+	active = true
+	response = request(t, client, http.MethodPut, server.URL+"/admin/api/v1/voice-routes/1983/browser", `{"profile":"phone-guy","revision":7}`, testOrigin, csrf)
+	if response.StatusCode != http.StatusOK {
+		response.Body.Close()
+		t.Fatalf("active browser update status=%d", response.StatusCode)
+	}
+	var snapshot voiceconfig.RouteSnapshot
+	decodeBody(t, response, &snapshot)
+	if snapshot.BrowserExtensions["1983"] != voiceconfig.ProfilePhoneGuy || snapshot.Extensions["1983"] != voiceconfig.ProfileOriginal {
+		t.Fatalf("unexpected route split: %+v", snapshot)
+	}
+}
+
 func mustURL(t *testing.T, raw string) *url.URL {
 	t.Helper()
 	parsed, err := url.Parse(raw)

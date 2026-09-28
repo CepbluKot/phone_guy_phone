@@ -26,6 +26,7 @@ const response = (status: number, body?: unknown) =>
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  window.history.replaceState(null, "", window.location.pathname + window.location.search);
 });
 
 describe("phone profile admin", () => {
@@ -46,6 +47,8 @@ describe("phone profile admin", () => {
     expect(screen.getByRole("button", { name: "Свернуть меню" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Профили голоса" }));
     expect(screen.getByRole("button", { name: "Профили голоса" })).toHaveAttribute("aria-current", "page");
+    expect(window.location.hash).toBe("#/profiles");
+    expect(screen.getByRole("navigation", { name: "Breadcrumb" })).toHaveTextContent(/Админка\s*\/\s*Профили голоса/);
   });
 
   it("requires login, then loads and displays current phone profiles", async () => {
@@ -168,20 +171,44 @@ describe("phone profile admin", () => {
       .mockResolvedValue(response(200, metrics));
     vi.stubGlobal("fetch", fetchMock);
     render(<App />);
-    await userEvent.click(await screen.findByRole("button", { name: "EN" }));
-    await userEvent.click(await screen.findByRole("button", { name: "Voice profiles" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Профили голоса" }));
     await userEvent.selectOptions(
-      await screen.findByLabelText("Profile for 1983"),
+      await screen.findByLabelText("Профиль для 1983"),
       "phone-guy",
     );
-    await userEvent.click(screen.getByRole("button", { name: "Save 1983" }));
-    expect(await screen.findByText("Saved")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Сохранить 1983" }));
+    expect(await screen.findByText("Сохранено")).toBeTruthy();
     expect(screen.queryByLabelText("Admin password")).toBeNull();
     const put = fetchMock.mock.calls.find(
       ([path]) => path === "/admin/api/v1/voice-routes/1983",
     )!;
     expect(put[0]).toBe("/admin/api/v1/voice-routes/1983");
     expect(new Headers(put[1].headers).get("X-CSRF-Token")).toBe("");
+  });
+
+  it("shows an independent editable voice profile for a connected browser phone", async () => {
+    const browserRoutes = { ...routes, browserExtensions: { "3454": "original" } };
+    const saved = { ...browserRoutes, revision: 5, browserExtensions: { "3454": "phone-guy" } };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response(200, { required: false }))
+      .mockResolvedValueOnce(response(200, browserRoutes))
+      .mockResolvedValueOnce(response(200, phonebook))
+      .mockResolvedValueOnce(response(200, metrics))
+      .mockResolvedValueOnce(response(200, { sessions: [{ nickname: "phoneguy123", extension: "3454", expiresAt: "2026-09-27T20:00:00Z" }] }))
+      .mockResolvedValueOnce(response(200, saved))
+      .mockResolvedValueOnce(response(200, { sessions: [{ nickname: "phoneguy123", extension: "3454", expiresAt: "2026-09-27T20:00:00Z" }] }))
+      .mockResolvedValue(response(200, metrics));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+    await userEvent.click(await screen.findByRole("button", { name: "Профили голоса" }));
+    const select = await screen.findByRole("combobox", { name: "Профиль голоса · 3454" });
+    expect(select).toHaveValue("original");
+    await userEvent.selectOptions(select, "phone-guy");
+    await userEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    expect(await screen.findByText("Сохранено")).toBeInTheDocument();
+    const put = fetchMock.mock.calls.find(([path]) => path === "/admin/api/v1/voice-routes/3454/browser");
+    expect(put).toBeTruthy();
+    expect(JSON.parse(String(put?.[1]?.body))).toEqual({ profile: "phone-guy", revision: 4 });
   });
 
   it("shows service unavailable when routes cannot be loaded", async () => {
