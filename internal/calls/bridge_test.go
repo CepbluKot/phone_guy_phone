@@ -659,7 +659,7 @@ func TestInvalidRVCBlockIsNeverInjected(t *testing.T) {
 	}
 }
 
-func TestOneRVCBlockBecomesFiftyPacedMediaFrames(t *testing.T) {
+func TestOneRVCBlockBecomesFiftyAsteriskTimedMediaFrames(t *testing.T) {
 	outputs := make(chan []byte, 1)
 	outputs <- make([]byte, rvc.BlockBytes)
 	close(outputs)

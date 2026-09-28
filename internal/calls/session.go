@@ -217,23 +217,14 @@ func (session *Session) forwardOutput() error {
 				log.Printf("voice output signal: blocks=%d nonzero_samples=%d", blocks, nonzero)
 			}
 			for offset := 0; offset < len(block); offset += rvc.FrameBytes {
-				if err := session.waitFrameTick(); err != nil {
-					return err
-				}
+				// chan_websocket queues and times PCM frames itself. Delaying each
+				// write here makes the one-block RVC output queue drift behind live
+				// audio until it overflows and ends the call.
 				if err := session.injection.SendFrame(session.ctx, block[offset:offset+rvc.FrameBytes]); err != nil {
 					return err
 				}
 			}
 		}
-	}
-}
-
-func (session *Session) waitFrameTick() error {
-	select {
-	case <-session.ctx.Done():
-		return session.ctx.Err()
-	case <-time.After(20 * time.Millisecond):
-		return nil
 	}
 }
 
