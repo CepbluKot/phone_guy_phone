@@ -22,14 +22,53 @@ const response = (status: number, body?: unknown) =>
     status,
     headers: { "Content-Type": "application/json" },
   });
+const originalInnerWidth = Object.getOwnPropertyDescriptor(window, "innerWidth");
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  window.localStorage.removeItem("voice-control-sidebar-collapsed");
+  if (originalInnerWidth) Object.defineProperty(window, "innerWidth", originalInnerWidth);
   window.history.replaceState(null, "", window.location.pathname + window.location.search);
 });
 
 describe("phone profile admin", () => {
+  it("opens a mobile drawer and closes it after choosing a section", async () => {
+    window.localStorage.removeItem("voice-control-sidebar-collapsed");
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(response(200, { required: false }))
+      .mockResolvedValueOnce(response(200, routes))
+      .mockResolvedValueOnce(response(200, phonebook))
+      .mockResolvedValueOnce(response(200, metrics)));
+    render(<App />);
+
+    const menu = await screen.findByRole("button", { name: "Открыть меню" });
+    expect(menu).toHaveAttribute("aria-expanded", "false");
+    await userEvent.click(menu);
+    expect(menu).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: "Закрыть панель навигации" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Профили голоса" }));
+    expect(menu).toHaveAttribute("aria-expanded", "false");
+    expect(await screen.findByRole("heading", { name: "Профили телефонов" })).toBeInTheDocument();
+  });
+
+  it("labels the mobile physical-phone card fields", async () => {
+    window.localStorage.removeItem("voice-control-sidebar-collapsed");
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(response(200, { required: false }))
+      .mockResolvedValueOnce(response(200, routes))
+      .mockResolvedValueOnce(response(200, { revision: 2, devices: [{ mac: "00:0b:82:f4:f2:8b", label: "Grandstream desk phone", extension: "1988", lastSeenIp: "192.168.20.66", lastSeenAt: "2026-09-29" }] }))
+      .mockResolvedValueOnce(response(200, metrics)));
+    render(<App />);
+
+    const deviceName = await screen.findByDisplayValue("Grandstream desk phone");
+    expect(deviceName.closest("td")).toHaveAttribute("data-label", "Устройство");
+    expect(screen.getByText("00:0b:82:f4:f2:8b").closest("td")).toHaveAttribute("data-label", "MAC-адрес");
+    expect(screen.getByText("192.168.20.66").closest("td")).toHaveAttribute("data-label", "IP");
+  });
+
   it("exposes the selected Voice section in an accessible application navigation", async () => {
     vi.stubGlobal(
       "fetch",

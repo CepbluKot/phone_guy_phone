@@ -67,6 +67,9 @@ const copy = {
     signOut: "Sign out",
     collapseSidebar: "Collapse sidebar",
     expandSidebar: "Expand sidebar",
+    openMobileNavigation: "Open menu",
+    closeMobileNavigation: "Close menu",
+    dismissMobileNavigation: "Close navigation drawer",
     allowedNow: "Allowed now",
     estimate: "Measured estimate",
     notMeasured: "Not measured",
@@ -145,6 +148,9 @@ const copy = {
     signOut: "Выйти",
     collapseSidebar: "Свернуть меню",
     expandSidebar: "Развернуть меню",
+    openMobileNavigation: "Открыть меню",
+    closeMobileNavigation: "Закрыть меню",
+    dismissMobileNavigation: "Закрыть панель навигации",
     allowedNow: "Разрешено сейчас",
     estimate: "Измеренная оценка",
     notMeasured: "Не измерено",
@@ -613,7 +619,7 @@ function ProfileTable({
         <tbody>
           {extensions.map((extension) => (
             <tr className={phoneLabels[extension] ? "physical-profile-row" : "virtual-profile-row"} key={extension}>
-              <td>
+              <td data-label={labels.phone}>
                 <div className="phone-cell">
                   <span className="phone-avatar" aria-hidden="true">{phoneLabels[extension] ? "▣" : "#"}</span>
                   <span className="profile-phone-identity">
@@ -622,7 +628,7 @@ function ProfileTable({
                   </span>
                 </div>
               </td>
-              <td>
+              <td data-label={labels.role}>
                 <label className="sr-only" htmlFor={`profile-${extension}`}>
                   {language === "en" ? `Profile for ${extension}` : `Профиль для ${extension}`}
                 </label>
@@ -635,7 +641,7 @@ function ProfileTable({
                   <option value="phone-guy">{labels.phoneGuy}</option>
                 </select>
               </td>
-              <td className="row-actions">
+              <td className="row-actions" data-label="">
                 <span className={`save-message ${messages[extension] ?? ""}`} role={messages[extension] ? "status" : undefined}>
                   {messages[extension] === "saved" ? labels.saved : messages[extension] === "stale" ? labels.stale : messages[extension] === "error" ? labels.saveError : ""}
                 </span>
@@ -708,7 +714,7 @@ function PhysicalPhonesPage({
     </section>
     <section className="panel inventory-panel unassigned-panel" aria-label={labels.unassignedHeading}>
       <div className="panel-heading"><div><h2>{labels.unassignedHeading}</h2><p className="muted">{language === "en" ? "Phones listed here do not have an extension assigned yet." : "Здесь собраны телефоны, которым ещё не назначен внутренний номер."}</p></div><button className="button secondary" type="button" onClick={() => document.getElementById("phone-add-panel")?.scrollIntoView({ behavior: "smooth", block: "center" })}>＋ {labels.addDevice}</button></div>
-      {unassignedDevices.length ? <div className="table-scroll"><table className="inventory-table"><thead><tr><th>{labels.device}</th><th>{labels.mac}</th><th>IP</th><th>{labels.status}</th></tr></thead><tbody>{unassignedDevices.map((device) => <tr key={device.mac}><td><strong>{device.label}</strong></td><td className="device-mac">{device.mac}</td><td>{device.lastSeenIp ?? labels.unknown}</td><td><span className={`observation-pill ${device.lastSeenAt ? "observed" : "unknown"}`}><span />{device.lastSeenAt ? labels.historyAvailable : labels.historyMissing}</span></td></tr>)}</tbody></table></div> : <div className="inventory-empty-state"><span className="empty-phone-icon" aria-hidden="true">▯</span><strong>{labels.noUnassigned}</strong><p>{language === "en" ? "New phones will appear here when they are added to the inventory." : "Новые телефоны появятся здесь после добавления в реестр."}</p></div>}
+      {unassignedDevices.length ? <div className="table-scroll"><table className="inventory-table"><thead><tr><th>{labels.device}</th><th>{labels.mac}</th><th>IP</th><th>{labels.status}</th></tr></thead><tbody>{unassignedDevices.map((device) => <tr key={device.mac}><td data-label={labels.device}><strong>{device.label}</strong></td><td data-label={labels.mac} className="device-mac">{device.mac}</td><td data-label="IP">{device.lastSeenIp ?? labels.unknown}</td><td data-label={labels.status}><span className={`observation-pill ${device.lastSeenAt ? "observed" : "unknown"}`}><span />{device.lastSeenAt ? labels.historyAvailable : labels.historyMissing}</span></td></tr>)}</tbody></table></div> : <div className="inventory-empty-state"><span className="empty-phone-icon" aria-hidden="true">▯</span><strong>{labels.noUnassigned}</strong><p>{language === "en" ? "New phones will appear here when they are added to the inventory." : "Новые телефоны появятся здесь после добавления в реестр."}</p></div>}
     </section>
     <section className="panel phone-add-panel" id="phone-add-panel" aria-label={labels.addDevice}>
       <div className="panel-heading"><div><h2>{labels.addDevice}</h2><p className="muted">{labels.mappingOnly}</p></div></div>
@@ -745,11 +751,11 @@ function PhoneInventoryRow({ device, allDevices, extensions, draft, message, sav
   const occupied = new Set(allDevices.filter((other) => other.mac !== device.mac).map((other) => other.extension).filter(Boolean));
   const changed = draft.label !== device.label || draft.extension !== (device.extension ?? "");
   return <tr>
-    <td><label className="sr-only" htmlFor={`label-${device.mac}`}>{labels.label} {device.mac}</label><input className="device-label-input" id={`label-${device.mac}`} value={draft.label} maxLength={80} onChange={(event) => setDraft({ ...draft, label: event.target.value })} /></td>
-    <td className="device-mac">{device.mac}</td><td>{device.lastSeenIp ?? labels.unknown}</td>
-    <td><label className="sr-only" htmlFor={`extension-${device.mac}`}>{labels.phone} {device.mac}</label><select id={`extension-${device.mac}`} value={draft.extension} onChange={(event) => setDraft({ ...draft, extension: event.target.value })}><option value="">{labels.unassigned}</option>{extensions.map((extension) => <option key={extension} value={extension} disabled={occupied.has(extension)}>{extension}</option>)}</select></td>
-    <td><span className={`observation-pill ${device.lastSeenAt ? "observed" : "unknown"}`} title={device.lastSeenAt ?? labels.unknown}><span />{device.lastSeenAt ? labels.historyAvailable : labels.historyMissing}</span></td>
-    <td className="row-actions"><span className="save-message saved" role={message ? "status" : undefined}>{message}</span><button className="button primary save-button" disabled={!changed || saving} onClick={onSave}>{saving ? "…" : labels.save}</button></td>
+    <td data-label={labels.device}><label className="sr-only" htmlFor={`label-${device.mac}`}>{labels.label} {device.mac}</label><input className="device-label-input" id={`label-${device.mac}`} value={draft.label} maxLength={80} onChange={(event) => setDraft({ ...draft, label: event.target.value })} /></td>
+    <td className="device-mac" data-label={labels.mac}>{device.mac}</td><td data-label="IP">{device.lastSeenIp ?? labels.unknown}</td>
+    <td data-label={labels.phone}><label className="sr-only" htmlFor={`extension-${device.mac}`}>{labels.phone} {device.mac}</label><select id={`extension-${device.mac}`} value={draft.extension} onChange={(event) => setDraft({ ...draft, extension: event.target.value })}><option value="">{labels.unassigned}</option>{extensions.map((extension) => <option key={extension} value={extension} disabled={occupied.has(extension)}>{extension}</option>)}</select></td>
+    <td data-label={labels.status}><span className={`observation-pill ${device.lastSeenAt ? "observed" : "unknown"}`} title={device.lastSeenAt ?? labels.unknown}><span />{device.lastSeenAt ? labels.historyAvailable : labels.historyMissing}</span></td>
+    <td className="row-actions" data-label=""><span className="save-message saved" role={message ? "status" : undefined}>{message}</span><button className="button primary save-button" disabled={!changed || saving} onClick={onSave}>{saving ? "…" : labels.save}</button></td>
   </tr>;
 }
 

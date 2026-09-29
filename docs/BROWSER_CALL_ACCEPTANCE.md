@@ -120,6 +120,19 @@ API routing regressions after the admin and phone domains are split.
 | Hangup and cleanup | **Passed** — both calls ended, the browser leases were released, browser status returned `{"sessions":[]}`, and Asterisk reported 0 active channels and 0 active calls. |
 | Final result | Registration display, refresh persistence, call signaling/media transport, RVC processing, and cleanup passed. Audible speech remains unverified in this synthetic-media run. |
 
+### Mobile admin UI release and post-deploy acceptance — 2026-09-29
+
+| Field | Result |
+| --- | --- |
+| Date/time and deployed release | 2026-09-29 15:49 UTC; Go release `20260929T151908Z` |
+| Mobile visual check | **Passed** — production admin profiles and phones pages inspected at 375px; navigation drawer, card-style physical phone rows, and single-column phone registration form were visible without clipped content. |
+| Browser registrations in admin during both leases | **Passed** — `njbh · 345` and `ыыва · 3454` appeared under **Браузерные телефоны** as **Подключён**. Physical `1983`/`1988` and virtual `1987`/`2014` remained in their own sections. |
+| A-to-B incoming modal / answer / media | **Passed** — modal and answer worked; ICE connected; inbound and outbound audio RTP counters advanced in both browser sessions. Call ended from B; both pages returned idle and stayed registered. |
+| B-to-A incoming modal / answer / media | **Passed** — modal and answer worked; ICE connected; inbound and outbound audio RTP counters advanced in both browser sessions after the streams settled. Call ended from A; both pages returned idle and stayed registered. |
+| Hangup and cleanup | **Passed** — browser leases released, `/phone/api/v1/status` returned `{"sessions":[]}`, and Asterisk reported 0 active channels and 0 active calls. |
+| Service recovery after test-data cleanup | **Passed** — Go container healthy; both admin and phone domains returned HTTP 200; the temporary test nickname on `1988` was removed and the original empty display name restored. |
+| Final result | Mobile layout, admin visibility, call signaling, RTP transport, hangup, and cleanup passed. Audible speech and RVC voice quality remain unverified because the isolated browsers used silent synthetic microphones. |
+
 ### Previous automated live run
 
 | Field | Result |
