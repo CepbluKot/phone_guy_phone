@@ -12,6 +12,7 @@ import (
 const (
 	HeartbeatInterval = 10 * time.Second
 	LeaseTimeout      = 30 * time.Second
+	browserSIPDomain  = "vm-voice-1.lan.awesomeio.ru"
 )
 
 type DynamicPJSIP interface {
@@ -54,7 +55,7 @@ type Sessions struct {
 }
 
 func NewSessions(directory *Directory, ari DynamicPJSIP, wsURL string) (*Sessions, error) {
-	if directory == nil || ari == nil || wsURL != "wss://vm-voice-1.lan.awesomeio.ru/ws/phone-signaling" {
+	if directory == nil || ari == nil || wsURL != "wss://"+browserSIPDomain+"/ws/phone-signaling" {
 		return nil, ErrInvalid
 	}
 	return &Sessions{directory: directory, ari: ari, active: map[string]*lease{}, byID: map[string]*lease{}, wsURL: wsURL, now: time.Now}, nil
@@ -100,7 +101,7 @@ func (s *Sessions) claim(ctx context.Context, nickname, extension string, create
 	if err != nil {
 		return SessionView{}, TemporarySIPCredentials{}, ErrProvision
 	}
-	entry := &lease{view: SessionView{ID: id, Nickname: nickname, Extension: extension, ExpiresAt: now.Add(LeaseTimeout)}, credential: TemporarySIPCredentials{URI: "sip:" + endpoint + "@vm-voice-1.lan.awesomeio.ru", Username: endpoint, Password: password, Endpoint: endpoint}, endpointID: endpoint, authID: authID, aorID: aorID, lastSeen: now}
+	entry := &lease{view: SessionView{ID: id, Nickname: nickname, Extension: extension, ExpiresAt: now.Add(LeaseTimeout)}, credential: TemporarySIPCredentials{URI: "sip:" + endpoint + "@" + browserSIPDomain, Username: endpoint, Password: password, Endpoint: endpoint}, endpointID: endpoint, authID: authID, aorID: aorID, lastSeen: now}
 	s.mu.Lock()
 	if _, busy := s.active[extension]; busy {
 		s.mu.Unlock()
@@ -120,7 +121,7 @@ func (s *Sessions) claim(ctx context.Context, nickname, extension string, create
 	}{
 		{"auth", authID, map[string]string{"type": "auth", "auth_type": "userpass", "username": endpoint, "password": password}},
 		{"aor", aorID, map[string]string{"type": "aor", "max_contacts": "1", "remove_existing": "yes"}},
-		{"endpoint", endpoint, map[string]string{"type": "endpoint", "context": "phoneguy-sip", "disallow": "all", "allow": "alaw", "auth": authID, "aors": aorID, "transport": "transport-wss", "media_encryption": "dtls", "dtls_auto_generate_cert": "yes", "ice_support": "yes", "use_avpf": "yes", "rtcp_mux": "yes", "direct_media": "no", "force_rport": "yes", "rewrite_contact": "yes", "rtp_symmetric": "yes", "media_use_received_transport": "yes"}},
+		{"endpoint", endpoint, map[string]string{"type": "endpoint", "context": "phoneguy-sip", "disallow": "all", "allow": "alaw", "auth": authID, "aors": aorID, "transport": "transport-wss", "from_domain": browserSIPDomain, "media_encryption": "dtls", "dtls_auto_generate_cert": "yes", "ice_support": "yes", "use_avpf": "yes", "rtcp_mux": "yes", "direct_media": "no", "force_rport": "yes", "rewrite_contact": "yes", "rtp_symmetric": "yes", "media_use_received_transport": "yes"}},
 	}
 	for _, object := range objects {
 		if err := s.ari.PutDynamicPJSIP(ctx, object.kind, object.id, object.fields); err != nil {

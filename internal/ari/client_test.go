@@ -172,6 +172,63 @@ func TestPutDynamicPJSIPRejectsUnknownKindIDAndFields(t *testing.T) {
 	}
 }
 
+func TestPutDynamicPJSIPEndpointAcceptsFromDomain(t *testing.T) {
+	client, _ := newARIClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requireARIAuth(t, r)
+		if r.Method != http.MethodPut || r.URL.Path != "/ari/asterisk/config/dynamic/res_pjsip/endpoint/browser-endpoint-1" {
+			t.Errorf("request=%s %s", r.Method, r.URL.Path)
+		}
+		var body struct {
+			Fields []struct {
+				Attribute string `json:"attribute"`
+				Value     string `json:"value"`
+			} `json:"fields"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, field := range body.Fields {
+			if field.Attribute == "from_domain" && field.Value == "vm-voice-1.lan.awesomeio.ru" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatal("from_domain was not sent to Asterisk")
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	if err := client.PutDynamicPJSIP(context.Background(), "endpoint", "browser-endpoint-1", map[string]string{
+		"type": "endpoint", "from_domain": "vm-voice-1.lan.awesomeio.ru",
+	}); err != nil {
+		t.Fatalf("PutDynamicPJSIP with from_domain: %v", err)
+	}
+}
+
+func TestCreateMediaChannelClaimsIDBeforeRESTRequest(t *testing.T) {
+	var client *Client
+	claimedAtRequest := false
+	client, _ = newARIClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/ari/channels/create" {
+			t.Errorf("request=%s %s", r.Method, r.URL.Path)
+		}
+		claimedAtRequest = client.owns(r.URL.Query().Get("channelId"), resourceChannel)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	if _, err := client.CreateMediaChannel(context.Background(), "listener", true); err == nil {
+		t.Fatal("CreateMediaChannel unexpectedly succeeded")
+	}
+	if !claimedAtRequest {
+		t.Fatal("external media channel was not claimed before its StasisStart could arrive")
+	}
+	client.mu.Lock()
+	remaining := len(client.resources)
+	client.mu.Unlock()
+	if remaining != 0 {
+		t.Fatalf("failed create left %d owned resource(s)", remaining)
+	}
+}
+
 func TestDeleteDynamicPJSIPUsesExpectedResource(t *testing.T) {
 	client, _ := newARIClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requireARIAuth(t, r)

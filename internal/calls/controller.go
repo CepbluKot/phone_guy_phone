@@ -3,6 +3,7 @@ package calls
 import (
 	"context"
 	"errors"
+	"log"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,6 +30,7 @@ type managedCall struct {
 	callerEndpoint  string
 	peerID          string
 	targetEndpoints map[string]string
+	targetStarted   map[string]bool
 	targetGone      map[string]bool
 	winnerID        string
 	flow            string
@@ -267,6 +269,12 @@ func pairArgs(args []string) (callID, role string, attempt int, ok bool) {
 }
 
 func (controller *Controller) start(ctx context.Context, event ari.Event) error {
+	// Stasis also reports the WebSocket ExternalMedia channels created by this
+	// app for RVC. They are already owned by the ARI media client; treating
+	// them as inbound SIP calls would claim and delete them during setup.
+	if _, ok := pjsipEndpoint(event.Channel.Name); !ok {
+		return nil
+	}
 	if event.Channel.ID == "" || controller.ari.ClaimChannel(event.Channel.ID) != nil {
 		return ErrInvalidCallEvent
 	}
@@ -338,7 +346,7 @@ func (controller *Controller) start(ctx context.Context, event ari.Event) error 
 		targets["call-peer-"+callID+"-browser"] = route.BrowserTarget
 	}
 	callerEndpoint, _ := pjsipEndpoint(event.Channel.Name)
-	call := &managedCall{id: callID, route: route, callerID: event.Channel.ID, callerEndpoint: callerEndpoint, peerID: peerID, targetEndpoints: targets, targetGone: map[string]bool{}, flow: route.Flow, attempt: 1, main: main, ctx: callCtx, cancel: callCancel}
+	call := &managedCall{id: callID, route: route, callerID: event.Channel.ID, callerEndpoint: callerEndpoint, peerID: peerID, targetEndpoints: targets, targetStarted: map[string]bool{}, targetGone: map[string]bool{}, flow: route.Flow, attempt: 1, main: main, ctx: callCtx, cancel: callCancel}
 	controller.mu.Lock()
 	controller.calls[callID] = call
 	controller.mu.Unlock()
@@ -438,15 +446,18 @@ func (controller *Controller) peerStarted(ctx context.Context, callID string, at
 		cancel()
 		return ErrInvalidCallEvent
 	}
-	if event.Channel.State != "Up" {
-		return nil
-	}
 	actual, ok := pjsipEndpoint(event.Channel.Name)
 	if !ok || actual != endpoint {
 		cleanupCtx, cancel := cleanupCallContext(ctx)
 		_ = controller.closeCall(cleanupCtx, call)
 		cancel()
 		return ErrInvalidCallEvent
+	}
+	call.mu.Lock()
+	call.targetStarted[event.Channel.ID] = true
+	call.mu.Unlock()
+	if event.Channel.State != "Up" {
+		return nil
 	}
 	if winner != "" && winner != event.Channel.ID {
 		cleanupCtx, cancel := cleanupCallContext(ctx)
@@ -476,12 +487,19 @@ func (controller *Controller) peerUp(ctx context.Context, event ari.Event) error
 	found.mu.Lock()
 	expected := found.targetEndpoints[event.Channel.ID]
 	winner := found.winnerID
+	started := found.targetStarted[event.Channel.ID]
 	found.mu.Unlock()
 	endpoint, ok := pjsipEndpoint(event.Channel.Name)
 	if !ok || endpoint != expected {
 		cleanupCtx, cancel := cleanupCallContext(ctx)
 		defer cancel()
 		return controller.closeCall(cleanupCtx, found)
+	}
+	// A StateChange can be observed before the new channel's StasisStart.
+	// ARI snoop and media operations require the target to already belong to
+	// this Stasis app, so wait for peerStarted to confirm that admission.
+	if !started {
+		return nil
 	}
 	if winner != "" && winner != event.Channel.ID {
 		cleanupCtx, cancel := cleanupCallContext(ctx)
@@ -534,6 +552,7 @@ func (controller *Controller) beginConnect(call *managedCall, winnerID string) e
 		call.connecting = false
 		call.attemptCancel = nil
 		retried := call.flow == "callback-1900" && call.attempt != attempt
+		closed := call.closed
 		active := err == nil && !call.closed && !retried
 		if active {
 			call.connected = true
@@ -542,6 +561,9 @@ func (controller *Controller) beginConnect(call *managedCall, winnerID string) e
 		call.mu.Unlock()
 		if err != nil && !retried {
 			controller.recordOutcome(outcomeCode(err))
+			if !closed {
+				log.Printf("voice-control: call connection failed (%s): %v", outcomeCode(err), err)
+			}
 			cleanupCtx, cancel := cleanupCallContext(context.Background())
 			_ = controller.closeCall(cleanupCtx, call)
 			cancel()
