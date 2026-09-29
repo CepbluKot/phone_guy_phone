@@ -23,6 +23,7 @@ var dynamicPJSIPFields = map[string]map[string]struct{}{
 	"aor":  {"type": {}, "max_contacts": {}, "remove_existing": {}},
 	"endpoint": {
 		"type": {}, "context": {}, "disallow": {}, "allow": {}, "auth": {}, "aors": {}, "transport": {},
+		"from_domain":      {},
 		"media_encryption": {}, "dtls_auto_generate_cert": {}, "ice_support": {}, "use_avpf": {}, "rtcp_mux": {},
 		"direct_media": {}, "force_rport": {}, "rewrite_contact": {}, "rtp_symmetric": {}, "media_use_received_transport": {},
 	},

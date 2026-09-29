@@ -49,7 +49,7 @@ receiving browser. Do not count a basic unprocessed call as proof that RVC works
 Any failed criterion is a failed live acceptance; do not mark the release
 verified just because signaling or the unit tests passed.
 
-## Evidence record
+## Evidence record template
 
 Record only the test metadata and outcome, never credentials, SIP payloads, or
 audio:
@@ -63,6 +63,18 @@ audio:
 | B-to-A incoming modal / answer / two-way audio | |
 | Hangup from B, then A; UI and Asterisk cleanup | |
 | Final result and failure details | |
+
+### Latest automated live run
+
+| Field | Result |
+| --- | --- |
+| Date/time and deployed release | 2026-09-29 09:27 UTC; release `20260929T092249Z` |
+| Browser A extension and browser/version | 345; isolated Chromium 153.0.8010.36 context with synthetic media |
+| Browser B extension and browser/version | 3454; separate isolated Chromium 153.0.8010.36 context with synthetic media |
+| A-to-B incoming modal / answer / two-way audio | Modal, answer, connected ICE, RTP in both directions, and fresh RVC processing sample verified; synthetic microphone supplied silence, so audible speech is unverified |
+| B-to-A incoming modal / answer / two-way audio | Modal, answer, connected ICE, RTP in both directions, and fresh RVC processing sample verified; synthetic microphone supplied silence, so audible speech is unverified |
+| Hangup from B, then A; UI and Asterisk cleanup | Both sides returned idle and stayed registered; Asterisk reported 0 active channels and 0 active calls |
+| Final result and failure details | Signaling, media transport, RVC stream, consecutive calls, and teardown passed. Human-audible two-way speech and perceptible voice conversion remain unverified because the automated run used silent synthetic audio. |
 
 Use a concise Asterisk channel check after hangup, for example
 `asterisk -rx "core show channels concise"`; record only whether the test call

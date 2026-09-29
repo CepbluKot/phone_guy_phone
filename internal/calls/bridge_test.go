@@ -185,6 +185,28 @@ func TestLegacyPlaybackServiceHandsChannelBackAfterTrustedAdmission(t *testing.T
 	}
 }
 
+func TestControllerIgnoresInternalWebSocketMediaChannelStarts(t *testing.T) {
+	store := snapshotStore{snapshot: voiceconfig.RouteSnapshot{Revision: 1, Extensions: map[string]voiceconfig.Profile{"4101": voiceconfig.ProfilePhoneGuy}}}
+	router, err := NewRouter(store, []string{"4101"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &fakeARI{}
+	controller, err := NewController("voice-control", client, router, fakeRVC{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := ari.Event{Type: "StasisStart", App: "voice-control"}
+	event.Channel.ID = "voice-control-call-listen-test"
+	event.Channel.Name = "WebSocket/INCOMING/c(slin48)n-test"
+	if err := controller.HandleEvent(context.Background(), event); err != nil {
+		t.Fatalf("internal WebSocket media channel event: %v", err)
+	}
+	if actions := client.logSnapshot(); len(actions) != 0 {
+		t.Fatalf("controller claimed or deleted its internal media channel: %v", actions)
+	}
+}
+
 func Test1900CallbackAdmitsFixedDestinationAndRingsBeforeAnswer(t *testing.T) {
 	store := snapshotStore{snapshot: voiceconfig.RouteSnapshot{Revision: 8, Extensions: map[string]voiceconfig.Profile{
 		"4101": voiceconfig.ProfileOriginal,
@@ -259,10 +281,29 @@ func TestParallelRingIncludesActiveBrowserAndSelectsOneWinner(t *testing.T) {
 	physicalUp.Channel.ID = physicalID
 	physicalUp.Channel.Name = "PJSIP/4102-00003"
 	physicalUp.Channel.State = "Up"
+	var premature sync.WaitGroup
+	premature.Add(2)
+	go func() { defer premature.Done(); _ = controller.HandleEvent(context.Background(), browserUp) }()
+	go func() { defer premature.Done(); _ = controller.HandleEvent(context.Background(), physicalUp) }()
+	premature.Wait()
+	call.mu.Lock()
+	prematureWinner, prematureDone := call.winnerID, call.connectDone
+	call.mu.Unlock()
+	if prematureWinner != "" || prematureDone != nil {
+		t.Fatalf("call connected before peer StasisStart: winner=%q done=%v", prematureWinner, prematureDone != nil)
+	}
+	browserStart := ari.Event{Type: "StasisStart", App: "voice-control", Args: []string{"call=" + call.id, "role=peer"}}
+	browserStart.Channel.ID = browserID
+	browserStart.Channel.Name = "PJSIP/web-abcd1234-00002"
+	browserStart.Channel.State = "Up"
+	physicalStart := ari.Event{Type: "StasisStart", App: "voice-control", Args: []string{"call=" + call.id, "role=peer"}}
+	physicalStart.Channel.ID = physicalID
+	physicalStart.Channel.Name = "PJSIP/4102-00003"
+	physicalStart.Channel.State = "Up"
 	var wg sync.WaitGroup
 	wg.Add(2)
-	go func() { defer wg.Done(); _ = controller.HandleEvent(context.Background(), browserUp) }()
-	go func() { defer wg.Done(); _ = controller.HandleEvent(context.Background(), physicalUp) }()
+	go func() { defer wg.Done(); _ = controller.HandleEvent(context.Background(), browserStart) }()
+	go func() { defer wg.Done(); _ = controller.HandleEvent(context.Background(), physicalStart) }()
 	wg.Wait()
 	call.mu.Lock()
 	winner := call.winnerID

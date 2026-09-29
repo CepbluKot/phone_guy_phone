@@ -62,6 +62,12 @@ func (c *Client) CreateMediaChannel(ctx context.Context, role string, receive bo
 	if err != nil {
 		return nil, ErrARIFailure
 	}
+	// Asterisk may emit StasisStart before the REST response returns. Claim
+	// the generated ID first so the event handler can recognize this channel
+	// as an owned media resource rather than an unrelated inbound call.
+	if err := c.register(id, resourceChannel); err != nil {
+		return nil, err
+	}
 	query := url.Values{
 		"endpoint":  []string{"WebSocket/INCOMING/c(slin48)n"},
 		"app":       []string{c.app},
@@ -70,12 +76,10 @@ func (c *Client) CreateMediaChannel(ctx context.Context, role string, receive bo
 	}
 	response, err := c.request(ctx, http.MethodPost, "/channels/create", query)
 	if err != nil {
+		c.forgetChannel(id)
 		return nil, err
 	}
 	closeResponse(response)
-	if err := c.register(id, resourceChannel); err != nil {
-		return nil, err
-	}
 	created := true
 	var connection *websocket.Conn
 	var media *MediaChannel

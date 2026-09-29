@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -88,54 +89,57 @@ func sessionID() (string, error) {
 func (session *Session) setup(ctx context.Context, callID string, rvcClient RVC) error {
 	private, err := session.ari.CreateBridge(ctx, "call-source-"+callID)
 	if err != nil {
-		return err
+		return fmt.Errorf("create source bridge: %w", err)
 	}
 	session.private = private
 	listener, err := session.ari.CreateMediaChannel(ctx, "call-listen-"+callID, true)
 	if err != nil {
-		return err
+		return fmt.Errorf("create listener media channel: %w", err)
 	}
 	session.listener = listener
 	model, err := rvcClient.Open(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("open RVC stream: %w", err)
 	}
 	session.model = model
 	injection, err := session.ari.CreateMediaChannel(ctx, "call-output-"+callID, false)
 	if err != nil {
-		return err
+		return fmt.Errorf("create output media channel: %w", err)
 	}
 	session.injection = injection
 	// Keep the raw source in its own bridge. Asterisk reads muted bridge
 	// channels without audio, which also starves a snoop audiohook.
 	if err := private.AddChannel(ctx, session.sourceID, false); err != nil {
-		return err
+		return fmt.Errorf("add source to private bridge: %w", err)
 	}
 	if err := private.AddChannel(ctx, listener.ID(), false); err != nil {
-		return err
+		return fmt.Errorf("add listener to private bridge: %w", err)
 	}
 	if err := session.main.AddChannel(ctx, injection.ID(), false); err != nil {
-		return err
+		return fmt.Errorf("add output to call bridge: %w", err)
 	}
 	returnBridge, err := session.ari.CreateBridge(ctx, "call-return-"+callID)
 	if err != nil {
-		return err
+		return fmt.Errorf("create return bridge: %w", err)
 	}
 	session.returnBridge = returnBridge
 	peerSnoopID, err := session.ari.SnoopChannel(ctx, session.peerID, "call-peer-snoop-"+callID)
 	if err != nil {
-		return err
+		return fmt.Errorf("snoop peer channel: %w", err)
 	}
 	session.peerSnoopID = peerSnoopID
 	whisperID, err := session.ari.WhisperChannel(ctx, session.sourceID, "call-whisper-"+callID)
 	if err != nil {
-		return err
+		return fmt.Errorf("whisper into source channel: %w", err)
 	}
 	session.whisperID = whisperID
 	if err := returnBridge.AddChannel(ctx, session.peerSnoopID, false); err != nil {
-		return err
+		return fmt.Errorf("add peer snoop to return bridge: %w", err)
 	}
-	return returnBridge.AddChannel(ctx, session.whisperID, false)
+	if err := returnBridge.AddChannel(ctx, session.whisperID, false); err != nil {
+		return fmt.Errorf("add source whisper to return bridge: %w", err)
+	}
+	return nil
 }
 
 func (session *Session) run() {

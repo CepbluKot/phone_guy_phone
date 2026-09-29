@@ -12,15 +12,19 @@ import (
 )
 
 type fakeARI struct {
-	mu            sync.Mutex
-	puts, deletes []string
-	failDelete    bool
+	mu             sync.Mutex
+	puts, deletes  []string
+	endpointFields map[string]string
+	failDelete     bool
 }
 
-func (f *fakeARI) PutDynamicPJSIP(_ context.Context, kind, id string, _ map[string]string) error {
+func (f *fakeARI) PutDynamicPJSIP(_ context.Context, kind, id string, fields map[string]string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.puts = append(f.puts, kind+":"+id)
+	if kind == "endpoint" {
+		f.endpointFields = fields
+	}
 	return nil
 }
 func (f *fakeARI) DeleteDynamicPJSIP(_ context.Context, kind, id string) error {
@@ -94,6 +98,9 @@ func TestClaimReturnsTemporaryCredentialOnceAndDirectoryStaysSecretFree(t *testi
 	}
 	if a.puts[0] != "auth:"+secret.Endpoint+"-auth" || a.puts[1] != "aor:"+secret.Endpoint || a.puts[2] != "endpoint:"+secret.Endpoint {
 		t.Fatalf("registrar object IDs do not match SIP URI user: %v", a.puts)
+	}
+	if got := a.endpointFields["from_domain"]; got != "vm-voice-1.lan.awesomeio.ru" {
+		t.Fatalf("browser endpoint From domain=%q; incoming SIP.js parser needs a routable DNS domain", got)
 	}
 	entries := d.List(nil)
 	encoded, _ := json.Marshal(entries)
