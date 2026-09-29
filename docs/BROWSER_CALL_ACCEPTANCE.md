@@ -20,17 +20,23 @@ and unit tests do not replace this check: unit tests mock the SIP session.
    for **Готов принимать звонки**.
 2. Open `/phone/` in an independent browser profile/device B, connect it to the
    second test extension, and wait for **Готов принимать звонки**.
-3. Confirm both pages show the other browser as online in the call target list.
-   If either browser is offline or missing, stop: the call test has not started.
-4. From A, call B. Confirm B shows the incoming-call modal with the right
+3. Open `https://voice-admin.lan.awesomeio.ru/admin/#/profiles` in a browser
+   session while A and B remain registered. In **Браузерные телефоны**, confirm
+   both nicknames and extensions appear with **Подключён**. Refresh the page once
+   and confirm both entries remain. If either browser is missing, stop: the
+   registration display test has failed.
+4. Confirm both phone pages show the other browser as online in the call target
+   list. If either browser is offline or missing, stop: the call test has not
+   started.
+5. From A, call B. Confirm B shows the incoming-call modal with the right
    caller, then answer. Confirm both pages show the active call and the timer
    advances.
-5. Speak a short phrase from A and confirm B hears it; speak a different short
+6. Speak a short phrase from A and confirm B hears it; speak a different short
    phrase from B and confirm A hears it. Do not record or save audio.
-6. End this call from B. Confirm both call modals close, both pages return to
+7. End this call from B. Confirm both call modals close, both pages return to
    idle, both browser registrations remain online, and the call is gone from
    Asterisk.
-7. Repeat B-to-A, answer on A, verify two-way audio, then end the call from A.
+8. Repeat B-to-A, answer on A, verify two-way audio, then end the call from A.
    Confirm the same clean return to idle and that both registrations remain
    online.
 
@@ -71,10 +77,18 @@ audio:
 | Date/time and deployed release | 2026-09-29 11:31 UTC; Go release `20260929T112129Z` and separate Voice edge hosts |
 | Browser A extension and browser/version | 345; isolated Chromium 153.0.8010.36 context with synthetic media at `voice-phone.lan.awesomeio.ru` |
 | Browser B extension and browser/version | 3454; second isolated Chromium context at the same host |
+| Admin browser registrations visible during both leases | |
 | A-to-B incoming modal / answer / two-way audio | Modal and answer passed; ICE connected, RTP sent and received by both browsers, and a fresh RVC processing sample was observed. Audible speech is unverified because synthetic microphone audio was silent. |
 | B-to-A incoming modal / answer / two-way audio | Same signaling, ICE, RTP and RVC checks passed. Audible speech remains unverified. |
 | Hangup from B, then A; UI and Asterisk cleanup | Both pages returned idle and stayed registered after each hangup; Asterisk reported 0 active channels and 0 active calls. |
 | Final result and failure details | The final run passed signaling, media transport, RVC stream and teardown. An immediately preceding run timed out waiting for RTP/RVC progress after answer; its channels cleared. The successful repeat initially showed one ICE peer in `checking` and then connected. Investigate if this delay recurs in real calls. |
+
+### Admin browser-registration visibility check
+
+Keep this check in the same live acceptance run as the calls above: while both
+phone pages are still registered, open the admin profiles page and verify each
+nickname, extension, and connected state. This specifically catches cross-host
+API routing regressions after the admin and phone domains are split.
 
 ### Previous automated live run
 

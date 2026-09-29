@@ -346,6 +346,25 @@ func TestConferenceSocketRouteIsMountedAndFailsClosedWhenUnconfigured(t *testing
 	}
 }
 
+func TestAdminBrowserPhoneStatusUsesPhoneSessionHandler(t *testing.T) {
+	phoneAPI := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/phone/api/v1/status" {
+			t.Fatalf("phone status handler path=%q", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"sessions":[{"nickname":"phoneguy123","extension":"3454"}]}`))
+	})
+	handler := newAppHandler(testWebRoot(t), http.NotFoundHandler(), nil, nil, phoneAPI)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/admin/api/v1/browser-phones", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), `"extension":"3454"`) {
+		t.Fatalf("response missing active browser registration: %s", recorder.Body.String())
+	}
+}
+
 func TestWebServerDoesNotExposeFilesOutsideRoot(t *testing.T) {
 	root := testWebRoot(t)
 	outside := filepath.Join(filepath.Dir(root), "outside-secret.txt")

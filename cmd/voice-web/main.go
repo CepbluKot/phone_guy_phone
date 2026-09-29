@@ -558,6 +558,21 @@ func newAppHandler(webRoot string, adminAPI http.Handler, realtimeHandlers ...ht
 		if r.URL.Path == "/conference/" || strings.HasPrefix(r.URL.Path, "/admin/") || r.URL.Path == "/admin" {
 			w.Header().Set("Permissions-Policy", "microphone=()")
 		}
+		if r.Method == http.MethodGet && r.URL.Path == "/admin/api/v1/browser-phones" {
+			phoneAPI := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				http.Error(w, `{"error":"phone_unavailable"}`, http.StatusServiceUnavailable)
+			}))
+			if len(realtimeHandlers) > 2 && realtimeHandlers[2] != nil {
+				phoneAPI = realtimeHandlers[2]
+			}
+			forwarded := r.Clone(r.Context())
+			forwardedURL := *r.URL
+			forwardedURL.Path = "/phone/api/v1/status"
+			forwardedURL.RawPath = ""
+			forwarded.URL = &forwardedURL
+			phoneAPI.ServeHTTP(w, forwarded)
+			return
+		}
 		if r.URL.Path == "/admin/api/v1" || strings.HasPrefix(r.URL.Path, "/admin/api/v1/") {
 			adminAPI.ServeHTTP(w, r)
 			return

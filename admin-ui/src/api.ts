@@ -52,7 +52,7 @@ export const api = {
   routes: () => request<RouteSnapshot>("/admin/api/v1/voice-routes"),
   metrics: () => request<MetricsSnapshot>("/admin/api/v1/metrics"),
   phones: () => request<PhonebookSnapshot>("/admin/api/v1/phones"),
-  browserPhones: () => request<{ sessions: BrowserPhone[] }>("/phone/api/v1/status"),
+  browserPhones: () => request<{ sessions: BrowserPhone[] }>("/admin/api/v1/browser-phones"),
   login: (password: string) =>
     request<{ csrfToken: string }>("/admin/api/v1/session", {
       method: "POST",
