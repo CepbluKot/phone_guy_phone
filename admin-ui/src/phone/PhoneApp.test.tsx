@@ -21,7 +21,7 @@ describe("browser phone",()=>{
       {deviceId:"speaker-usb",kind:"audiooutput",label:"USB headset"},
     ]),addEventListener:vi.fn(),removeEventListener:vi.fn()}});
     Object.defineProperty(HTMLMediaElement.prototype,"setSinkId",{configurable:true,value:vi.fn().mockResolvedValue(undefined)});
-    vi.mocked(phoneAPI.directory).mockResolvedValue({people:[{nickname:"Alice",extension:"1983",active:false},{nickname:"Bob",extension:"1988",active:false}]});
+    vi.mocked(phoneAPI.directory).mockResolvedValue({people:[{nickname:"Alice",extension:"1983",active:false},{nickname:"Bob",extension:"1988",active:false,physicalPhone:"Grandstream"}]});
     vi.mocked(phoneAPI.config).mockResolvedValue({signalingUrl:"wss://vm-voice-1.lan.awesomeio.ru/ws/phone-signaling"});
     vi.mocked(phoneAPI.claim).mockResolvedValue(sessionResponse);
     vi.mocked(phoneAPI.release).mockResolvedValue(undefined);
@@ -35,6 +35,20 @@ describe("browser phone",()=>{
   it("registers the browser and calls only another configured internal number",async()=>{
     render(<PhoneApp/>);await screen.findByLabelText("Ваш ник");fireEvent.change(screen.getByLabelText("Ваш ник"),{target:{value:"Alice"}});fireEvent.change(screen.getByLabelText("Внутренний номер"),{target:{value:"1983"}});fireEvent.click(screen.getByRole("button",{name:/Подключиться/}));await screen.findByText("Готов принимать звонки");expect(BrowserSIPSession).toBeDefined();
     expect(screen.getByRole("option",{name:/Bob/})).not.toBeNull();expect(screen.queryByRole("option",{name:/Alice/})).toBeNull();fireEvent.click(screen.getByRole("button",{name:/Позвонить/}));await waitFor(()=>expect(sipMocks.call).toHaveBeenCalledWith("1988"));
+  });
+  it("keeps virtual placeholders out of call targets but available for browser registration",async()=>{
+    vi.mocked(phoneAPI.directory).mockResolvedValue({people:[
+      {nickname:"Alice",extension:"1983",active:false},
+      {nickname:"",extension:"1987",active:false},
+      {nickname:"Bob",extension:"1988",active:false,physicalPhone:"Grandstream",physicalStatus:"offline"},
+      {nickname:"Carol",extension:"3454",active:true},
+    ]});
+    render(<PhoneApp/>);await screen.findByLabelText("Ваш ник");
+    expect(screen.getByRole("option",{name:/1987/})).not.toBeNull();
+    fireEvent.change(screen.getByLabelText("Ваш ник"),{target:{value:"Alice"}});fireEvent.change(screen.getByLabelText("Внутренний номер"),{target:{value:"1983"}});fireEvent.click(screen.getByRole("button",{name:/Подключиться/}));await screen.findByText("Готов принимать звонки");
+    expect(screen.queryByRole("option",{name:/1987/})).toBeNull();
+    expect(screen.getByRole("option",{name:/1988.*физический телефон/})).not.toBeNull();
+    expect(screen.getByRole("option",{name:/3454.*браузер/})).not.toBeNull();
   });
   it("refreshes browser presence while the phone page stays open",async()=>{
     vi.useFakeTimers();

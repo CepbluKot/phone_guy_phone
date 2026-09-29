@@ -42,7 +42,7 @@ export function PhoneApp() {
   const sessionIdRef = useRef("");
   const connected = registration === "registered";
   const callModalVisible = callStatus === "calling" || callStatus === "ringing" || callStatus === "connected";
-  const targetOptions = useMemo(() => people.filter((person) => person.extension !== extension), [people, extension]);
+  const targetOptions = useMemo(() => people.filter((person) => person.extension !== extension && (person.active || !!person.physicalPhone)), [people, extension]);
   const activePeer = people.find((person) => person.extension === peerExtension);
   const activePeerName = activePeer?.nickname || peerExtension || "Внутренний номер";
   const mediaDevices = navigator.mediaDevices as (MediaDevices & { selectAudioOutput?: () => Promise<MediaDeviceInfo> }) | undefined;

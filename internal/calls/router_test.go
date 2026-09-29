@@ -120,6 +120,40 @@ func TestBrowserProfileAppliesOnlyToBrowserEndpoint(t *testing.T) {
 	}
 }
 
+func TestRouterRejectsConfiguredVirtualPlaceholdersAsCallTargets(t *testing.T) {
+	store := snapshotStore{snapshot: voiceconfig.RouteSnapshot{Revision: 1, Extensions: map[string]voiceconfig.Profile{
+		"1983": voiceconfig.ProfileOriginal,
+		"1987": voiceconfig.ProfileOriginal,
+		"1988": voiceconfig.ProfileOriginal,
+		"2014": voiceconfig.ProfileOriginal,
+	}}}
+	router, err := NewRouter(store, []string{"1983", "1987", "1988", "2014"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	router.SetPhysicalEndpointLookup(func() []string { return []string{"1983", "1988"} })
+	unassignedSource := ari.Event{Type: "StasisStart", Args: []string{"source=1987", "peer=1983"}}
+	unassignedSource.Channel.ID = "placeholder-channel"
+	unassignedSource.Channel.Name = "PJSIP/1987-0001"
+	if _, err := router.Resolve(context.Background(), unassignedSource); !errors.Is(err, ErrUnknownEndpoint) {
+		t.Fatalf("unassigned placeholder was allowed to originate a call: %v", err)
+	}
+	for _, target := range []string{"1987", "2014"} {
+		event := ari.Event{Type: "StasisStart", Args: []string{"source=1983", "peer=" + target}}
+		event.Channel.ID = "phone-channel"
+		event.Channel.Name = "PJSIP/1983-0001"
+		if _, err := router.Resolve(context.Background(), event); !errors.Is(err, ErrUnknownEndpoint) {
+			t.Errorf("virtual placeholder %s was callable: %v", target, err)
+		}
+	}
+	event := ari.Event{Type: "StasisStart", Args: []string{"source=1983", "peer=1988"}}
+	event.Channel.ID = "phone-channel"
+	event.Channel.Name = "PJSIP/1983-0002"
+	if _, err := router.Resolve(context.Background(), event); err != nil {
+		t.Fatalf("assigned physical phone target rejected: %v", err)
+	}
+}
+
 func TestRouterUsesCallerProfileWhenBothCallersHavePhoneGuy(t *testing.T) {
 	store := snapshotStore{snapshot: voiceconfig.RouteSnapshot{
 		Revision: 4,

@@ -29,18 +29,23 @@ and unit tests do not replace this check: unit tests mock the SIP session.
    **Подключён**. Refresh the page once and confirm the separation and entries
    remain. If a placeholder appears under physical phones, or an active browser
    is missing/duplicated as virtual, the display test has failed.
-4. Confirm both phone pages show the other browser as online in the call target
+4. Confirm neither phone page offers an unassigned virtual placeholder such as
+   1987 or 2014 as a call target. Only extensions assigned to physical devices
+   or currently registered browsers should appear. The Go routing tests also
+   assert that direct attempts to originate from or call an unassigned
+   placeholder are rejected, even if the client bypasses the target list.
+5. Confirm both phone pages show the other browser as online in the call target
    list. If either browser is offline or missing, stop: the call test has not
    started.
-5. From A, call B. Confirm B shows the incoming-call modal with the right
+6. From A, call B. Confirm B shows the incoming-call modal with the right
    caller, then answer. Confirm both pages show the active call and the timer
    advances.
-6. Speak a short phrase from A and confirm B hears it; speak a different short
+7. Speak a short phrase from A and confirm B hears it; speak a different short
    phrase from B and confirm A hears it. Do not record or save audio.
-7. End this call from B. Confirm both call modals close, both pages return to
+8. End this call from B. Confirm both call modals close, both pages return to
    idle, both browser registrations remain online, and the call is gone from
    Asterisk.
-8. Repeat B-to-A, answer on A, verify two-way audio, then end the call from A.
+9. Repeat B-to-A, answer on A, verify two-way audio, then end the call from A.
    Confirm the same clean return to idle and that both registrations remain
    online.
 
