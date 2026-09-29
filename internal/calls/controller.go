@@ -386,6 +386,9 @@ func (controller *Controller) originatePeer(call *managedCall, timeout int) erro
 		if primaryErr != nil {
 			return errors.Join(primaryErr, err)
 		}
+		if !call.route.PhysicalPeer {
+			return err
+		}
 		return nil
 	}
 	return nil
