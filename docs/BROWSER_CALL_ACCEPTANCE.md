@@ -21,10 +21,14 @@ and unit tests do not replace this check: unit tests mock the SIP session.
 2. Open `/phone/` in an independent browser profile/device B, connect it to the
    second test extension, and wait for **Готов принимать звонки**.
 3. Open `https://voice-admin.lan.awesomeio.ru/admin/#/profiles` in a browser
-   session while A and B remain registered. In **Браузерные телефоны**, confirm
-   both nicknames and extensions appear with **Подключён**. Refresh the page once
-   and confirm both entries remain. If either browser is missing, stop: the
-   registration display test has failed.
+   session while A and B remain registered. In **Физические телефоны**, confirm
+   that only extensions mapped to inventory devices appear. In **Виртуальные
+   номера**, confirm configured extensions without a physical device or active
+   browser appear; active browser extensions must stay in **Браузерные
+   телефоны** only. Confirm both browser nicknames/extensions appear with
+   **Подключён**. Refresh the page once and confirm the separation and entries
+   remain. If a placeholder appears under physical phones, or an active browser
+   is missing/duplicated as virtual, the display test has failed.
 4. Confirm both phone pages show the other browser as online in the call target
    list. If either browser is offline or missing, stop: the call test has not
    started.

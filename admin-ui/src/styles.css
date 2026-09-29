@@ -967,6 +967,10 @@ td { color: #171717; }
   max-width: 100%;
   white-space: normal;
 }
+.profile-phone-identity { display: grid; gap: 4px; min-width: 0; }
+.profile-phone-label { color: var(--pm-text-subtle); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.virtual-number-admin { margin-top: 18px; }
+.virtual-profile-row .phone-avatar { color: #064bff; background: #edf2ff; }
 .browser-phone-admin .panel-heading {
   gap: 20px;
 }
