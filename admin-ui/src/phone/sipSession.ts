@@ -34,6 +34,7 @@ export class BrowserSIPSession {
 
   async connect(credentials: SIPCredentials, audio: HTMLAudioElement): Promise<void> {
     this.audio = audio;
+    let initialConnection = true;
     const uri = UserAgent.makeURI(credentials.uri);
     if (!uri) throw new Error("invalid_sip_uri");
     const userAgent = new UserAgent({
@@ -44,7 +45,21 @@ export class BrowserSIPSession {
       displayName: credentials.username,
       logBuiltinEnabled: false,
       logConfiguration: false,
-      delegate: { onInvite: (invitation) => this.receive(invitation) },
+      // Asterisk is restarted during deployment. SIP.js does not reconnect by default.
+      reconnectionAttempts: 1000000,
+      reconnectionDelay: 4,
+      delegate: {
+        onInvite: (invitation) => this.receive(invitation),
+        onDisconnect: () => this.onRegistration("offline"),
+        onConnect: () => {
+          if (initialConnection) {
+            initialConnection = false;
+            return;
+          }
+          this.onRegistration("connecting");
+          void this.registerer?.register().catch(() => this.onRegistration("offline"));
+        },
+      },
       sessionDescriptionHandlerFactoryOptions: {
         constraints: this.mediaConstraints(),
       },
