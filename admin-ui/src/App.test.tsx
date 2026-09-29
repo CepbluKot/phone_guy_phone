@@ -201,6 +201,10 @@ describe("phone profile admin", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<App />);
     await userEvent.click(await screen.findByRole("button", { name: "Профили голоса" }));
+    expect(await screen.findByText("phoneguy123")).toBeInTheDocument();
+    expect(screen.getByText("3454")).toBeInTheDocument();
+    expect(screen.getByText("Подключён")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith("/admin/api/v1/browser-phones", expect.any(Object));
     const select = await screen.findByRole("combobox", { name: "Профиль голоса · 3454" });
     expect(select).toHaveValue("original");
     await userEvent.selectOptions(select, "phone-guy");
