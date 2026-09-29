@@ -31,6 +31,14 @@ const copy = {
     phones: "Phones",
     voiceProfiles: "Voice profiles",
     physicalPhones: "Physical phones",
+    profilePhysicalPhones: "Physical phones",
+    profilePhysicalSummary: "Voice profiles for phones assigned in the physical device register.",
+    virtualPhones: "Virtual numbers",
+    virtualPhoneSummary: "Configured numbers without a physical phone or an active browser session.",
+    noAssignedProfilePhones: "No physical phones with an assigned internal number.",
+    noVirtualPhones: "No virtual numbers.",
+    physicalPhoneCount: "Physical phones",
+    virtualPhoneCount: "Virtual numbers",
     existingPhones: "Existing phones",
     newUnassigned: "New / unassigned",
     assignedHeading: "Assigned phones",
@@ -101,6 +109,14 @@ const copy = {
     phones: "Телефоны",
     voiceProfiles: "Профили голоса",
     physicalPhones: "Физические телефоны",
+    profilePhysicalPhones: "Физические телефоны",
+    profilePhysicalSummary: "Профили голосов для аппаратов из реестра физических телефонов.",
+    virtualPhones: "Виртуальные номера",
+    virtualPhoneSummary: "Настроенные номера без физического аппарата и активной браузерной сессии.",
+    noAssignedProfilePhones: "Нет физических телефонов с назначенным внутренним номером.",
+    noVirtualPhones: "Виртуальных номеров нет.",
+    physicalPhoneCount: "Физических телефонов",
+    virtualPhoneCount: "Виртуальных номеров",
     existingPhones: "Назначенные телефоны",
     newUnassigned: "Новые / без номера",
     assignedHeading: "Назначенные телефоны",
@@ -390,6 +406,15 @@ export default function App() {
     }
   }
 
+  const profilePhysicalPhones = (phonebook?.devices ?? [])
+    .filter((device) => Boolean(device.extension))
+    .sort((a, b) => (a.extension ?? "").localeCompare(b.extension ?? "", undefined, { numeric: true }));
+  const physicalExtensions = new Set(profilePhysicalPhones.map((device) => device.extension!));
+  const activeBrowserExtensions = new Set(browserPhones.map((phone) => phone.extension));
+  const virtualExtensions = Object.keys(snapshot?.extensions ?? {})
+    .filter((extension) => !physicalExtensions.has(extension) && !activeBrowserExtensions.has(extension))
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+
   if (status === "loading")
     return (
       <div className="center-state" role="status">
@@ -467,26 +492,21 @@ export default function App() {
               language={language}
             />
           ) : <>
-          <div className="page-heading">
+            <div className="page-heading">
             <div>
               <p className="eyebrow">{t.phones.toUpperCase()}</p>
               <h1>{t.title}</h1>
-              <p className="muted">{t.subtitle}</p>
+              <p className="muted">{language === "en" ? "Physical phones, browser phones, and virtual numbers are shown separately." : "Физические телефоны, браузерные телефоны и виртуальные номера показаны отдельно."}</p>
             </div>
             <span className="count-badge">
-              {Object.keys(snapshot?.extensions ?? {}).length}{" "}
-              {t.phones.toLowerCase()}
+              {t.physicalPhoneCount}: {profilePhysicalPhones.length}
             </span>
           </div>
-          <section className="panel" aria-label={t.title}>
+          <section className="panel" aria-label={t.profilePhysicalPhones}>
             <div className="panel-heading">
               <div>
-                <h2>{t.phones}</h2>
-                <p className="muted">
-                  {language === "en"
-                    ? "Roles apply to calls involving each phone."
-                    : "Профиль применяется ко всем звонкам с этим телефоном."}
-                </p>
+                <h2>{t.profilePhysicalPhones}</h2>
+                <p className="muted">{t.profilePhysicalSummary}</p>
               </div>
               <span className="private-label">
                 <span className="lock-icon" aria-hidden="true">
@@ -495,97 +515,52 @@ export default function App() {
                 {language === "en" ? "Private" : "Приватно"}
               </span>
             </div>
-            <div className="table-scroll">
-              <table className="voice-profile-table">
-                <thead>
-                  <tr>
-                    <th>{t.phone}</th>
-                    <th>{t.role}</th>
-                    <th>
-                      <span className="sr-only">{t.save}</span>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {Object.entries(snapshot?.extensions ?? {})
-                    .sort(([a], [b]) =>
-                      a.localeCompare(b, undefined, { numeric: true }),
-                    )
-                    .map(([extension]) => (
-                      <tr key={extension}>
-                        <td>
-                          <div className="phone-cell">
-                            <span className="phone-avatar" aria-hidden="true">
-                              ▣
-                            </span>
-                            <span className="phone-number">{extension}</span>
-                          </div>
-                        </td>
-                        <td>
-                          <label
-                            className="sr-only"
-                            htmlFor={`profile-${extension}`}
-                          >
-                            {language === "en"
-                              ? `Profile for ${extension}`
-                              : `Профиль для ${extension}`}
-                          </label>
-                          <select
-                            id={`profile-${extension}`}
-                            value={drafts[extension] ?? "original"}
-                            onChange={(event) => {
-                              setDrafts((current) => ({
-                                ...current,
-                                [extension]: event.target.value as Profile,
-                              }));
-                              setMessages((current) => ({
-                                ...current,
-                                [extension]: undefined,
-                              }));
-                            }}
-                          >
-                            <option value="original">{t.original}</option>
-                            <option value="phone-guy">{t.phoneGuy}</option>
-                          </select>
-                        </td>
-                        <td className="row-actions">
-                          <span
-                            className={`save-message ${messages[extension] ?? ""}`}
-                            role={messages[extension] ? "status" : undefined}
-                          >
-                            {messages[extension] === "saved"
-                              ? t.saved
-                              : messages[extension] === "stale"
-                                ? t.stale
-                                : messages[extension] === "error"
-                                  ? t.saveError
-                                  : ""}
-                          </span>
-                          <button
-                            className="button primary save-button"
-                            disabled={
-                              saving === extension ||
-                              drafts[extension] ===
-                                snapshot?.extensions[extension]
-                            }
-                            onClick={() => void save(extension)}
-                          >
-                            {saving === extension
-                              ? "…"
-                              : `${t.save} ${extension}`}
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                </tbody>
-              </table>
-            </div>
+            <ProfileTable
+              extensions={profilePhysicalPhones.map((device) => device.extension!)}
+              phoneLabels={Object.fromEntries(profilePhysicalPhones.map((device) => [device.extension!, device.label]))}
+              routes={snapshot}
+              drafts={drafts}
+              messages={messages}
+              saving={saving}
+              labels={t}
+              language={language}
+              onDraftChange={(extension, profile) => {
+                setDrafts((current) => ({ ...current, [extension]: profile }));
+                setMessages((current) => ({ ...current, [extension]: undefined }));
+              }}
+              onSave={(extension) => void save(extension)}
+              emptyMessage={t.noAssignedProfilePhones}
+            />
             <div className="panel-footer">
               <span className="online-dot" />
               {language === "en"
                 ? `Configuration revision ${snapshot?.revision}`
                 : `Версия конфигурации ${snapshot?.revision}`}
             </div>
+          </section>
+          <section className="panel virtual-number-admin" aria-label={t.virtualPhones}>
+            <div className="panel-heading">
+              <div>
+                <h2>{t.virtualPhones}</h2>
+                <p className="muted">{t.virtualPhoneSummary}</p>
+              </div>
+              <span className="count-badge">{t.virtualPhoneCount}: {virtualExtensions.length}</span>
+            </div>
+            <ProfileTable
+              extensions={virtualExtensions}
+              routes={snapshot}
+              drafts={drafts}
+              messages={messages}
+              saving={saving}
+              labels={t}
+              language={language}
+              onDraftChange={(extension, profile) => {
+                setDrafts((current) => ({ ...current, [extension]: profile }));
+                setMessages((current) => ({ ...current, [extension]: undefined }));
+              }}
+              onSave={(extension) => void save(extension)}
+              emptyMessage={t.noVirtualPhones}
+            />
           </section>
           <section className="panel browser-phone-admin" aria-label={t.browserPhones}>
             <div className="panel-heading">
@@ -597,6 +572,87 @@ export default function App() {
           </>}
         </section>
       </VoiceShell>
+  );
+}
+
+function ProfileTable({
+  extensions,
+  phoneLabels = {},
+  routes,
+  drafts,
+  messages,
+  saving,
+  labels,
+  language,
+  onDraftChange,
+  onSave,
+  emptyMessage,
+}: {
+  extensions: string[];
+  phoneLabels?: Record<string, string>;
+  routes: RouteSnapshot | null;
+  drafts: Record<string, Profile>;
+  messages: Partial<Record<string, "saved" | "stale" | "error">>;
+  saving: string | null;
+  labels: Record<string, string>;
+  language: Language;
+  onDraftChange: (extension: string, profile: Profile) => void;
+  onSave: (extension: string) => void;
+  emptyMessage: string;
+}) {
+  return (
+    <div className="table-scroll">
+      <table className="voice-profile-table">
+        <thead>
+          <tr>
+            <th>{labels.phone}</th>
+            <th>{labels.role}</th>
+            <th><span className="sr-only">{labels.save}</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {extensions.map((extension) => (
+            <tr className={phoneLabels[extension] ? "physical-profile-row" : "virtual-profile-row"} key={extension}>
+              <td>
+                <div className="phone-cell">
+                  <span className="phone-avatar" aria-hidden="true">{phoneLabels[extension] ? "▣" : "#"}</span>
+                  <span className="profile-phone-identity">
+                    <span className="phone-number">{extension}</span>
+                    {phoneLabels[extension] && <span className="profile-phone-label">{phoneLabels[extension]}</span>}
+                  </span>
+                </div>
+              </td>
+              <td>
+                <label className="sr-only" htmlFor={`profile-${extension}`}>
+                  {language === "en" ? `Profile for ${extension}` : `Профиль для ${extension}`}
+                </label>
+                <select
+                  id={`profile-${extension}`}
+                  value={drafts[extension] ?? "original"}
+                  onChange={(event) => onDraftChange(extension, event.target.value as Profile)}
+                >
+                  <option value="original">{labels.original}</option>
+                  <option value="phone-guy">{labels.phoneGuy}</option>
+                </select>
+              </td>
+              <td className="row-actions">
+                <span className={`save-message ${messages[extension] ?? ""}`} role={messages[extension] ? "status" : undefined}>
+                  {messages[extension] === "saved" ? labels.saved : messages[extension] === "stale" ? labels.stale : messages[extension] === "error" ? labels.saveError : ""}
+                </span>
+                <button
+                  className="button primary save-button"
+                  disabled={saving === extension || drafts[extension] === routes?.extensions[extension]}
+                  onClick={() => onSave(extension)}
+                >
+                  {saving === extension ? "…" : `${labels.save} ${extension}`}
+                </button>
+              </td>
+            </tr>
+          ))}
+          {extensions.length === 0 && <tr><td colSpan={3} className="inventory-empty">{emptyMessage}</td></tr>}
+        </tbody>
+      </table>
+    </div>
   );
 }
 

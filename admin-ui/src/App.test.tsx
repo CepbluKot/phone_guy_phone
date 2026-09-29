@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import App from "./App";
 
@@ -213,6 +213,51 @@ describe("phone profile admin", () => {
     const put = fetchMock.mock.calls.find(([path]) => path === "/admin/api/v1/voice-routes/3454/browser");
     expect(put).toBeTruthy();
     expect(JSON.parse(String(put?.[1]?.body))).toEqual({ profile: "phone-guy", revision: 4 });
+  });
+
+  it("separates assigned physical phones, virtual placeholders, and browser phones", async () => {
+    const configuredRoutes = {
+      revision: 4,
+      extensions: {
+        "1983": "original",
+        "1987": "original",
+        "1988": "original",
+        "2014": "original",
+        "3454": "original",
+      },
+      browserExtensions: { "3454": "original" },
+    };
+    const inventory = {
+      revision: 2,
+      devices: [
+        { mac: "00:11:22:33:44:55", label: "Grandstream desk", extension: "1983" },
+        { mac: "00:11:22:33:44:66", label: "Yealink desk", extension: "1988" },
+      ],
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response(200, { required: false }))
+      .mockResolvedValueOnce(response(200, configuredRoutes))
+      .mockResolvedValueOnce(response(200, inventory))
+      .mockResolvedValueOnce(response(200, metrics))
+      .mockResolvedValueOnce(response(200, { sessions: [{ nickname: "browser3454", extension: "3454", expiresAt: "2026-09-29T20:00:00Z" }] }))
+      .mockResolvedValue(response(200, metrics));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Профили голоса" }));
+    const physical = screen.getByRole("region", { name: "Физические телефоны" });
+    const virtual = screen.getByRole("region", { name: "Виртуальные номера" });
+    const browsers = screen.getByRole("region", { name: "Браузерные телефоны" });
+
+    expect(within(physical).getByText("1983")).toBeInTheDocument();
+    expect(within(physical).getByText("1988")).toBeInTheDocument();
+    expect(within(physical).getByText("Grandstream desk")).toBeInTheDocument();
+    expect(within(physical).queryByText("1987")).not.toBeInTheDocument();
+    expect(within(physical).queryByText("2014")).not.toBeInTheDocument();
+    expect(within(virtual).getByText("1987")).toBeInTheDocument();
+    expect(within(virtual).getByText("2014")).toBeInTheDocument();
+    expect(within(virtual).queryByText("3454")).not.toBeInTheDocument();
+    expect(within(browsers).getByText("browser3454")).toBeInTheDocument();
   });
 
   it("shows service unavailable when routes cannot be loaded", async () => {
