@@ -230,7 +230,7 @@ PY
 
   python3 - <<'PY'
 import json, urllib.request
-for origin in ('https://voice.lan.awesomeio.ru', 'https://vm-voice-1.lan.awesomeio.ru'):
+for origin in ('https://voice-admin.lan.awesomeio.ru', 'https://voice-phone.lan.awesomeio.ru', 'https://voice.lan.awesomeio.ru', 'https://vm-voice-1.lan.awesomeio.ru'):
     headers = {'Origin': origin}
     def get(path):
         with urllib.request.urlopen(urllib.request.Request('http://192.168.20.70:8080' + path, headers=headers), timeout=5) as response:

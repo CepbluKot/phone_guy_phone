@@ -17,7 +17,7 @@ services:
       VOICE_PHONE_DIRECTORY_FILE: /etc/voice-changer/webphone-directory.json
       VOICE_ADMIN_PASSWORD_FILE: /run/secrets/voice-admin-password
       VOICE_ADMIN_AUTH_DISABLED: "true"
-      VOICE_ADMIN_ORIGIN: https://voice.lan.awesomeio.ru,https://vm-voice-1.lan.awesomeio.ru
+      VOICE_ADMIN_ORIGIN: https://voice-admin.lan.awesomeio.ru,https://voice-phone.lan.awesomeio.ru,https://voice.lan.awesomeio.ru,https://vm-voice-1.lan.awesomeio.ru
       VOICE_ARI_URL: http://127.0.0.1:8092/ari
       VOICE_ARI_USERNAME: phoneguy
       VOICE_ARI_PASSWORD_FILE: /run/secrets/ari-password

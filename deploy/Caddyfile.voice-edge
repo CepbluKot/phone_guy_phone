@@ -1,0 +1,59 @@
+# Private edge routes for the Voice application. Merge these site blocks into
+# /opt/awesomeio-dns/caddy/Caddyfile on the VPN VPS.
+voice-admin.lan.awesomeio.ru {
+	import private_site
+	route {
+		redir / /admin/ 308
+		redir /admin /admin/ 308
+		redir /phone https://voice-phone.lan.awesomeio.ru/phone/ 308
+		redir /phone/ https://voice-phone.lan.awesomeio.ru/phone/ 308
+		@admin path /admin/* /healthz
+		handle @admin {
+			reverse_proxy http://192.168.20.70:8080
+		}
+		handle {
+			respond 404
+		}
+	}
+}
+
+voice-phone.lan.awesomeio.ru {
+	import private_site
+	route {
+		redir / /phone/ 308
+		redir /phone /phone/ 308
+		redir /admin https://voice-admin.lan.awesomeio.ru/admin/ 308
+		redir /admin/ https://voice-admin.lan.awesomeio.ru/admin/ 308
+		# The current Vite build emits shared static assets under /admin/assets/.
+		@phone path /phone/* /admin/assets/* /healthz
+		handle @phone {
+			reverse_proxy http://192.168.20.70:8080
+		}
+		handle {
+			respond 404
+		}
+	}
+}
+
+# Keep the old entry point working for bookmarks while directing the two
+# applications to their new hosts. Legacy conference and live demos stay here.
+voice.lan.awesomeio.ru {
+	import private_site
+	route {
+		@legacy_admin path /admin /admin/*
+		redir @legacy_admin https://voice-admin.lan.awesomeio.ru{uri} 308
+		@legacy_phone path / /phone /phone/*
+		redir @legacy_phone https://voice-phone.lan.awesomeio.ru{uri} 308
+		@legacy_health path /healthz
+		handle @legacy_health {
+			reverse_proxy http://192.168.20.70:8080
+		}
+		@legacy_demos path /conference/* /live/* /ws/conference /ws/live-mirror /static/*
+		handle @legacy_demos {
+			reverse_proxy http://192.168.20.70:8080
+		}
+		handle {
+			respond 404
+		}
+	}
+}
