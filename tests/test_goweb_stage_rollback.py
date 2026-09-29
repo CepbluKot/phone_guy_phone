@@ -103,14 +103,28 @@ def test_stage_compose_has_only_loopback_listeners_and_separate_state():
     assert "/var/lib/voice-go-stage/voice-routing.json" in compose
     assert "selfmonitor-go-candidate" in compose
     assert 'restart: "no"' in compose
-    assert "VOICE_ADMIN_ORIGIN: https://voice.lan.awesomeio.ru,https://vm-voice-1.lan.awesomeio.ru" in compose
+    assert "VOICE_ADMIN_ORIGIN: https://voice-admin.lan.awesomeio.ru,https://voice-phone.lan.awesomeio.ru,https://voice.lan.awesomeio.ru,https://vm-voice-1.lan.awesomeio.ru" in compose
 
 
 def test_production_compose_uses_the_existing_ui_origin_for_admin_login():
     compose = (ROOT / "deploy" / "compose.goweb.yaml").read_text()
 
-    assert "VOICE_ADMIN_ORIGIN: https://voice.lan.awesomeio.ru,https://vm-voice-1.lan.awesomeio.ru" in compose
+    assert "VOICE_ADMIN_ORIGIN: https://voice-admin.lan.awesomeio.ru,https://voice-phone.lan.awesomeio.ru,https://voice.lan.awesomeio.ru,https://vm-voice-1.lan.awesomeio.ru" in compose
     assert "VOICE_WEB_ADDR: 192.168.20.70:8080" in compose
+
+
+def test_edge_routes_admin_and_browser_phone_on_distinct_private_hosts():
+    edge = (ROOT / "deploy" / "Caddyfile.voice-edge").read_text()
+
+    assert "voice-admin.lan.awesomeio.ru" in edge
+    assert "voice-phone.lan.awesomeio.ru" in edge
+    assert "@admin path /admin/*" in edge
+    assert "@phone path /phone/* /admin/assets/* /healthz" in edge
+    assert "voice.lan.awesomeio.ru" in edge
+    assert "redir /phone/ https://voice-phone.lan.awesomeio.ru/phone/ 308" in edge
+    assert "redir /admin/ https://voice-admin.lan.awesomeio.ru/admin/ 308" in edge
+    assert "redir @legacy_admin https://voice-admin.lan.awesomeio.ru{uri} 308" in edge
+    assert "redir @legacy_phone https://voice-phone.lan.awesomeio.ru{uri} 308" in edge
 
 
 def test_go_caddy_template_preserves_the_live_call_page_route():

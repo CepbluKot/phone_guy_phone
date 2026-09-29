@@ -16,7 +16,7 @@ and unit tests do not replace this check: unit tests mock the SIP session.
 
 ## Procedure
 
-1. Open `/phone/` in browser A, connect it to the first test extension, and wait
+1. Open `https://voice-phone.lan.awesomeio.ru/phone/` in browser A, connect it to the first test extension, and wait
    for **Готов принимать звонки**.
 2. Open `/phone/` in an independent browser profile/device B, connect it to the
    second test extension, and wait for **Готов принимать звонки**.
@@ -64,11 +64,23 @@ audio:
 | Hangup from B, then A; UI and Asterisk cleanup | |
 | Final result and failure details | |
 
-### Latest automated live run
+### Latest automated live run after the private-domain split
 
 | Field | Result |
 | --- | --- |
-| Date/time and deployed release | 2026-09-29 09:27 UTC; release `20260929T092249Z` |
+| Date/time and deployed release | 2026-09-29 11:31 UTC; Go release `20260929T112129Z` and separate Voice edge hosts |
+| Browser A extension and browser/version | 345; isolated Chromium 153.0.8010.36 context with synthetic media at `voice-phone.lan.awesomeio.ru` |
+| Browser B extension and browser/version | 3454; second isolated Chromium context at the same host |
+| A-to-B incoming modal / answer / two-way audio | Modal and answer passed; ICE connected, RTP sent and received by both browsers, and a fresh RVC processing sample was observed. Audible speech is unverified because synthetic microphone audio was silent. |
+| B-to-A incoming modal / answer / two-way audio | Same signaling, ICE, RTP and RVC checks passed. Audible speech remains unverified. |
+| Hangup from B, then A; UI and Asterisk cleanup | Both pages returned idle and stayed registered after each hangup; Asterisk reported 0 active channels and 0 active calls. |
+| Final result and failure details | The final run passed signaling, media transport, RVC stream and teardown. An immediately preceding run timed out waiting for RTP/RVC progress after answer; its channels cleared. The successful repeat initially showed one ICE peer in `checking` and then connected. Investigate if this delay recurs in real calls. |
+
+### Previous automated live run
+
+| Field | Result |
+| --- | --- |
+| Date/time and deployed release | 2026-09-29 09:27 UTC; release `20260929T092249Z` (before domain split) |
 | Browser A extension and browser/version | 345; isolated Chromium 153.0.8010.36 context with synthetic media |
 | Browser B extension and browser/version | 3454; separate isolated Chromium 153.0.8010.36 context with synthetic media |
 | A-to-B incoming modal / answer / two-way audio | Modal, answer, connected ICE, RTP in both directions, and fresh RVC processing sample verified; synthetic microphone supplied silence, so audible speech is unverified |

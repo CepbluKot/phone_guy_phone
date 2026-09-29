@@ -106,9 +106,12 @@ docker exec voice-conference-asterisk-1 asterisk -rx 'pjsip show transport trans
 docker exec voice-conference-asterisk-1 asterisk -rx 'pjsip show transport transport-wss' | grep -q 'local_net                   : 172.19.0.0/255.255.0.0'
 python3 - <<'PY'
 import json, urllib.request
-for origin in ('https://voice.lan.awesomeio.ru','https://vm-voice-1.lan.awesomeio.ru'):
+for origin in ('https://voice-phone.lan.awesomeio.ru','https://voice.lan.awesomeio.ru','https://vm-voice-1.lan.awesomeio.ru'):
     req=urllib.request.Request('http://192.168.20.70:8080/phone/api/v1/config',headers={'Origin':origin})
     d=json.load(urllib.request.urlopen(req,timeout=5)); assert d['signalingUrl']=='wss://vm-voice-1.lan.awesomeio.ru/ws/phone-signaling'
+for origin in ('https://voice-admin.lan.awesomeio.ru','https://voice.lan.awesomeio.ru','https://vm-voice-1.lan.awesomeio.ru'):
+    req=urllib.request.Request('http://192.168.20.70:8080/admin/api/v1/auth-mode',headers={'Origin':origin})
+    d=json.load(urllib.request.urlopen(req,timeout=5)); assert d['required'] is False
 PY
 cp "$release/deploy/Caddyfile.goweb" /etc/caddy/Caddyfile; cp "$release/deploy/Caddyfile.goweb" "$voice/deploy/Caddyfile"; caddy validate --config /etc/caddy/Caddyfile; systemctl reload caddy
 curl --max-time 5 -fsS https://vm-voice-1.lan.awesomeio.ru/phone/ | grep -q 'phone-'

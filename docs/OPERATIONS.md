@@ -5,8 +5,9 @@
 
 Код: /home/oleg/Documents/voice-changer/.worktrees/rvc-streaming на ноутбуке.
 Выполнение: VM209, ubuntu@192.168.20.70.
-UI: https://voice.lan.awesomeio.ru/ перенаправляет на /phone/ через VPN;
-админка доступна по /admin/. Наушники → обновить страницу →
+Телефон: https://voice-phone.lan.awesomeio.ru/phone/; админка:
+https://voice-admin.lan.awesomeio.ru/admin/ (через VPN). Старый домен
+`voice.lan.awesomeio.ru` перенаправляет эти разделы на новые адреса. Наушники → обновить страницу →
 «Начать» → разрешить микрофон → дождаться готовности и говорить непрерывно.
 Старый эффект, его ползунки и тестовый тон больше не доступны в UI.
 
@@ -159,12 +160,17 @@ rvc_service/requirements.lock — отдельные точные pins нейр�
 
 ## Сеть и изоляция
 
-- DNS service: `voice.lan.awesomeio.ru → 10.19.87.1`.
+- DNS service: `voice-admin.lan.awesomeio.ru`, `voice-phone.lan.awesomeio.ru`
+  и совместимый `voice.lan.awesomeio.ru` → `10.19.87.1`.
 - DNS VM: `vm-voice-1.lan.awesomeio.ru → 192.168.20.70`.
 - Caddy на VPN VPS проксирует `192.168.20.70:8080`.
-- UI остаётся на прежнем домене; аудио идёт напрямую по TLS к
-  `vm-voice-1.lan.awesomeio.ru:443`. Это исключает лишний путь через VPS
-  для клиента в домашней LAN. Сам UI также доступен на домене VM.
+- Админка и телефон используют отдельные хосты; edge Caddy разрешает на них
+  `/admin/` и `/phone/` соответственно. Телефон также получает общие статические
+  файлы Vite из `/admin/assets/`, но админский UI и API на его хосте закрыты.
+  SIP-сигнализация идёт по WSS к `vm-voice-1.lan.awesomeio.ru:443`,
+  а медиапоток WebRTC использует DTLS-SRTP на приватных UDP-портах VM.
+  Это исключает лишний путь через VPS для клиента в домашней LAN.
+  Сам UI также доступен на домене VM.
 - Caddy в VM принимает HTTPS только на LAN-адресе; UFW разрешает 443
   из домашней LAN и VPN. Сертификат обновляется каждые 12 часов через
   `voice-cert-sync.timer`. SSH-ключ VM на VPS ограничен forced-command,
