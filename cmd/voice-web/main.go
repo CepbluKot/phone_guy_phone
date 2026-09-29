@@ -152,6 +152,17 @@ func run() error {
 	if err != nil {
 		return errors.New("voice control unavailable")
 	}
+	if callRouter != nil {
+		callRouter.SetPhysicalEndpointLookup(func() []string {
+			var extensions []string
+			for _, device := range phones.Snapshot().Devices {
+				if device.Extension != "" {
+					extensions = append(extensions, device.Extension)
+				}
+			}
+			return extensions
+		})
+	}
 	defer closeVoice()
 	var phoneAPI http.Handler
 	var phoneARI *ari.Client

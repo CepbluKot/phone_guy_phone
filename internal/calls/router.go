@@ -51,14 +51,15 @@ func (route *Route) ProcessingLease() ProcessingLease {
 }
 
 type Router struct {
-	store        voiceconfig.RouteStore
-	allowed      map[string]struct{}
-	physical     map[string]struct{}
-	gate         *sessionGate
-	browserMu    sync.RWMutex
-	browsers     map[string]string
-	browserByExt map[string]string
-	dynamicExts  map[string]struct{}
+	store          voiceconfig.RouteStore
+	allowed        map[string]struct{}
+	physical       map[string]struct{}
+	gate           *sessionGate
+	browserMu      sync.RWMutex
+	browsers       map[string]string
+	browserByExt   map[string]string
+	dynamicExts    map[string]struct{}
+	physicalLookup func() []string
 }
 
 func NewRouter(store voiceconfig.RouteStore, endpointIDs []string) (*Router, error) {
@@ -107,6 +108,18 @@ func (router *Router) SetBrowserEndpoint(endpoint, extension string, active bool
 	return nil
 }
 
+// SetPhysicalEndpointLookup makes routing follow the current phonebook
+// assignments, so configured-but-unassigned placeholders are never call
+// targets. Configure it before serving call events.
+func (router *Router) SetPhysicalEndpointLookup(lookup func() []string) {
+	if router == nil {
+		return
+	}
+	router.browserMu.Lock()
+	router.physicalLookup = lookup
+	router.browserMu.Unlock()
+}
+
 func validBrowserEndpoint(endpoint string) bool {
 	if !strings.HasPrefix(endpoint, "web-") || len(endpoint) > 64 {
 		return false
@@ -145,15 +158,31 @@ func (router *Router) Resolve(ctx context.Context, event ari.Event) (*Route, err
 	for k, v := range router.browsers {
 		browserIDs[k] = v
 	}
-	allowed := make(map[string]struct{}, len(router.allowed))
-	for k := range router.allowed {
-		allowed[k] = struct{}{}
+	physicalLookup := router.physicalLookup
+	physical := make(map[string]struct{}, len(router.physical))
+	for k := range router.physical {
+		physical[k] = struct{}{}
 	}
 	dynamicExts := make(map[string]struct{}, len(router.dynamicExts))
 	for k := range router.dynamicExts {
 		dynamicExts[k] = struct{}{}
 	}
 	router.browserMu.RUnlock()
+	if physicalLookup != nil {
+		physical = make(map[string]struct{})
+		for _, extension := range physicalLookup() {
+			if validEndpoint(extension) {
+				physical[extension] = struct{}{}
+			}
+		}
+	}
+	allowed := make(map[string]struct{}, len(physical)+len(browserIDs))
+	for extension := range physical {
+		allowed[extension] = struct{}{}
+	}
+	for _, extension := range browserIDs {
+		allowed[extension] = struct{}{}
+	}
 	identity, err := resolveEndpointsWithBrowsers(event, allowed, browserIDs)
 	if err != nil {
 		return nil, err
@@ -171,9 +200,7 @@ func (router *Router) Resolve(ctx context.Context, event ari.Event) (*Route, err
 	}
 	route := &Route{Source: identity.Source, Peer: identity.Peer, Profile: profile, Revision: snapshot.Revision, Flow: identity.Flow, BrowserTarget: router.browserTarget(identity.Peer)}
 	if identity.Peer != "conference" {
-		router.browserMu.RLock()
-		_, route.PhysicalPeer = router.physical[identity.Peer]
-		router.browserMu.RUnlock()
+		_, route.PhysicalPeer = physical[identity.Peer]
 	}
 	processed := profile == voiceconfig.ProfilePhoneGuy
 	if identity.Peer != "conference" {
