@@ -1102,3 +1102,152 @@ td { color: #171717; }
   }
 }
 @media (max-width: 850px) { .sidebar-expanded .sidebar { box-shadow: 6px 0 0 #ffe600; } }
+
+/* Mobile navigation and inventory cards. */
+.mobile-menu-toggle,
+.mobile-nav-backdrop { display: none; }
+
+@media (max-width: 850px) {
+  .mobile-menu-toggle {
+    display: grid;
+    flex: 0 0 40px;
+    width: 40px;
+    height: 40px;
+    place-items: center;
+    padding: 0;
+    color: #111;
+    background: #ffe600;
+    border: 2px solid #111;
+    box-shadow: 3px 3px 0 #064bff;
+  }
+  .mobile-menu-toggle svg { width: 20px; height: 20px; }
+  .sidebar,
+  .sidebar-collapsed .sidebar,
+  .sidebar-expanded .sidebar {
+    z-index: 30;
+    width: min(286px, 86vw);
+    padding: 18px 12px;
+    transform: translateX(-105%);
+    visibility: hidden;
+    box-shadow: 6px 0 0 #ffe600;
+    transition: transform 180ms ease, visibility 180ms ease;
+  }
+  .mobile-nav-open .sidebar { transform: translateX(0); visibility: visible; }
+  .sidebar-collapsed .sidebar-header,
+  .sidebar-expanded .sidebar-header { justify-content: space-between; padding: 0 6px; }
+  .sidebar-collapsed .brand,
+  .sidebar-expanded .brand { display: flex; }
+  .sidebar-collapsed .voice-navigation .nav-label,
+  .sidebar-expanded .voice-navigation .nav-label,
+  .sidebar-collapsed .nav-item-label,
+  .sidebar-expanded .nav-item-label { display: inline; }
+  .sidebar-collapsed .voice-navigation .nav-item,
+  .sidebar-expanded .voice-navigation .nav-item,
+  .sidebar-collapsed .browser-phone-link,
+  .sidebar-expanded .browser-phone-link { justify-content: flex-start; gap: 12px; padding: 0 12px; }
+  .sidebar-collapsed .sidebar-divider,
+  .sidebar-expanded .sidebar-divider { display: block; }
+  .sidebar-collapsed .sidebar-bottom,
+  .sidebar-expanded .sidebar-bottom { justify-content: flex-start; padding: 14px 10px 4px; }
+  .mobile-nav-open .mobile-nav-backdrop {
+    display: block;
+    position: fixed;
+    z-index: 29;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    background: rgb(17 17 17 / 0.48);
+    cursor: default;
+  }
+  .sidebar-collapsed .main-content,
+  .sidebar-expanded .main-content { margin-left: 0; }
+  .topbar { justify-content: flex-start; gap: 12px; padding: 0 20px; }
+  .breadcrumb { min-width: 0; flex: 1; }
+  .top-actions { flex: 0 0 auto; }
+  .inventory-table { min-width: 0; }
+  .inventory-panel .table-scroll { overflow: visible; }
+  .inventory-panel .inventory-table,
+  .inventory-panel .inventory-table tbody { display: block; width: 100%; }
+  .inventory-panel .inventory-table thead { display: none; }
+  .inventory-panel .inventory-table tbody { padding: 10px; }
+  .inventory-panel .inventory-table tbody tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+    gap: 12px 10px;
+    padding: 14px 12px;
+    margin-bottom: 10px;
+    border: 2px solid #111;
+    background: #fffef9;
+    box-shadow: 3px 3px 0 #111;
+  }
+  .inventory-panel .inventory-table tbody tr:last-child { margin-bottom: 0; }
+  .inventory-panel .inventory-table tbody tr:hover { background: #fffef9; }
+  .inventory-panel .inventory-table tbody td {
+    display: flex;
+    min-width: 0;
+    height: auto;
+    padding: 0;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 5px;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+  .inventory-panel .inventory-table tbody td::before {
+    content: attr(data-label);
+    color: #66645e;
+    font-size: 9px;
+    font-weight: 900;
+    line-height: 1.3;
+    letter-spacing: .45px;
+    text-transform: uppercase;
+  }
+  .inventory-panel .inventory-table tbody td[data-label=""]::before { display: none; }
+  .inventory-panel .inventory-table tbody td.inventory-empty,
+  .inventory-panel .inventory-table tbody td[colspan] { display: block; grid-column: 1 / -1; text-align: center; }
+  .inventory-panel .inventory-table tbody td.inventory-empty::before,
+  .inventory-panel .inventory-table tbody td[colspan]::before { content: none; }
+  .inventory-panel .inventory-table td input,
+  .inventory-panel .inventory-table td select { width: 100%; min-width: 0; max-width: 100%; }
+  .inventory-panel .inventory-table .device-label-input { max-width: none; }
+  .inventory-panel .inventory-table .row-actions {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-direction: row;
+    justify-content: flex-end;
+    align-items: center;
+    margin-top: 2px;
+    padding-top: 9px;
+    border-top: 1px solid #d4d0c4;
+  }
+  .phone-add-form { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .phone-add-form input,
+  .phone-add-form select { width: 100%; min-width: 0; }
+}
+
+@media (max-width: 580px) {
+  .topbar { height: 60px; gap: 9px; padding: 0 12px; }
+  .mobile-menu-toggle { flex-basis: 36px; width: 36px; height: 36px; }
+  .breadcrumb { gap: 0; overflow: hidden; font-size: 0; white-space: nowrap; }
+  .breadcrumb > span { display: none; }
+  .breadcrumb strong { display: block; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
+  .top-actions { gap: 5px; }
+  .page-content { padding: 22px 12px; }
+  .page-heading { align-items: flex-start; gap: 10px; margin-bottom: 18px; }
+  .page-heading h1 { font-size: 22px; line-height: 1.15; }
+  .page-heading .muted { max-width: 100%; font-size: 12px; }
+  .count-badge { flex: 0 0 auto; white-space: nowrap; font-size: 10px; }
+  .panel-heading { min-height: 0; padding: 15px 14px; gap: 10px; }
+  .panel-heading .muted { overflow-wrap: anywhere; }
+  .panel-heading .button { flex: 0 0 auto; max-width: 45%; white-space: normal; }
+  .inventory-panel .inventory-table tbody { padding: 10px; }
+  .inventory-panel .inventory-table tbody tr { gap: 12px 9px; padding: 13px 10px; }
+  .phone-add-form { grid-template-columns: minmax(0, 1fr); padding: 0 14px; }
+  .phone-add-form .button { width: 100%; }
+  .compact-load { padding: 0 14px 14px; }
+  .compact-load-heading { align-items: flex-start; padding: 14px 0 8px; }
+  .compact-load-grid { grid-template-columns: minmax(0, 1fr); }
+  .metrics-grid { grid-template-columns: minmax(0, 1fr); }
+}

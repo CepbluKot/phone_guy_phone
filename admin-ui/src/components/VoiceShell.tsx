@@ -1,10 +1,12 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import {
   AudioLines,
   ChevronLeft,
   ChevronRight,
   Headphones,
   LayoutGrid,
+  Menu,
+  X,
   type LucideIcon,
 } from "lucide-react";
 
@@ -20,6 +22,9 @@ type VoiceShellLabels = {
   signOut: string;
   collapseSidebar: string;
   expandSidebar: string;
+  openMobileNavigation: string;
+  closeMobileNavigation: string;
+  dismissMobileNavigation: string;
 };
 
 const navigation: Array<{ page: VoicePage; label: keyof Pick<VoiceShellLabels, "phones" | "voiceProfiles">; icon: LucideIcon }> = [
@@ -44,9 +49,10 @@ export function VoiceShell({
   onSignOut?: () => void;
   children: ReactNode;
 }) {
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   return (
-    <div className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : "sidebar-expanded"}`}>
-      <aside className="sidebar">
+    <div className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : "sidebar-expanded"} ${mobileNavOpen ? "mobile-nav-open" : ""}`}>
+      <aside id="voice-sidebar" className="sidebar">
         <div className="sidebar-header">
           {!sidebarCollapsed ? (
             <a className="brand" href="/admin/" aria-label={`${labels.appName} home`}>
@@ -77,7 +83,7 @@ export function VoiceShell({
                 aria-label={labels[label]}
                 aria-current={active ? "page" : undefined}
                 title={sidebarCollapsed ? labels[label] : undefined}
-                onClick={() => onNavigate(targetPage)}
+                onClick={() => { onNavigate(targetPage); setMobileNavOpen(false); }}
               >
                 <Icon className="nav-icon" aria-hidden="true" />
                 <span className="nav-item-label">{labels[label]}</span>
@@ -96,9 +102,13 @@ export function VoiceShell({
           <span className="online-dot" aria-hidden="true" />
         </div>
       </aside>
+      {mobileNavOpen && <button className="mobile-nav-backdrop" type="button" aria-label={labels.dismissMobileNavigation} onClick={() => setMobileNavOpen(false)} />}
 
       <main className="main-content">
         <header className="topbar">
+          <button className="mobile-menu-toggle" type="button" aria-label={mobileNavOpen ? labels.closeMobileNavigation : labels.openMobileNavigation} aria-expanded={mobileNavOpen} aria-controls="voice-sidebar" onClick={() => setMobileNavOpen((open) => !open)}>
+            {mobileNavOpen ? <X aria-hidden="true" /> : <Menu aria-hidden="true" />}
+          </button>
           <nav className="breadcrumb" aria-label="Breadcrumb">
             <a href="#/phones" onClick={(event) => { event.preventDefault(); onNavigate("phones"); }}>{labels.adminHome}</a>
             <span aria-hidden="true">/</span>
