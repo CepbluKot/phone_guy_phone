@@ -77,7 +77,6 @@ audio:
 | Date/time and deployed release | 2026-09-29 11:31 UTC; Go release `20260929T112129Z` and separate Voice edge hosts |
 | Browser A extension and browser/version | 345; isolated Chromium 153.0.8010.36 context with synthetic media at `voice-phone.lan.awesomeio.ru` |
 | Browser B extension and browser/version | 3454; second isolated Chromium context at the same host |
-| Admin browser registrations visible during both leases | |
 | A-to-B incoming modal / answer / two-way audio | Modal and answer passed; ICE connected, RTP sent and received by both browsers, and a fresh RVC processing sample was observed. Audible speech is unverified because synthetic microphone audio was silent. |
 | B-to-A incoming modal / answer / two-way audio | Same signaling, ICE, RTP and RVC checks passed. Audible speech remains unverified. |
 | Hangup from B, then A; UI and Asterisk cleanup | Both pages returned idle and stayed registered after each hangup; Asterisk reported 0 active channels and 0 active calls. |
@@ -89,6 +88,17 @@ Keep this check in the same live acceptance run as the calls above: while both
 phone pages are still registered, open the admin profiles page and verify each
 nickname, extension, and connected state. This specifically catches cross-host
 API routing regressions after the admin and phone domains are split.
+
+### Admin visibility fix and post-deploy acceptance — 2026-09-29
+
+| Field | Result |
+| --- | --- |
+| Date/time and deployed release | 2026-09-29 11:45 UTC; Go release `20260929T114505Z`, commit `60e3351` |
+| Browser registrations in admin during both leases | **Passed** — `авпап · 345` and `ыыва · 3454` both showed **Подключён**; both remained visible after reloading the profiles page. |
+| A-to-B incoming modal / answer / media / RVC | **Passed** — incoming modal appeared; ICE connected; bidirectional RTP and a fresh RVC processing sample were observed. Synthetic microphone input was silent, so audible speech is unverified. |
+| B-to-A incoming modal / answer / media / RVC | **Passed** — same checks passed; synthetic microphone input was silent, so audible speech is unverified. |
+| Hangup and cleanup | **Passed** — both calls ended, the browser leases were released, browser status returned `{"sessions":[]}`, and Asterisk reported 0 active channels and 0 active calls. |
+| Final result | Registration display, refresh persistence, call signaling/media transport, RVC processing, and cleanup passed. Audible speech remains unverified in this synthetic-media run. |
 
 ### Previous automated live run
 
