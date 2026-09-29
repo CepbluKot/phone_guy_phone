@@ -64,6 +64,17 @@ receiving browser. Do not count a basic unprocessed call as proof that RVC works
 Any failed criterion is a failed live acceptance; do not mark the release
 verified just because signaling or the unit tests passed.
 
+### Latest production run
+
+| Field | Result |
+| --- | --- |
+| Date/time and deployed release | 2026-09-29 12:27 UTC; Go/Asterisk release `20260929T122734Z`, source commit `2e88fee` |
+| Profile categories and live browser records | **Passed** — physical `1983`, `1988`; virtual `1987`, `2014`; active browsers `345` (`авпап`) and `3454` (`ыыва`) were shown in separate sections and remained after admin reload. |
+| Virtual call-target and direct-call rejection | **Passed** — phone page offered `1988`, `1983`, and active browser `3454`, but not `1987` or `2014`. A direct SIP attempt to `1987` received `603 Decline`; the call UI returned idle and the active-call metric remained zero. |
+| Browser call A-to-B and B-to-A | **Passed** — incoming modals appeared, calls connected, bidirectional RTP counters advanced, and each call produced a fresh RVC processing sample. |
+| Hangup and cleanup | **Passed** — both calls ended cleanly; browser registrations stayed online. |
+| Audible speech | **Unverified** — this automated run used synthetic silent microphones, so RTP and RVC processing do not prove that a person heard converted speech. |
+
 ## Evidence record template
 
 Record only the test metadata and outcome, never credentials, SIP payloads, or
