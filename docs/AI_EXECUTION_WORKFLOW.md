@@ -107,6 +107,25 @@ observed outcomes; the model split and token savings are not guaranteed.
 
 ## Completion
 
+### Mandatory browser-call acceptance
+
+Every project update must run the live browser-to-browser call acceptance before
+the update is reported complete. This gate applies to application, UI, SIP,
+configuration, and deployment changes; build and unit tests are necessary but
+do not replace the live call. Run both call directions using two independent
+browser sessions, verify the incoming UI and two-way audio, and hang up from
+each side while confirming both pages return to idle and the Asterisk channels
+are cleared. Follow the checklist and record the result in
+[`BROWSER_CALL_ACCEPTANCE.md`](BROWSER_CALL_ACCEPTANCE.md).
+
+If a criterion fails, keep the update open: diagnose and fix the underlying
+problem, deploy the candidate when required, then repeat the live acceptance
+until it passes. Do not report the update as complete or the release as
+verified while the live gate is failing. If an external condition prevents the
+test, report that specific blocker and leave acceptance explicitly incomplete.
+For documentation-only changes, run repository/document validation and retain
+the latest live-call result; do not claim a new live pass without running it.
+
 The final task report names changed files, checks actually run and their result,
 checks not run, and remaining risks. The project-specific definition of done and
 authorization rules remain authoritative.
