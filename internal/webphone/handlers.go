@@ -11,33 +11,72 @@ import (
 	"time"
 )
 
+type ICEServer struct {
+	URLs       []string `json:"urls"`
+	Username   string   `json:"username,omitempty"`
+	Credential string   `json:"credential,omitempty"`
+}
+
+type TURNCredentialProvider interface {
+	Issue() ([]ICEServer, error)
+}
+
 type API struct {
 	sessions            *Sessions
-	origins             map[string]struct{}
-	signalURL           string
+	origins             map[string]PhoneOrigin
 	physicalPhones      func() map[string]string
 	physicalPhoneStatus func(context.Context) (map[string]string, error)
 	browserHangup       func(context.Context, string) error
+	turnCredentials     TURNCredentialProvider
 	handler             http.Handler
 }
 
-func NewAPI(sessions *Sessions, allowedOrigins string, physicalPhoneLookup ...func() map[string]string) (http.Handler, error) {
-	if sessions == nil {
-		return nil, ErrInvalid
-	}
-	origins := map[string]struct{}{}
+type PhoneOrigin struct {
+	SignalingURL string `json:"signalingUrl"`
+	SIPDomain    string `json:"sipDomain"`
+}
+
+func BuildPhoneOrigins(allowedOrigins, publicOrigin string) (map[string]PhoneOrigin, error) {
+	origins := map[string]PhoneOrigin{}
 	for _, raw := range strings.Split(allowedOrigins, ",") {
-		value := strings.TrimSpace(raw)
-		u, err := url.Parse(value)
-		if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
+		origin := strings.TrimSpace(raw)
+		if origin == "" {
+			continue
+		}
+		origins[origin] = PhoneOrigin{SignalingURL: "wss://" + browserSIPDomain + "/ws/phone-signaling", SIPDomain: browserSIPDomain}
+	}
+	if publicOrigin != "" {
+		if publicOrigin != "https://phone.awesomeio.ru" {
 			return nil, ErrInvalid
 		}
-		origins[value] = struct{}{}
+		origins[publicOrigin] = PhoneOrigin{SignalingURL: "wss://phone.awesomeio.ru/ws/phone-signaling", SIPDomain: publicSIPDomain}
 	}
 	if len(origins) == 0 {
 		return nil, ErrInvalid
 	}
-	a := &API{sessions: sessions, origins: origins, signalURL: sessions.wsURL}
+	return origins, nil
+}
+
+func NewAPI(sessions *Sessions, allowedOrigins string, physicalPhoneLookup ...func() map[string]string) (http.Handler, error) {
+	origins, err := BuildPhoneOrigins(allowedOrigins, "")
+	if err != nil {
+		return nil, err
+	}
+	return NewAPIWithPhoneOrigins(sessions, origins, physicalPhoneLookup...)
+}
+
+func NewAPIWithPhoneOrigins(sessions *Sessions, origins map[string]PhoneOrigin, physicalPhoneLookup ...func() map[string]string) (http.Handler, error) {
+	if sessions == nil || len(origins) == 0 {
+		return nil, ErrInvalid
+	}
+	for origin, config := range origins {
+		u, err := url.Parse(origin)
+		ws, wsErr := url.Parse(config.SignalingURL)
+		if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || wsErr != nil || ws.Scheme != "wss" || ws.Host == "" || ws.User != nil || ws.Path != "/ws/phone-signaling" || ws.RawQuery != "" || ws.Fragment != "" || !validSIPDomain(config.SIPDomain) {
+			return nil, ErrInvalid
+		}
+	}
+	a := &API{sessions: sessions, origins: origins}
 	if len(physicalPhoneLookup) > 0 {
 		a.physicalPhones = physicalPhoneLookup[0]
 	}
@@ -65,9 +104,35 @@ func (a *API) SetPhysicalPhoneStatusLookup(lookup func(context.Context) (map[str
 	a.physicalPhoneStatus = lookup
 }
 
+func (a *API) SetTurnCredentialProvider(provider TURNCredentialProvider) {
+	a.turnCredentials = provider
+}
+
 func (a *API) config(w http.ResponseWriter, r *http.Request) {
+	origin, ok := a.origins[r.Header.Get("Origin")]
+	if !ok || r.Header.Get("Origin") == "" {
+		writeAPIError(w, http.StatusForbidden, "origin_forbidden")
+		return
+	}
+	var iceServers []ICEServer
+	if origin.SIPDomain == publicSIPDomain {
+		if a.turnCredentials == nil {
+			writeAPIError(w, http.StatusServiceUnavailable, "phone_media_unavailable")
+			return
+		}
+		var err error
+		iceServers, err = a.turnCredentials.Issue()
+		if err != nil || len(iceServers) == 0 {
+			writeAPIError(w, http.StatusServiceUnavailable, "phone_media_unavailable")
+			return
+		}
+	}
 	a.json(w)
-	_ = json.NewEncoder(w).Encode(map[string]string{"signalingUrl": a.signalURL})
+	_ = json.NewEncoder(w).Encode(struct {
+		SignalingURL string      `json:"signalingUrl"`
+		SIPDomain    string      `json:"sipDomain"`
+		ICEServers   []ICEServer `json:"iceServers,omitempty"`
+	}{origin.SignalingURL, origin.SIPDomain, iceServers})
 }
 func (a *API) directory(w http.ResponseWriter, r *http.Request) {
 	a.json(w)
@@ -108,7 +173,8 @@ func (a *API) status(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"sessions": safe})
 }
 func (a *API) claim(w http.ResponseWriter, r *http.Request) {
-	if !a.writeAllowed(w, r) {
+	origin, ok := a.originForWrite(w, r)
+	if !ok {
 		return
 	}
 	var request struct {
@@ -124,9 +190,9 @@ func (a *API) claim(w http.ResponseWriter, r *http.Request) {
 	var credential TemporarySIPCredentials
 	var err error
 	if request.CreateExtension {
-		view, credential, err = a.sessions.ClaimNew(r.Context(), request.Nickname, request.Extension)
+		view, credential, err = a.sessions.ClaimNewForDomain(r.Context(), request.Nickname, request.Extension, origin.SIPDomain)
 	} else {
-		view, credential, err = a.sessions.Claim(r.Context(), request.Nickname, request.Extension)
+		view, credential, err = a.sessions.ClaimForDomain(r.Context(), request.Nickname, request.Extension, origin.SIPDomain)
 	}
 	if err != nil {
 		a.sessionError(w, err)
@@ -215,6 +281,20 @@ func (a *API) writeAllowed(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	return true
+}
+
+func (a *API) originForWrite(w http.ResponseWriter, r *http.Request) (PhoneOrigin, bool) {
+	origin := r.Header.Get("Origin")
+	config, ok := a.origins[origin]
+	if !ok || origin == "" {
+		writeAPIError(w, http.StatusForbidden, "origin_forbidden")
+		return PhoneOrigin{}, false
+	}
+	if r.Header.Get("Content-Type") != "application/json" {
+		writeAPIError(w, http.StatusUnsupportedMediaType, "json_required")
+		return PhoneOrigin{}, false
+	}
+	return config, true
 }
 func (a *API) json(w http.ResponseWriter) {
 	w.Header().Set("Cache-Control", "no-store")

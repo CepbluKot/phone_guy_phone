@@ -1,0 +1,31 @@
+[Unit]
+Description=Owner-only browser phone TURN relay
+After=network-online.target nftables.service
+Wants=network-online.target
+Requires=voice-turn-firewall.service
+
+[Service]
+Type=simple
+User=turnserver
+Group=turnserver
+RuntimeDirectory=voice-turn
+RuntimeDirectoryMode=0750
+ExecStartPre=+/usr/bin/python3 /usr/local/sbin/voice-turn-render-config.py
+ExecStart=/usr/bin/turnserver -c /run/voice-turn/turnserver.conf --no-cli
+Restart=on-failure
+RestartSec=3s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_UNIX
+ReadOnlyPaths=/etc/voice-phone /run/voice-turn/turnserver.conf
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

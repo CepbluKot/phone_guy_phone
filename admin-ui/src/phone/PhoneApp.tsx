@@ -158,7 +158,7 @@ export function PhoneApp() {
           setSpeakerMuted(false);
           if (audioRef.current) audioRef.current.muted = false;
         }
-      }, setAudioPlaybackError);
+      }, setAudioPlaybackError, config.iceServers);
       sipRef.current = sip;
       await sip.connect(claimed.sip, audioRef.current!);
       setSession(claimed.session);

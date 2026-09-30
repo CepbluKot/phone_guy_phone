@@ -1,0 +1,14 @@
+[Unit]
+Description=Restrict voice TURN relay peer traffic
+After=nftables.service
+PartOf=nftables.service
+Before=voice-turn.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/voice-turn-apply-firewall
+ExecReload=/usr/local/sbin/voice-turn-apply-firewall
+
+[Install]
+WantedBy=multi-user.target

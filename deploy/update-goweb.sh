@@ -13,7 +13,7 @@ if [[ "${DEPLOY_GOWEB_SKIP_CHECKS:-0}" != 1 ]]; then
   (cd admin-ui && npm test -- --run && npm run build)
   pytest_bin=${DEPLOY_GOWEB_PYTEST:-$(command -v pytest || true)}
   [[ -x "$pytest_bin" ]] || { echo "Set DEPLOY_GOWEB_PYTEST to the project test runner" >&2; exit 2; }
-  "$pytest_bin" -q tests/test_bootstrap_goweb.py tests/test_goweb_stage_rollback.py tests/test_rollback_goweb_production.py tests/test_legacy_deploy_owner_guard.py tests/test_browser_webrtc_config.py
+  "$pytest_bin" -q tests/test_bootstrap_goweb.py tests/test_goweb_stage_rollback.py tests/test_rollback_goweb_production.py tests/test_legacy_deploy_owner_guard.py tests/test_browser_webrtc_config.py tests/test_public_phone_access.py
   git diff --check
 fi
 

@@ -1,5 +1,14 @@
 # Browser-to-browser call acceptance
 
+## 2026-09-30 release `20260930T173000Z`
+
+**Incomplete for this release.** Deployment health and private `/phone/` page/API
+checks passed, and Asterisk reported zero active calls. The public hostname is
+still gated and no new two-browser call was run after this deployment. Two
+independent browser profiles were not available in this task session. The
+previous 2026-09-29 private call acceptance remains historical evidence only;
+it does not validate the new public origin, Teleport, or TURN path.
+
 Run this live acceptance stage after deploying any change to browser SIP,
 signaling, incoming-call UI, call teardown, or WebRTC audio. A successful build
 and unit tests do not replace this check: unit tests mock the SIP session.

@@ -29,7 +29,7 @@ import (
 	"voice-changer/internal/webphone"
 )
 
-const contentSecurityPolicy = "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' wss://vm-voice-1.lan.awesomeio.ru; frame-ancestors 'none'; base-uri 'none'"
+const contentSecurityPolicy = "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' wss://vm-voice-1.lan.awesomeio.ru wss://phone.awesomeio.ru; frame-ancestors 'none'; base-uri 'none'"
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
@@ -165,6 +165,7 @@ func run() error {
 	}
 	defer closeVoice()
 	var phoneAPI http.Handler
+	var phoneSignaling http.Handler
 	var phoneARI *ari.Client
 	if os.Getenv("VOICE_ARI_PASSWORD_FILE") != "" {
 		phoneARI, err = newPhoneARIClient()
@@ -185,7 +186,22 @@ func run() error {
 		if callRouter != nil {
 			sessions.SetEndpointObserver(callRouter.SetBrowserEndpoint)
 		}
-		phoneHandler, apiErr := webphone.NewAPI(sessions, origin, func() map[string]string {
+		phoneOrigins, originsErr := webphone.BuildPhoneOrigins(origin, os.Getenv("VOICE_PHONE_PUBLIC_ORIGIN"))
+		if originsErr != nil {
+			return errors.New("browser phone origins unavailable")
+		}
+		var turnCredentials webphone.TURNCredentialProvider
+		if turnSecretPath := os.Getenv("VOICE_PHONE_TURN_SECRET_FILE"); turnSecretPath != "" {
+			turnCredentials, err = webphone.NewTURNRESTCredentialIssuerFromFile(
+				turnSecretPath,
+				[]string{"turns:phone.awesomeio.ru:5349?transport=tcp"},
+				30*time.Minute,
+			)
+			if err != nil {
+				return errors.New("browser phone media credentials unavailable")
+			}
+		}
+		phoneHandler, apiErr := webphone.NewAPIWithPhoneOrigins(sessions, phoneOrigins, func() map[string]string {
 			labels := make(map[string]string)
 			for _, device := range phones.Snapshot().Devices {
 				if device.Extension != "" {
@@ -198,6 +214,9 @@ func run() error {
 			return errors.New("browser phone API unavailable")
 		}
 		phoneAPIHandler := phoneHandler.(*webphone.API)
+		if turnCredentials != nil {
+			phoneAPIHandler.SetTurnCredentialProvider(turnCredentials)
+		}
 		phoneAPIHandler.SetBrowserHangupHandler(hangupBrowser)
 		phoneAPIHandler.SetPhysicalPhoneStatusLookup(func(requestCtx context.Context) (map[string]string, error) {
 			lookupCtx, cancel := context.WithTimeout(requestCtx, 2*time.Second)
@@ -205,12 +224,18 @@ func run() error {
 			return phoneARI.PJSIPEndpointStates(lookupCtx, configuredExtensions)
 		})
 		phoneAPI = phoneHandler
+		if publicOrigin := os.Getenv("VOICE_PHONE_PUBLIC_ORIGIN"); publicOrigin != "" {
+			phoneSignaling, err = webphone.NewSignalingProxy(publicOrigin, envOr("VOICE_PHONE_SIGNAL_UPSTREAM", "http://127.0.0.1:8092/ws"))
+			if err != nil {
+				return errors.New("browser phone signaling proxy unavailable")
+			}
+		}
 		defer sessions.Close(context.Background())
 		go sessions.RunSweeper(ctx)
 	}
 	server := &http.Server{
 		Addr:              address,
-		Handler:           newAppHandler(root, adminAPI, conferenceHandler, mirrorHandler, phoneAPI),
+		Handler:           newAppHandler(root, adminAPI, conferenceHandler, mirrorHandler, phoneAPI, phoneSignaling),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
@@ -507,6 +532,13 @@ func newAppHandler(webRoot string, adminAPI http.Handler, realtimeHandlers ...ht
 		mirrorSocket = realtimeHandlers[1]
 	}
 	mux.Handle("GET /ws/live-mirror", mirrorSocket)
+	phoneSignaling := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "phone signaling unavailable", http.StatusServiceUnavailable)
+	}))
+	if len(realtimeHandlers) > 3 && realtimeHandlers[3] != nil {
+		phoneSignaling = realtimeHandlers[3]
+	}
+	mux.Handle("GET /ws/phone-signaling", phoneSignaling)
 	mux.HandleFunc("GET /conference/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/conference/" {
 			http.NotFound(w, r)
@@ -553,7 +585,7 @@ func newAppHandler(webRoot string, adminAPI http.Handler, realtimeHandlers ...ht
 		serveFile(webRoot, rel, w, r)
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/" || r.URL.Path == "/healthz" || r.URL.Path == "/conference/" || r.URL.Path == "/live/" || r.URL.Path == "/phone" || r.URL.Path == "/admin" || r.URL.Path == "/ws/conference" || r.URL.Path == "/ws/live-mirror" || strings.HasPrefix(r.URL.Path, "/static/") || strings.HasPrefix(r.URL.Path, "/admin/") || strings.HasPrefix(r.URL.Path, "/phone/") {
+		if r.URL.Path == "/" || r.URL.Path == "/healthz" || r.URL.Path == "/conference/" || r.URL.Path == "/live/" || r.URL.Path == "/phone" || r.URL.Path == "/admin" || r.URL.Path == "/ws/conference" || r.URL.Path == "/ws/live-mirror" || r.URL.Path == "/ws/phone-signaling" || strings.HasPrefix(r.URL.Path, "/static/") || strings.HasPrefix(r.URL.Path, "/admin/") || strings.HasPrefix(r.URL.Path, "/phone/") {
 			w.Header().Set("Allow", "GET, HEAD")
 			http.Error(w, `{"detail":"Method Not Allowed"}`, http.StatusMethodNotAllowed)
 			return

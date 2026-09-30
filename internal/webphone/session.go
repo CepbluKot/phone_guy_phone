@@ -13,6 +13,7 @@ const (
 	HeartbeatInterval = 10 * time.Second
 	LeaseTimeout      = 30 * time.Second
 	browserSIPDomain  = "vm-voice-1.lan.awesomeio.ru"
+	publicSIPDomain   = "phone.awesomeio.ru"
 )
 
 type DynamicPJSIP interface {
@@ -68,16 +69,28 @@ func (s *Sessions) SetEndpointObserver(observer func(string, string, bool) error
 }
 
 func (s *Sessions) Claim(ctx context.Context, nickname, extension string) (SessionView, TemporarySIPCredentials, error) {
-	return s.claim(ctx, nickname, extension, false)
+	return s.claim(ctx, nickname, extension, false, browserSIPDomain)
 }
 
 func (s *Sessions) ClaimNew(ctx context.Context, nickname, extension string) (SessionView, TemporarySIPCredentials, error) {
-	return s.claim(ctx, nickname, extension, true)
+	return s.claim(ctx, nickname, extension, true, browserSIPDomain)
 }
 
-func (s *Sessions) claim(ctx context.Context, nickname, extension string, create bool) (SessionView, TemporarySIPCredentials, error) {
+func (s *Sessions) ClaimForDomain(ctx context.Context, nickname, extension, sipDomain string) (SessionView, TemporarySIPCredentials, error) {
+	return s.claim(ctx, nickname, extension, false, sipDomain)
+}
+
+func (s *Sessions) ClaimNewForDomain(ctx context.Context, nickname, extension, sipDomain string) (SessionView, TemporarySIPCredentials, error) {
+	return s.claim(ctx, nickname, extension, true, sipDomain)
+}
+
+func validSIPDomain(domain string) bool {
+	return domain == browserSIPDomain || domain == publicSIPDomain
+}
+
+func (s *Sessions) claim(ctx context.Context, nickname, extension string, create bool, sipDomain string) (SessionView, TemporarySIPCredentials, error) {
 	nickname = trim(nickname)
-	if !validNickname(nickname) {
+	if !validNickname(nickname) || !validSIPDomain(sipDomain) {
 		return SessionView{}, TemporarySIPCredentials{}, ErrInvalid
 	}
 	if create {
@@ -101,7 +114,7 @@ func (s *Sessions) claim(ctx context.Context, nickname, extension string, create
 	if err != nil {
 		return SessionView{}, TemporarySIPCredentials{}, ErrProvision
 	}
-	entry := &lease{view: SessionView{ID: id, Nickname: nickname, Extension: extension, ExpiresAt: now.Add(LeaseTimeout)}, credential: TemporarySIPCredentials{URI: "sip:" + endpoint + "@" + browserSIPDomain, Username: endpoint, Password: password, Endpoint: endpoint}, endpointID: endpoint, authID: authID, aorID: aorID, lastSeen: now}
+	entry := &lease{view: SessionView{ID: id, Nickname: nickname, Extension: extension, ExpiresAt: now.Add(LeaseTimeout)}, credential: TemporarySIPCredentials{URI: "sip:" + endpoint + "@" + sipDomain, Username: endpoint, Password: password, Endpoint: endpoint}, endpointID: endpoint, authID: authID, aorID: aorID, lastSeen: now}
 	s.mu.Lock()
 	if _, busy := s.active[extension]; busy {
 		s.mu.Unlock()
@@ -121,7 +134,7 @@ func (s *Sessions) claim(ctx context.Context, nickname, extension string, create
 	}{
 		{"auth", authID, map[string]string{"type": "auth", "auth_type": "userpass", "username": endpoint, "password": password}},
 		{"aor", aorID, map[string]string{"type": "aor", "max_contacts": "1", "remove_existing": "yes"}},
-		{"endpoint", endpoint, map[string]string{"type": "endpoint", "context": "phoneguy-sip", "disallow": "all", "allow": "alaw", "auth": authID, "aors": aorID, "transport": "transport-wss", "from_domain": browserSIPDomain, "media_encryption": "dtls", "dtls_auto_generate_cert": "yes", "ice_support": "yes", "use_avpf": "yes", "rtcp_mux": "yes", "direct_media": "no", "force_rport": "yes", "rewrite_contact": "yes", "rtp_symmetric": "yes", "media_use_received_transport": "yes"}},
+		{"endpoint", endpoint, map[string]string{"type": "endpoint", "context": "phoneguy-sip", "disallow": "all", "allow": "alaw", "auth": authID, "aors": aorID, "transport": "transport-wss", "from_domain": sipDomain, "media_encryption": "dtls", "dtls_auto_generate_cert": "yes", "ice_support": "yes", "use_avpf": "yes", "rtcp_mux": "yes", "direct_media": "no", "force_rport": "yes", "rewrite_contact": "yes", "rtp_symmetric": "yes", "media_use_received_transport": "yes"}},
 	}
 	for _, object := range objects {
 		if err := s.ari.PutDynamicPJSIP(ctx, object.kind, object.id, object.fields); err != nil {

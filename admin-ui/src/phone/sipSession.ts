@@ -30,6 +30,7 @@ export class BrowserSIPSession {
     private readonly onRegistration: (status: SIPStatus) => void,
     private readonly onCall: (status: CallStatus, caller?: string) => void,
     private readonly onAudioError: (message: string) => void = () => undefined,
+    private readonly iceServers: RTCIceServer[] = [],
   ) {}
 
   async connect(credentials: SIPCredentials, audio: HTMLAudioElement): Promise<void> {
@@ -62,6 +63,7 @@ export class BrowserSIPSession {
       },
       sessionDescriptionHandlerFactoryOptions: {
         constraints: this.mediaConstraints(),
+        ...(this.iceServers.length ? { peerConnectionConfiguration: { iceServers: this.iceServers } } : {}),
       },
     });
     this.userAgent = userAgent;
@@ -81,7 +83,7 @@ export class BrowserSIPSession {
     const target = UserAgent.makeURI(`sip:${extension}@${host}`);
     if (!target) throw new Error("invalid_call_target");
     const inviter = new Inviter(userAgent, target, {
-      sessionDescriptionHandlerOptions: { constraints: this.mediaConstraints() },
+      sessionDescriptionHandlerOptions: this.sessionDescriptionHandlerOptions(),
     });
     this.attachCall(inviter);
     this.onCall("calling", extension);
@@ -90,7 +92,7 @@ export class BrowserSIPSession {
 
   async answer(): Promise<void> {
     if (!this.invite) return;
-    await this.invite.accept({ sessionDescriptionHandlerOptions: { constraints: this.mediaConstraints() } });
+    await this.invite.accept({ sessionDescriptionHandlerOptions: this.sessionDescriptionHandlerOptions() });
   }
 
   async setInputDevice(deviceId: string): Promise<void> {
@@ -169,6 +171,13 @@ export class BrowserSIPSession {
 
   private mediaConstraints(): MediaStreamConstraints {
     return { audio: this.audioConstraint(), video: false };
+  }
+
+  private sessionDescriptionHandlerOptions(): { constraints: MediaStreamConstraints; peerConnectionConfiguration?: RTCConfiguration } {
+    return {
+      constraints: this.mediaConstraints(),
+      ...(this.iceServers.length ? { peerConnectionConfiguration: { iceServers: this.iceServers } } : {}),
+    };
   }
 
   private receive(invitation: Invitation): void {

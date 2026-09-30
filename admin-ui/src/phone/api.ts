@@ -1,6 +1,7 @@
 export type DirectoryEntry = { nickname: string; extension: string; active: boolean; physicalPhone?: string; physicalStatus?: "online" | "offline" | "unknown" };
 export type PhoneSession = { sessionId: string; nickname: string; extension: string; expiresAt: string };
 export type SIPCredentials = { uri: string; username: string; password: string; endpoint: string };
+export type PhoneConfig = { signalingUrl: string; sipDomain?: string; iceServers?: RTCIceServer[] };
 
 async function request<T>(path: string, body?: object): Promise<T> {
   const response = await fetch(path, {
@@ -18,7 +19,7 @@ async function request<T>(path: string, body?: object): Promise<T> {
 }
 
 export const phoneAPI = {
-  config: () => request<{ signalingUrl: string }>("/phone/api/v1/config"),
+  config: () => request<PhoneConfig>("/phone/api/v1/config"),
   directory: () => request<{ people: DirectoryEntry[] }>("/phone/api/v1/directory"),
   claim: (nickname: string, extension: string, createExtension = false) =>
     request<{ session: PhoneSession; sip: SIPCredentials }>("/phone/api/v1/claim", { nickname, extension, createExtension }),
