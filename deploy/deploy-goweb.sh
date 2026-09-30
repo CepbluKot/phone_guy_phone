@@ -291,7 +291,7 @@ if [ "${DEPLOY_GOWEB_SKIP_CHECKS:-0}" != 1 ]; then
   if [ -z "$pytest_bin" ] && [ -x .venv/bin/pytest ]; then pytest_bin=.venv/bin/pytest; fi
   if [ -z "$pytest_bin" ]; then pytest_bin=$(command -v pytest || true); fi
   [ -n "$pytest_bin" ] && [ -x "$pytest_bin" ] || { echo "Set DEPLOY_GOWEB_PYTEST to the project test runner" >&2; exit 2; }
-  "$pytest_bin" -q tests/test_bootstrap_goweb.py tests/test_goweb_stage_rollback.py tests/test_rollback_goweb_production.py tests/test_legacy_deploy_owner_guard.py
+  "$pytest_bin" -q tests/test_bootstrap_goweb.py tests/test_goweb_stage_rollback.py tests/test_rollback_goweb_production.py tests/test_legacy_deploy_owner_guard.py tests/test_public_phone_access.py
   git diff --check
 fi
 

@@ -79,6 +79,71 @@ func TestClaimRequiresSameOriginAndReturnsSessionCredential(t *testing.T) {
 	}
 }
 
+func TestPublicPhoneOriginUsesPublicSignalingAndSIPDomain(t *testing.T) {
+	s, _, _ := testSessions(t)
+	api, err := NewAPIWithPhoneOrigins(s, map[string]PhoneOrigin{
+		"https://phone.awesomeio.ru": {
+			SignalingURL: "wss://phone.awesomeio.ru/ws/phone-signaling",
+			SIPDomain:    "phone.awesomeio.ru",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	phoneAPI := api.(*API)
+
+	configRequest := httptest.NewRequest(http.MethodGet, "/phone/api/v1/config", nil)
+	configRequest.Header.Set("Origin", "https://phone.awesomeio.ru")
+	configResponse := httptest.NewRecorder()
+	phoneAPI.ServeHTTP(configResponse, configRequest)
+	if configResponse.Code != http.StatusServiceUnavailable {
+		t.Fatalf("public config without TURN status=%d body=%s", configResponse.Code, configResponse.Body.String())
+	}
+	phoneAPI.SetTurnCredentialProvider(fixedTURNProvider{servers: []ICEServer{{URLs: []string{"turns:phone.awesomeio.ru:5349?transport=tcp"}, Username: "123456:voice-phone", Credential: "short-lived"}}})
+	configResponse = httptest.NewRecorder()
+	phoneAPI.ServeHTTP(configResponse, configRequest)
+	if configResponse.Code != http.StatusOK || !strings.Contains(configResponse.Body.String(), `"signalingUrl":"wss://phone.awesomeio.ru/ws/phone-signaling"`) {
+		t.Fatalf("public config status=%d body=%s", configResponse.Code, configResponse.Body.String())
+	}
+	if !strings.Contains(configResponse.Body.String(), `"credential":"short-lived"`) {
+		t.Fatalf("TURN credentials missing: %s", configResponse.Body.String())
+	}
+
+	claimRequest := httptest.NewRequest(http.MethodPost, "/phone/api/v1/claim", strings.NewReader(`{"nickname":"Alice","extension":"1983"}`))
+	claimRequest.Header.Set("Origin", "https://phone.awesomeio.ru")
+	claimRequest.Header.Set("Content-Type", "application/json")
+	claimResponse := httptest.NewRecorder()
+	api.ServeHTTP(claimResponse, claimRequest)
+	var result struct {
+		SIP TemporarySIPCredentials `json:"sip"`
+	}
+	if claimResponse.Code != http.StatusCreated || json.Unmarshal(claimResponse.Body.Bytes(), &result) != nil {
+		t.Fatalf("public claim status=%d body=%s", claimResponse.Code, claimResponse.Body.String())
+	}
+	if result.SIP.URI != "sip:web-"+result.SIP.Endpoint[len("web-"):]+"@phone.awesomeio.ru" {
+		t.Fatalf("public SIP URI=%q", result.SIP.URI)
+	}
+}
+
+type fixedTURNProvider struct {
+	servers []ICEServer
+}
+
+func (f fixedTURNProvider) Issue() ([]ICEServer, error) { return f.servers, nil }
+
+func TestBuildPhoneOriginsAddsOnlyTheFixedPublicHost(t *testing.T) {
+	origins, err := BuildPhoneOrigins("https://voice-phone.lan.awesomeio.ru", "https://phone.awesomeio.ru")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(origins) != 2 || origins["https://phone.awesomeio.ru"].SIPDomain != "phone.awesomeio.ru" {
+		t.Fatalf("phone origins=%+v", origins)
+	}
+	if _, err := BuildPhoneOrigins("https://voice-phone.lan.awesomeio.ru", "https://attacker.example"); err == nil {
+		t.Fatal("accepted an unapproved public phone origin")
+	}
+}
+
 func TestSecondClaimConflictAndDirectoryStatusNeverExposeSecrets(t *testing.T) {
 	s, _, _ := testSessions(t)
 	api, err := NewAPI(s, "https://voice.lan.awesomeio.ru")

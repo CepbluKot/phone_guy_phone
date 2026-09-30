@@ -54,6 +54,26 @@ func TestPhonePageAndAPIStayOnTheGoOrigin(t *testing.T) {
 	}
 }
 
+func TestPhoneSignalingRouteUsesDedicatedHandler(t *testing.T) {
+	configured := newAppHandler(testWebRoot(t), http.NotFoundHandler(), nil, nil, nil, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/ws/phone-signaling" {
+			t.Errorf("signaling path=%q", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusSwitchingProtocols)
+	}))
+	response := httptest.NewRecorder()
+	configured.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/ws/phone-signaling", nil))
+	if response.Code != http.StatusSwitchingProtocols {
+		t.Fatalf("configured signaling status=%d", response.Code)
+	}
+
+	response = httptest.NewRecorder()
+	newHandler(testWebRoot(t)).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/ws/phone-signaling", nil))
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("unconfigured signaling status=%d", response.Code)
+	}
+}
+
 func TestRootRedirectsToBrowserPhone(t *testing.T) {
 	handler := newHandler(testWebRoot(t))
 	response := httptest.NewRecorder()

@@ -1,5 +1,30 @@
 # Текущее развёртывание Phone Guy
 
+## Проверка публичного доступа — 2026-09-30
+
+Публичный доступ к браузерному телефону **не включён**. Авторитетные DNS
+серверы REG.RU уже отвечают для `phone.awesomeio.ru` адресом VPS
+`94.102.89.13`, но на публичном Caddy нет host-маршрута для этого имени;
+прямой HTTPS-запрос к нему завершается TLS-ошибкой. `.lan` имена на публичном
+edge также отклоняются.
+
+Go/Caddy support deployed to VM209, release `20260930T173000Z`. Local Caddy
+listens on `127.0.0.1:8181` and allows only `/phone`, `/phone/*`,
+`/admin/assets/*`, and `/ws/phone-signaling`; `/admin/`, `/admin/api/*`,
+`/healthz`, and `/ws/rvc-v2` return 404 there. The public-origin phone config
+returns 503 because TURN credentials have not been provisioned. The private
+phone page and API return HTTP 200; Go and Asterisk are healthy and Asterisk
+has no active calls.
+
+This update passed `go test ./...`, `go vet ./...`, 40 Node tests, 19 React
+tests, the TypeScript/Vite production build, and 30 selected Python deploy,
+rollback, WebRTC, and public-access tests. Candidate and live Caddy configs
+validated. The two-browser live call acceptance was not run for this release;
+the prior 2026-09-29 private-network acceptance does not verify public access.
+The public rollout remains gated on a phone-only Teleport role, the owner's
+MFA enrollment, the Teleport Application Service, TURN deployment, and external
+call/media/security probes.
+
 ## Актуальная проверка браузерного телефона — 2026-09-29
 
 Прямой запрос к Go API на VM209 вернул `healthz: ok`. Каталог вернул

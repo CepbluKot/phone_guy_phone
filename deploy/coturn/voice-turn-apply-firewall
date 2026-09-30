@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+
+/usr/sbin/nft -c -f /etc/voice-phone/turn-firewall.nft
+if /usr/sbin/nft list table inet voice_phone_turn >/dev/null 2>&1; then
+	/usr/sbin/nft delete table inet voice_phone_turn
+fi
+exec /usr/sbin/nft -f /etc/voice-phone/turn-firewall.nft

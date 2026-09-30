@@ -1,5 +1,21 @@
 # Voice Changer — эксплуатация
 
+## Публичный доступ к браузерному телефону
+
+На 2026-09-30 публичный маршрут выключен. Запись `phone.awesomeio.ru` уже
+указывает на VPS `94.102.89.13`, но публичный Caddy не проксирует этот host;
+прямой TLS handshake завершается ошибкой, а `*.lan.awesomeio.ru` отклоняется
+публичным edge. Admin остаётся приватным.
+
+В VM209 задеплоен release `20260930T173000Z`. Loopback-only Caddy listener
+`127.0.0.1:8181` разрешает лишь phone UI/API assets и `/ws/phone-signaling`;
+прочие пути возвращают 404. API для public origin остаётся закрыт с HTTP 503,
+пока на VM не настроен общий TURN secret. Не открывать Caddy host route и
+TURN-порты, пока не создана отдельная роль Teleport только с меткой
+`service=voice-phone`, владелец не завершил MFA enrollment, и не проверены
+app-only token, TURN relay и звонки из внешней сети. SIP, RTP Asterisk, ARI,
+RVC и admin API напрямую в интернет не публиковать.
+
 Актуальная версия и доказательства: [LIVE_STATUS.md](LIVE_STATUS.md).
 Инструкция следующему агенту: [HANDOFF.md](HANDOFF.md).
 
