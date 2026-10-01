@@ -7,7 +7,23 @@
 > authenticated TURN. Current state and checks: [LIVE_STATUS.md](LIVE_STATUS.md)
 > and [OPERATIONS.md](OPERATIONS.md).
 
-Status (2026-09-30): public phone access is deployed. The admin remains private.
+Status (2026-10-01): public browser-phone access is deployed; the admin remains
+private. Physical SIP phone access is a separate route and is now enabled as
+described below.
+
+## Physical IP phones outside the VPN
+
+This is separate from the browser phone's login cookie and TURN flow. A physical
+SIP phone registers directly to `phone.awesomeio.ru:5061` over TLS and uses its
+existing extension credentials. Asterisk requires SDES-SRTP; RTP uses UDP
+`10000-10019` through the VPS edge. No VPN or browser cookie is required on the
+handset. The public route does not expose the Go HTTP API, admin UI, ARI, or RVC
+listener. Current server-side checks and the still-pending handset acceptance
+are recorded in [LIVE_STATUS.md](LIVE_STATUS.md).
+
+Start with extension 1988. Extension 1983 retains a static LAN contact until an
+external handset registration is verified and a rollback is ready. Do not copy
+SIP passwords into these docs.
 
 ## Existing private access
 

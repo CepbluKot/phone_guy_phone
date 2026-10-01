@@ -34,6 +34,7 @@ RUN ./configure \
         --sysconfdir=/etc \
         --localstatedir=/var \
         --with-pjproject-bundled \
+        --with-ssl \
     && make menuselect.makeopts \
     && menuselect/menuselect \
         --disable BUILD_NATIVE \

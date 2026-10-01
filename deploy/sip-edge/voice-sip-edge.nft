@@ -1,0 +1,61 @@
+add table inet voice_sip_edge
+
+add set inet voice_sip_edge sip_tls_rate {
+	type ipv4_addr
+	flags dynamic
+	timeout 2m
+	size 65535
+}
+
+add set inet voice_sip_edge sip_tls_connections {
+	type ipv4_addr
+	flags dynamic
+	size 65535
+}
+
+add set inet voice_sip_edge sip_rtp_rate {
+	type ipv4_addr
+	flags dynamic
+	timeout 10s
+	size 65535
+}
+
+add chain inet voice_sip_edge forward {
+	type filter hook forward priority -20; policy accept;
+}
+
+add chain inet voice_sip_edge input {
+	type filter hook input priority -20; policy accept;
+}
+
+# Block SIP/5060 on the public interface for both local and forwarded traffic.
+add rule inet voice_sip_edge input iifname "eth0" tcp dport 5060 counter drop
+add rule inet voice_sip_edge input iifname "eth0" udp dport 5060 counter drop
+add rule inet voice_sip_edge forward iifname "eth0" tcp dport 5060 counter drop
+add rule inet voice_sip_edge forward iifname "eth0" udp dport 5060 counter drop
+
+# Rate-limit new TLS handshakes by the real Internet source before SNAT hides it.
+add rule inet voice_sip_edge forward iifname "eth0" ip daddr 192.168.20.70 tcp dport 5061 ct state new tcp flags & (syn | ack) == syn update @sip_tls_rate { ip saddr limit rate over 20/minute burst 30 packets } counter drop
+add rule inet voice_sip_edge forward iifname "eth0" ip daddr 192.168.20.70 tcp dport 5061 ct state new tcp flags & (syn | ack) == syn add @sip_tls_connections { ip saddr ct count over 8 } counter drop
+add rule inet voice_sip_edge forward iifname "eth0" ip daddr 192.168.20.70 tcp dport 5061 counter accept
+
+# Keep the existing 20-port media range useful while limiting one source and
+# the total public ingress volume. Media is SRTP; SIP/5060 is never forwarded.
+add rule inet voice_sip_edge forward iifname "eth0" ip daddr 192.168.20.70 udp dport 10000-10019 limit rate over 2000/second burst 4000 packets counter drop
+add rule inet voice_sip_edge forward iifname "eth0" ip daddr 192.168.20.70 udp dport 10000-10019 update @sip_rtp_rate { ip saddr limit rate over 500/second burst 1000 packets } counter drop
+add rule inet voice_sip_edge forward iifname "eth0" ip daddr 192.168.20.70 udp dport 10000-10019 counter accept
+
+add table ip voice_sip_edge_nat
+
+add chain ip voice_sip_edge_nat prerouting {
+	type nat hook prerouting priority dstnat; policy accept;
+}
+
+add chain ip voice_sip_edge_nat postrouting {
+	type nat hook postrouting priority srcnat; policy accept;
+}
+
+add rule ip voice_sip_edge_nat prerouting iifname "eth0" ip daddr 94.102.89.13 tcp dport 5061 dnat to 192.168.20.70:5061
+add rule ip voice_sip_edge_nat prerouting iifname "eth0" ip daddr 94.102.89.13 udp dport 10000-10019 dnat to 192.168.20.70
+add rule ip voice_sip_edge_nat postrouting oifname "wg-vpn87" ip daddr 192.168.20.70 tcp dport 5061 snat to 10.19.87.1
+add rule ip voice_sip_edge_nat postrouting oifname "wg-vpn87" ip daddr 192.168.20.70 udp dport 10000-10019 snat to 10.19.87.1

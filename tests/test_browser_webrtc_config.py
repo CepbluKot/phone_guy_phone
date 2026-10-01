@@ -34,7 +34,11 @@ def test_goweb_update_replaces_existing_runtime_wss_transport(tmp_path):
     runtime.write_text(
         "[transport-udp]\ntype=transport\nprotocol=udp\n\n"
         "[transport-wss]\ntype=transport\nprotocol=wss\nbind=0.0.0.0\n\n"
-        "[phone-endpoint]\ntype=endpoint\n"
+        "[phone-endpoint]\ntype=endpoint\n\n"
+        "[1983]\ntype=endpoint\n\n"
+        "[1987]\ntype=endpoint\n\n"
+        "[1988]\ntype=endpoint\n\n"
+        "[2014]\ntype=endpoint\n"
     )
     template = ROOT / "conference/asterisk/pjsip.conf.template"
     helper = ROOT / "deploy/update_pjsip_wss_transport.py"
@@ -43,6 +47,11 @@ def test_goweb_update_replaces_existing_runtime_wss_transport(tmp_path):
     updated = runtime.read_text()
     assert updated.count("[transport-wss]") == 1
     assert "[transport-wss]\ntype=transport\nprotocol=wss\nbind=0.0.0.0\nexternal_media_address=192.168.20.70\nlocal_net=172.19.0.0/16" in updated
+    assert "symmetric_transport=yes" in updated
+    assert "[phone-endpoint]\ntype=endpoint\nmedia_encryption=sdes" in updated
+    for extension in ("1983", "1987", "1988", "2014"):
+        assert f"[{extension}]\ntype=endpoint\n" in updated
+        assert f"[{extension}]\ntype=endpoint\nmedia_encryption=sdes" not in updated
 
     subprocess.run([sys.executable, str(helper), str(runtime), str(template)], check=True)
     assert runtime.read_text() == updated

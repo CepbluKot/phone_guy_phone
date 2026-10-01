@@ -1,0 +1,60 @@
+#!/bin/sh
+set -eu
+
+rules=/etc/voice-sip-edge/voice-sip-edge.nft
+public_ip=94.102.89.13
+phone_domain=phone.awesomeio.ru
+vm_ip=192.168.20.70
+
+remove_tables() {
+  /usr/sbin/nft delete table inet voice_sip_edge 2>/dev/null || true
+  /usr/sbin/nft delete table ip voice_sip_edge_nat 2>/dev/null || true
+}
+
+preflight() {
+  test -s "$rules"
+  /usr/bin/wg show wg-vpn87 >/dev/null
+  /usr/sbin/ip route get "$vm_ip" | /usr/bin/grep -q 'dev wg-vpn87'
+  /usr/sbin/nft --check --file "$rules"
+  /usr/bin/openssl s_client -connect "$vm_ip:5061" \
+    -servername "$phone_domain" -verify_hostname "$phone_domain" \
+    -verify_return_error </dev/null >/dev/null 2>&1
+}
+
+apply() {
+  preflight
+  remove_tables
+  /usr/sbin/nft --file "$rules"
+}
+
+case "${1:-}" in
+  apply)
+    test "$#" -eq 1
+    apply
+    ;;
+  remove)
+    test "$#" -eq 1
+    remove_tables
+    ;;
+  enable)
+    test "$#" -eq 1
+    preflight
+    /usr/bin/systemctl enable --now voice-sip-edge.service
+    ;;
+  disable)
+    test "$#" -eq 1
+    /usr/bin/systemctl disable --now voice-sip-edge.service 2>/dev/null || true
+    remove_tables
+    ;;
+  status)
+    test "$#" -eq 1
+    /usr/bin/systemctl is-enabled voice-sip-edge.service 2>/dev/null || true
+    /usr/bin/systemctl is-active voice-sip-edge.service 2>/dev/null || true
+    /usr/sbin/nft list table inet voice_sip_edge 2>/dev/null || true
+    /usr/sbin/nft list table ip voice_sip_edge_nat 2>/dev/null || true
+    ;;
+  *)
+    echo "usage: voice-sip-edge {apply|remove|enable|disable|status}" >&2
+    exit 2
+    ;;
+esac

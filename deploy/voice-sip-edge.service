@@ -1,0 +1,20 @@
+[Unit]
+Description=Restricted public SIP TLS and SRTP forwarding to VM209
+Wants=network-online.target
+After=network-online.target wg-quick@wg-vpn87.service
+Requires=wg-quick@wg-vpn87.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/voice-sip-edge apply
+ExecStop=/usr/local/sbin/voice-sip-edge remove
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadOnlyPaths=/etc/voice-sip-edge
+
+[Install]
+WantedBy=multi-user.target

@@ -18,12 +18,31 @@ bind=0.0.0.0
 external_media_address=192.168.20.70
 local_net=172.19.0.0/16
 
+; Public physical phones use end-to-end SIP TLS through the VPS. The WireGuard
+; peer address is intentionally not local_net: external SDP must advertise the
+; public VPS address and return RTP must follow the existing NAT state.
+[transport-tls-internet]
+type=transport
+protocol=tls
+bind=0.0.0.0:5061
+method=tlsv1_2
+cert_file=/run/voice-tls/current/fullchain.pem
+priv_key_file=/run/voice-tls/current/key.pem
+allow_reload=yes
+external_signaling_address=94.102.89.13
+external_signaling_port=5061
+external_media_address=94.102.89.13
+symmetric_transport=yes
+local_net=192.168.20.0/24
+local_net=172.19.0.0/16
+
 [phone-endpoint](!)
 type=endpoint
 context=phoneguy-sip
 disallow=all
 allow=alaw
 direct_media=no
+media_encryption=sdes
 rtp_symmetric=yes
 force_rport=yes
 rewrite_contact=yes
