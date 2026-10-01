@@ -25,7 +25,8 @@ remote_deploy() {
   phonebook_file=$(p /etc/voice-changer/phonebook.json)
   webphone_file=$(p /etc/voice-changer/webphone-directory.json)
   public_auth_file=$(p /etc/voice-phone-auth/public-auth.json)
-  conf_root=$(p /opt/voice-conference)
+  # Go owns the release tree for both the web and conference containers.
+  conf_root=$go_root
 
   if [ -e "$voice_root/.go-runtime-owner" ] || [ -e "$backup" ] \
       || [ -n "$(find "$(p /opt/voice-go/staging)" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null || true)" ]; then

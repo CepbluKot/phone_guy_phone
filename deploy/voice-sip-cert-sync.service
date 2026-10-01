@@ -1,0 +1,10 @@
+[Unit]
+Description=Synchronize the public SIP TLS certificate from the restricted VPS exporter
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/local/sbin/voice-sip-cert-sync
+UMask=0077

@@ -1,5 +1,23 @@
 # Browser-to-browser call acceptance
 
+## 2026-10-01 Asterisk Internet SIP deployment — partial acceptance
+
+**Call signaling, incoming UI, RTP, and hangup passed; the full independent-
+browser acceptance remains incomplete.** Two test phone clients registered as
+`345` and `3454` in separate tabs of one in-app-browser profile on the private
+phone domain. Both call directions showed the incoming modal, connected ICE,
+and exchanged live audio RTP counters. Each side hung up once; both pages
+returned to idle. The Go session status returned zero test sessions and Asterisk
+reported zero active channels/calls.
+
+The browser-test source was a generated 440 Hz tone; no microphone permission or
+human speech was used. RTP is verified, but human-audible speech and RVC voice
+quality are not. The required second independent browser profile could not be
+used: Chrome could not open the private phone hostname and returned
+`ERR_HTTP2_PROTOCOL_ERROR`. The admin profiles view was not separately checked
+during this run. Do not count this as a full checklist pass. The separate
+physical-handset test from a non-VPN network is still pending.
+
 ## 2026-09-30 public same-origin config fix — release `20260930T203223Z`
 
 **Registration smoke passed; browser-to-browser call acceptance incomplete.**
