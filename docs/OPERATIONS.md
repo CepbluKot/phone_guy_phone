@@ -168,6 +168,20 @@ PJSIP registrations can be inspected operationally, but an IP address alone is
 not sufficient to identify or enroll a physical handset. Keep provisioning
 disabled while these prerequisites are unresolved.
 
+### Read-only Asterisk status
+
+The private admin has a live Asterisk page and SIP registration state in the
+assigned physical-phone table. The Go service reads Asterisk through the
+existing loopback ARI client and refreshes the UI every five seconds. Responses
+contain only a total active-channel count and configured numeric extensions
+with `online`, `offline`, or `unknown` states. ARI credentials, contact/IP
+addresses, channel IDs, and caller data are not sent to the browser.
+
+`unknown` means Asterisk status could not be read or did not report the
+configured endpoint; it is not equivalent to offline. The MAC/IP inventory
+remains separate historical data. This read-only page is not FreePBX and does
+not edit Asterisk configuration or dialplan.
+
 RVC меняет тембр моделью PhoneGuyfnaf1V1 на GPU VM209. Capture48kHz mono PCM16,
 20мс кадры; выход2с фрагментами. Одновременно допускается одна RVC-сессия.
 «Доп. задержка»0–10с, шаг.5с, default5. Это сдвиг непрерывного потока, не ожидание

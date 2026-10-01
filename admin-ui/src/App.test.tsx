@@ -33,6 +33,37 @@ afterEach(() => {
 });
 
 describe("phone profile admin", () => {
+  it("shows live SIP registration state for assigned physical phones", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path === "/admin/api/v1/auth-mode") return response(200, { required: false });
+      if (path === "/admin/api/v1/voice-routes") return response(200, routes);
+      if (path === "/admin/api/v1/phones") return response(200, { revision: 2, devices: [
+        { mac: "00:11:22:33:44:55", label: "Desk phone", extension: "1983" },
+        { mac: "00:11:22:33:44:56", label: "Spare phone", extension: "1987" },
+      ] });
+      if (path === "/admin/api/v1/asterisk") return response(200, {
+        ready: true,
+        activeChannels: 1,
+        endpoints: [
+          { extension: "1983", state: "online" },
+          { extension: "1987", state: "offline" },
+        ],
+      });
+      if (path === "/admin/api/v1/browser-phones") return response(200, { sessions: [] });
+      return response(200, metrics);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+
+    expect(await screen.findByText("В сети")).toBeInTheDocument();
+    expect(screen.getByText("Не в сети")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Asterisk" }));
+    expect(await screen.findByRole("heading", { name: "Статус Asterisk" })).toBeInTheDocument();
+    expect(screen.getByText("Активные каналы")).toBeInTheDocument();
+    expect(window.location.hash).toBe("#/asterisk");
+  });
+
   it("opens a mobile drawer and closes it after choosing a section", async () => {
     window.localStorage.removeItem("voice-control-sidebar-collapsed");
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
@@ -128,6 +159,7 @@ describe("phone profile admin", () => {
       .mockResolvedValueOnce(response(200, routes))
       .mockResolvedValueOnce(response(200, phonebook))
       .mockResolvedValueOnce(response(200, metrics))
+      .mockResolvedValueOnce(response(200, { ready: true, activeChannels: 0, endpoints: [] }))
       .mockResolvedValueOnce(response(200, { sessions: [] }))
       .mockResolvedValueOnce(response(200, updated))
       .mockResolvedValue(response(200, metrics));
@@ -169,6 +201,7 @@ describe("phone profile admin", () => {
       .mockResolvedValueOnce(response(200, routes))
       .mockResolvedValueOnce(response(200, phonebook))
       .mockResolvedValueOnce(response(200, metrics))
+      .mockResolvedValueOnce(response(200, { ready: true, activeChannels: 0, endpoints: [] }))
       .mockResolvedValueOnce(response(200, { sessions: [] }))
       .mockResolvedValueOnce(response(409, { error: "stale_revision" }))
       .mockResolvedValueOnce(response(200, fresh))
@@ -205,6 +238,7 @@ describe("phone profile admin", () => {
       .mockResolvedValueOnce(response(200, routes))
       .mockResolvedValueOnce(response(200, phonebook))
       .mockResolvedValueOnce(response(200, metrics))
+      .mockResolvedValueOnce(response(200, { ready: true, activeChannels: 0, endpoints: [] }))
       .mockResolvedValueOnce(response(200, { sessions: [] }))
       .mockResolvedValueOnce(response(200, updated))
       .mockResolvedValue(response(200, metrics));
@@ -233,6 +267,7 @@ describe("phone profile admin", () => {
       .mockResolvedValueOnce(response(200, browserRoutes))
       .mockResolvedValueOnce(response(200, phonebook))
       .mockResolvedValueOnce(response(200, metrics))
+      .mockResolvedValueOnce(response(200, { ready: true, activeChannels: 0, endpoints: [] }))
       .mockResolvedValueOnce(response(200, { sessions: [{ nickname: "phoneguy123", extension: "3454", expiresAt: "2026-09-27T20:00:00Z" }] }))
       .mockResolvedValueOnce(response(200, saved))
       .mockResolvedValueOnce(response(200, { sessions: [{ nickname: "phoneguy123", extension: "3454", expiresAt: "2026-09-27T20:00:00Z" }] }))
@@ -278,6 +313,7 @@ describe("phone profile admin", () => {
       .mockResolvedValueOnce(response(200, configuredRoutes))
       .mockResolvedValueOnce(response(200, inventory))
       .mockResolvedValueOnce(response(200, metrics))
+      .mockResolvedValueOnce(response(200, { ready: true, activeChannels: 0, endpoints: [] }))
       .mockResolvedValueOnce(response(200, { sessions: [{ nickname: "browser3454", extension: "3454", expiresAt: "2026-09-29T20:00:00Z" }] }))
       .mockResolvedValue(response(200, metrics));
     vi.stubGlobal("fetch", fetchMock);

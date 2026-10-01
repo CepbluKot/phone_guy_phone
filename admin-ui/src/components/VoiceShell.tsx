@@ -6,17 +6,20 @@ import {
   Headphones,
   LayoutGrid,
   Menu,
+  Radio,
   X,
   type LucideIcon,
 } from "lucide-react";
 
-export type VoicePage = "phones" | "profiles";
+export type VoicePage = "phones" | "profiles" | "asterisk";
 
 type VoiceShellLabels = {
   appName: string;
   manage: string;
   phones: string;
   voiceProfiles: string;
+  asterisk: string;
+  asteriskTitle: string;
   adminHome: string;
   browserPhone: string;
   signOut: string;
@@ -27,9 +30,10 @@ type VoiceShellLabels = {
   dismissMobileNavigation: string;
 };
 
-const navigation: Array<{ page: VoicePage; label: keyof Pick<VoiceShellLabels, "phones" | "voiceProfiles">; icon: LucideIcon }> = [
+const navigation: Array<{ page: VoicePage; label: keyof Pick<VoiceShellLabels, "phones" | "voiceProfiles" | "asterisk">; icon: LucideIcon }> = [
   { page: "phones", label: "phones", icon: LayoutGrid },
   { page: "profiles", label: "voiceProfiles", icon: AudioLines },
+  { page: "asterisk", label: "asterisk", icon: Radio },
 ];
 
 export function VoiceShell({
@@ -112,7 +116,7 @@ export function VoiceShell({
           <nav className="breadcrumb" aria-label="Breadcrumb">
             <a href="#/phones" onClick={(event) => { event.preventDefault(); onNavigate("phones"); }}>{labels.adminHome}</a>
             <span aria-hidden="true">/</span>
-            <strong>{page === "phones" ? labels.phones : labels.voiceProfiles}</strong>
+            <strong>{page === "phones" ? labels.phones : page === "profiles" ? labels.voiceProfiles : labels.asteriskTitle}</strong>
           </nav>
           <div className="top-actions">
             {onSignOut ? <button className="text-button" type="button" onClick={onSignOut}>{labels.signOut}</button> : null}

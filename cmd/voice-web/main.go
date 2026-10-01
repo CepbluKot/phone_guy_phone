@@ -111,14 +111,22 @@ func run() error {
 		return errors.New("admin origin allowlist unavailable")
 	}
 	metrics := telemetry.NewCollector()
+	var phoneARI *ari.Client
+	if os.Getenv("VOICE_ARI_PASSWORD_FILE") != "" {
+		phoneARI, err = newPhoneARIClient()
+		if err != nil {
+			return errors.New("browser phone ARI unavailable")
+		}
+		defer phoneARI.Close(context.Background())
+	}
 	var browserSessions *webphone.Sessions
-	adminAPI := admin.NewHandlerWithBrowserProfiles(routes, password, origin, log.Default(), authDisabled, func() telemetry.TelemetrySnapshot { return metrics.Snapshot(time.Now()) }, func(extension string) bool {
+	adminAPI := admin.NewHandlerWithBrowserProfilesAndAsterisk(routes, password, origin, log.Default(), authDisabled, func() telemetry.TelemetrySnapshot { return metrics.Snapshot(time.Now()) }, func(extension string) bool {
 		if browserSessions == nil {
 			return false
 		}
 		_, active := browserSessions.ActiveBrowser(extension)
 		return active
-	}, phones)
+	}, phones, phoneARI)
 	for i := range passwordBytes {
 		passwordBytes[i] = 0
 	}
@@ -181,13 +189,7 @@ func run() error {
 	defer closeVoice()
 	var phoneAPI http.Handler
 	var phoneSignaling http.Handler
-	var phoneARI *ari.Client
-	if os.Getenv("VOICE_ARI_PASSWORD_FILE") != "" {
-		phoneARI, err = newPhoneARIClient()
-		if err != nil {
-			return errors.New("browser phone ARI unavailable")
-		}
-		defer phoneARI.Close(context.Background())
+	if phoneARI != nil {
 		directoryPath := envOr("VOICE_PHONE_DIRECTORY_FILE", "/etc/voice-changer/webphone-directory.json")
 		directory, openErr := webphone.OpenDirectory(directoryPath, configuredExtensions)
 		if openErr != nil {
