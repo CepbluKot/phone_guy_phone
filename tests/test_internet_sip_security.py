@@ -132,9 +132,11 @@ def test_vm_firewall_scopes_new_sip_and_rtp_ports_without_changing_http_or_udp_5
     assert "--dport 8080 -j VOICE_INGRESS" in firewall
     assert "iptables -N VOICE_SIP_INGRESS" in firewall
     assert "--dport 5061" in firewall
-    assert "-s 10.19.87.1" in firewall
-    assert "iptables -A VOICE_SIP_INGRESS -p tcp --dport 5061 -s 192.168.20.12 -j ACCEPT" in firewall
-    assert firewall.index("-s 192.168.20.12 -j ACCEPT") < firewall.index("-p tcp --dport 5061 -j DROP")
+    sip_tcp_allow_sources = re.findall(
+        r"iptables -A VOICE_SIP_INGRESS -p tcp --dport 5061 -s (\S+) -j ACCEPT",
+        firewall,
+    )
+    assert sip_tcp_allow_sources == ["10.19.87.1"]
     assert "--dport 10000:10019" in firewall
     assert "-s 192.168.20.0/24" in firewall
     assert "-s 10.19.87.0/24" in firewall
@@ -209,3 +211,15 @@ def test_asterisk_only_deployer_preserves_the_live_go_release_and_has_rollback()
     assert 'Endpoint:[[:space:]]+$extension' in remote
     assert "media_encryption.*sdes" not in remote
     assert "iptables -X VOICE_SIP_INGRESS" in rollback
+
+
+def test_asterisk_rollback_refuses_to_change_firewall_or_restart_during_a_call():
+    rollback = (ROOT / "deploy/rollback-asterisk-sip.sh").read_text()
+    guards = [match.start() for match in re.finditer(r"assert_no_active_calls", rollback)]
+    first_firewall_change = rollback.index("iptables -D DOCKER-USER")
+    asterisk_recreation = rollback.index("--force-recreate asterisk")
+
+    assert len(guards) >= 3, "rollback should define and run call guards before changes and restart"
+    assert guards[1] < first_firewall_change
+    assert guards[-1] < asterisk_recreation
+    assert "ROLLBACK_BLOCKED active-call" in rollback

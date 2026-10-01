@@ -1,5 +1,27 @@
 # Browser-to-browser call acceptance
 
+## 2026-10-01 Asterisk release `20261001T124305Z` — incomplete
+
+**Live browser-call acceptance did not pass.** On the public page, temporary
+browser registration on extension `345` failed with the generic connection
+error. On the private phone page, test extensions `345` (`авпап`) and `3454`
+(`ыыва`) both reached **Готов принимать звонки** and appeared in each other's
+target list. Calling `3454` from `345` left the caller at **Звоним**; no incoming
+modal appeared. Asterisk reported zero channels and zero calls processed, so no
+INVITE or media path was confirmed by the server. The cause is unknown; do not
+attribute this to microphone permission or to the SIP edge without further
+evidence. A follow-up attempt in regular Chrome could not load the private phone
+hostname (`ERR_HTTP2_PROTOCOL_ERROR`); the public hostname showed its owner-login
+form in that profile, so no second authenticated Chrome session was available.
+The admin profiles view was not checked while these leases were live.
+
+Both temporary tabs were closed. After their leases expired, `/phone/api/v1/status`
+returned `{"sessions":[]}` and Asterisk reported zero active channels and calls.
+The test restored the known directory nicknames `авпап` and `ыыва`. No user audio
+was recorded. Human speech, two-way audio, RVC, and hangup acceptance were not
+verified in this run. Treat the live gate as **failed/incomplete** until the
+underlying call signaling is diagnosed and the full check is repeated.
+
 ## 2026-10-01 Asterisk Internet SIP deployment — partial acceptance
 
 **Call signaling, incoming UI, RTP, and hangup passed; the full independent-
