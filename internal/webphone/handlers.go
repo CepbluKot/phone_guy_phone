@@ -109,8 +109,8 @@ func (a *API) SetTurnCredentialProvider(provider TURNCredentialProvider) {
 }
 
 func (a *API) config(w http.ResponseWriter, r *http.Request) {
-	origin, ok := a.origins[r.Header.Get("Origin")]
-	if !ok || r.Header.Get("Origin") == "" {
+	origin, ok := a.originForRead(r)
+	if !ok {
 		writeAPIError(w, http.StatusForbidden, "origin_forbidden")
 		return
 	}
@@ -134,6 +134,29 @@ func (a *API) config(w http.ResponseWriter, r *http.Request) {
 		ICEServers   []ICEServer `json:"iceServers,omitempty"`
 	}{origin.SignalingURL, origin.SIPDomain, iceServers})
 }
+
+// originForRead accepts a normal Origin header when the browser sends one.
+// Fetch omits Origin on some same-origin GET requests, so for this read-only
+// config endpoint allow that case only when Fetch Metadata confirms same-origin
+// and the request host exactly matches one configured origin. State-changing
+// requests continue to require the exact Origin header.
+func (a *API) originForRead(r *http.Request) (PhoneOrigin, bool) {
+	if origin := r.Header.Get("Origin"); origin != "" {
+		config, ok := a.origins[origin]
+		return config, ok
+	}
+	if r.Method != http.MethodGet || r.Header.Get("Sec-Fetch-Site") != "same-origin" {
+		return PhoneOrigin{}, false
+	}
+	for rawOrigin, config := range a.origins {
+		allowed, err := url.Parse(rawOrigin)
+		if err == nil && strings.EqualFold(allowed.Host, r.Host) {
+			return config, true
+		}
+	}
+	return PhoneOrigin{}, false
+}
+
 func (a *API) directory(w http.ResponseWriter, r *http.Request) {
 	a.json(w)
 	people := a.sessions.Directory()

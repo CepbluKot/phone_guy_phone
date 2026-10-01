@@ -37,6 +37,7 @@ export function PhoneApp() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [audioPlaybackError, setAudioPlaybackError] = useState("");
+  const [ownerLogoutBusy, setOwnerLogoutBusy] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
   const sipRef = useRef<BrowserSIPSession | undefined>(undefined);
   const sessionIdRef = useRef("");
@@ -47,6 +48,20 @@ export function PhoneApp() {
   const activePeerName = activePeer?.nickname || peerExtension || "Внутренний номер";
   const mediaDevices = navigator.mediaDevices as (MediaDevices & { selectAudioOutput?: () => Promise<MediaDeviceInfo> }) | undefined;
   const supportsOutputSelection = typeof (audioRef.current as (HTMLAudioElement & { setSinkId?: (deviceId: string) => Promise<void> }) | null)?.setSinkId === "function";
+  const isPublicPhone = location.hostname === "phone.awesomeio.ru";
+
+  const logoutOwner = async () => {
+    setOwnerLogoutBusy(true);
+    try {
+      const response = await fetch("/phone/api/v1/public-auth/logout", { method: "POST", credentials: "same-origin" });
+      if (!response.ok) throw new Error("logout_failed");
+      window.location.assign("/phone/");
+    } catch {
+      setError("Не удалось завершить вход. Обновите страницу и попробуйте ещё раз.");
+    } finally {
+      setOwnerLogoutBusy(false);
+    }
+  };
 
   const refreshAudioDevices = useCallback(async () => {
     if (!navigator.mediaDevices?.enumerateDevices) return;
@@ -304,7 +319,7 @@ export function PhoneApp() {
       >
         <header className="phone-topbar">
           <a className="phone-brand" href="/phone/" aria-label="Voice phone home"><span className="phone-mark">V</span><span>Voice desk</span></a>
-          <a className="phone-admin-link" href="/admin/">Администрирование <span aria-hidden="true">↗</span></a>
+          {isPublicPhone ? <button className="phone-logout-button" type="button" onClick={() => void logoutOwner()} disabled={ownerLogoutBusy}>{ownerLogoutBusy ? "Выходим…" : "Выйти"}</button> : <a className="phone-admin-link" href="/admin/">Администрирование <span aria-hidden="true">↗</span></a>}
         </header>
         <div className="phone-content">
           <section className="phone-heading">
@@ -339,7 +354,7 @@ export function PhoneApp() {
           )}
 
           {error && <div role="alert" className="phone-error"><span>!</span>{error}</div>}
-          <footer className="phone-footer"><span><i className={connected ? "is-online" : ""} />{connected ? "Сигнализация защищена TLS" : "Подключение доступно в частной сети"}</span><a href="/admin/">Управление профилями →</a></footer>
+          <footer className="phone-footer"><span><i className={connected ? "is-online" : ""} />{connected ? "Сигнализация защищена TLS" : isPublicPhone ? "Публичный доступ защищён" : "Подключение доступно в частной сети"}</span><a href="/admin/">Управление профилями →</a></footer>
         </div>
       </div>
       {callModalVisible && (

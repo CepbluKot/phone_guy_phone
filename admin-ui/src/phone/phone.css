@@ -4,6 +4,7 @@
 .phone-brand{display:flex;align-items:center;gap:12px;color:#172846;text-decoration:none;font:700 15px Manrope,sans-serif;letter-spacing:-.02em}
 .phone-mark{width:36px;height:36px;border-radius:12px;display:grid;place-items:center;background:#276ef1;color:white;font:800 17px Manrope;box-shadow:0 5px 13px #276ef12e}
 .phone-admin-link{font-size:13px;font-weight:600;color:#62718a;text-decoration:none}.phone-admin-link:hover,.phone-footer a:hover{color:#276ef1}
+.phone-logout-button{border:1px solid #d7deea;border-radius:10px;background:#fff;color:#62718a;padding:9px 13px;font:inherit;font-size:13px;font-weight:700;cursor:pointer}.phone-logout-button:hover:not(:disabled){border-color:#276ef1;color:#276ef1}.phone-logout-button:disabled{opacity:.6;cursor:wait}
 .phone-content{width:min(900px,calc(100% - 40px));margin:0 auto;padding:58px 0 38px}
 .phone-heading{margin-bottom:30px}.phone-eyebrow{color:#5280c9;font-size:11px;letter-spacing:.13em;font-weight:700;margin:0 0 12px}.phone-heading h1{font:800 clamp(32px,5vw,44px) Manrope,sans-serif;letter-spacing:-.045em;margin:0 0 10px}.phone-heading>p:last-child{color:#65748b;font-size:15px;margin:0;line-height:1.6}
 .phone-card{background:var(--pm-surface);border:1px solid var(--pm-border);border-radius:var(--pm-radius-lg);padding:26px 28px;box-shadow:var(--pm-shadow);margin:0 0 16px}

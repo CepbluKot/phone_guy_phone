@@ -19,8 +19,9 @@ services:
       VOICE_ADMIN_AUTH_DISABLED: "true"
       VOICE_ADMIN_ORIGIN: https://voice-admin.lan.awesomeio.ru,https://voice-phone.lan.awesomeio.ru,https://voice.lan.awesomeio.ru,https://vm-voice-1.lan.awesomeio.ru
       VOICE_PHONE_PUBLIC_ORIGIN: https://phone.awesomeio.ru
+      VOICE_PHONE_PUBLIC_AUTH_FILE: /run/secrets/voice-phone-public-auth
       VOICE_PHONE_SIGNAL_UPSTREAM: http://127.0.0.1:8092/ws
-      VOICE_PHONE_TURN_SECRET_FILE: ${VOICE_PHONE_TURN_SECRET_FILE:-}
+      VOICE_PHONE_TURN_SECRET_FILE: /run/secrets/voice-phone-turn
       VOICE_ARI_URL: http://127.0.0.1:8092/ari
       VOICE_ARI_USERNAME: phoneguy
       VOICE_ARI_PASSWORD_FILE: /run/secrets/ari-password
@@ -31,6 +32,8 @@ services:
       CONFERENCE_FIXTURE_DIR: /var/lib/voice-changer/conference-fixtures
     volumes:
       - /etc/voice-changer:/etc/voice-changer:rw
+      - "${VOICE_PHONE_TURN_SECRET_HOST_FILE:?VOICE_PHONE_TURN_SECRET_HOST_FILE is required}:/run/secrets/voice-phone-turn:ro"
+      - "${VOICE_PHONE_PUBLIC_AUTH_HOST_FILE:?VOICE_PHONE_PUBLIC_AUTH_HOST_FILE is required}:/run/secrets/voice-phone-public-auth:ro"
       - /proc/stat:/host/proc/stat:ro
       - /proc/meminfo:/host/proc/meminfo:ro
       - /sys/fs/cgroup/system.slice/voice-rvc.service:/host/cgroup/voice-rvc.service:ro

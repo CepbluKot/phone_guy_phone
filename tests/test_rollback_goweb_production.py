@@ -53,6 +53,7 @@ def fixture(tmp_path):
         "phonebook_was_present=false\n"
     )
     (backup / "phonebook-absent").write_text("")
+    (backup / "go.env").write_text("VOICE_GO_IMAGE=voice-go:prior\n")
     owner = root / "opt" / "voice-changer" / ".go-runtime-owner"
     owner.parent.mkdir(parents=True, exist_ok=True)
     owner.write_text(STAMP + "\n")
@@ -155,3 +156,23 @@ def test_production_rollback_keeps_owner_marker_if_go_container_remains(tmp_path
     assert result.returncode != 0
     assert owner.exists()
     assert "Go container remains" in result.stderr
+
+
+def test_production_rollback_blocks_pre_cookie_release_while_public_cookie_route_is_enabled(tmp_path):
+    root, backup, _, owner = fixture(tmp_path)
+    # The candidate is cookie-aware; the rollback snapshot represents a Go
+    # release predating cookie auth. Public edge auth has no Basic fallback.
+    go_release = root / "opt" / "voice-go" / "releases" / STAMP
+    (go_release / ".env").write_text(
+        "VOICE_GO_IMAGE=voice-go:test\n"
+        "VOICE_PHONE_PUBLIC_AUTH_HOST_FILE=/etc/voice-phone-auth/public-auth.json\n"
+    )
+    (root / "etc" / "voice-phone-auth").mkdir(parents=True)
+    (root / "etc" / "voice-phone-auth" / "public-cookie-route.enabled").write_text("enabled\n")
+
+    result, log = run_rollback(tmp_path)
+
+    assert result.returncode != 0
+    assert "ROLLBACK_BLOCKED" in result.stderr
+    assert not log.exists()
+    assert owner.exists()

@@ -2,19 +2,55 @@
 
 ## Публичный доступ к браузерному телефону
 
-На 2026-09-30 публичный маршрут выключен. Запись `phone.awesomeio.ru` уже
-указывает на VPS `94.102.89.13`, но публичный Caddy не проксирует этот host;
-прямой TLS handshake завершается ошибкой, а `*.lan.awesomeio.ru` отклоняется
-публичным edge. Admin остаётся приватным.
+Публичный маршрут доступен на `https://phone.awesomeio.ru/`. Go показывает
+собственную страницу входа, а после успешной проверки устанавливает
+Secure/HttpOnly/SameSite=Strict cookie на 90 дней с автоматическим продлением
+при использовании. В cookie хранится подписанная сессия, а не пароль; после
+первого входа в этом профиле браузера ничего вводить не нужно. Другому
+браузеру/устройству, приватному окну, удалённым cookie или после 90 дней без
+использования потребуется войти снова. VPS Caddy завершает TLS и проксирует
+только `/phone*`, защищённые cookie `/admin/assets/*` и
+`/ws/phone-signaling` по WireGuard на Go-сервис VM209. Страница `/admin/`,
+`/healthz` и прочие пути возвращают 404. Teleport в этом маршруте не участвует; Teleport
+agent на VM выключен и удалён из автозапуска.
 
-В VM209 задеплоен release `20260930T173000Z`. Loopback-only Caddy listener
-`127.0.0.1:8181` разрешает лишь phone UI/API assets и `/ws/phone-signaling`;
-прочие пути возвращают 404. API для public origin остаётся закрыт с HTTP 503,
-пока на VM не настроен общий TURN secret. Не открывать Caddy host route и
-TURN-порты, пока не создана отдельная роль Teleport только с меткой
-`service=voice-phone`, владелец не завершил MFA enrollment, и не проверены
-app-only token, TURN relay и звонки из внешней сети. SIP, RTP Asterisk, ARI,
-RVC и admin API напрямую в интернет не публиковать.
+Внешний доступ требует только TCP 443 для HTTPS/WSS и TURN over TLS на TCP 5349.
+TURN выдаёт короткоживущие credentials; relay UDP ограничен портами
+49160–49219, а coturn может обращаться только к Asterisk VM209 на UDP
+10000–10019. SIP, ARI, RVC, Go HTTP и Asterisk RTP listeners не проксируются
+через публичный HTTPS-маршрут. Owner credential verifier и случайный ключ
+подписи cookie хранятся в `/etc/voice-phone-auth/public-auth.json` с владельцем
+UID/GID `10001:10001` и правами `0400`; пароль не сохранять в репозитории.
+
+Проверено для Go release `20260930T185105Z`: входная страница доступна без Basic
+Auth prompt; неверный пароль и Origin отклоняются; 90-дневная cookie открывает
+phone API и signaling WSS; logout очищает cookie; admin и health маршруты дают
+404. Caddy Basic Auth snippet выведен из активного каталога и сохранён вместе
+с прежним Caddyfile в `/var/backups/caddy-phone-cookie-20260930T185105Z`.
+Двухбраузерный звонок и реальный микрофон для этой версии отдельно не
+проверялись; см. [BROWSER_CALL_ACCEPTANCE.md](BROWSER_CALL_ACCEPTANCE.md).
+На VM209 `/etc/voice-phone-auth/public-cookie-route.enabled` блокирует ручной
+rollback Go на релиз без cookie-auth. Перед намеренным откатом на старый Go
+сначала восстановить owner-only auth на внешнем Caddy, и лишь затем создать
+`/etc/voice-phone-auth/public-basic-restored.enabled`.
+
+Для публичного браузерного телефона read-only `GET /phone/api/v1/config`
+допускает отсутствие `Origin` только если браузер прислал
+`Sec-Fetch-Site: same-origin`, а `Host` точно совпадает с настроенным
+разрешённым origin. Так работают браузерные same-origin GET-запросы в Chrome.
+Регистрация, heartbeat, завершение звонка и прочие изменяющие запросы по-прежнему
+проверяют точный `Origin`.
+В публичном интерфейсе при отключённом телефоне отображается статус
+«Публичный доступ защищён»; приватная сеть обозначается только на LAN-домене.
+
+На VM после удаления устаревшего listener `127.0.0.1:8181` сохранён приватный
+HTTPS health и страница телефона. TURN активен на VPS и принимает только TLS
+control listener 5349 плюс настроенный UDP relay range.
+
+Фактический звонок из двух браузеров через внешнюю сеть с проверкой двустороннего
+звука не выполнялся в этом обновлении. Эти проверки подтверждают маршрут,
+вход, API, сигнализационный handshake и TURN-конфигурацию, но не сквозной звук.
+Admin остаётся приватным.
 
 Актуальная версия и доказательства: [LIVE_STATUS.md](LIVE_STATUS.md).
 Инструкция следующему агенту: [HANDOFF.md](HANDOFF.md).

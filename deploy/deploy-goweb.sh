@@ -24,6 +24,7 @@ remote_deploy() {
   caddy_source="$voice_root/deploy/Caddyfile"
   phonebook_file=$(p /etc/voice-changer/phonebook.json)
   webphone_file=$(p /etc/voice-changer/webphone-directory.json)
+  public_auth_file=$(p /etc/voice-phone-auth/public-auth.json)
   conf_root=$(p /opt/voice-conference)
 
   if [ -e "$voice_root/.go-runtime-owner" ] || [ -e "$backup" ] \
@@ -50,6 +51,12 @@ remote_deploy() {
   ip -o -4 addr show | grep -q '192\.168\.20\.70/' || { echo "Go preflight: private web address is not assigned" >&2; return 1; }
   [ -f "$(p /etc/voice-changer/voice-routing.json)" ] && [ -f "$(p /etc/voice-changer-admin/password)" ] || {
     echo "Go preflight: admin bootstrap files missing" >&2; return 1;
+  }
+  [ -f "$public_auth_file" ] && [ ! -L "$public_auth_file" ] \
+      && [ "$(stat -c '%u:%g:%a' "$public_auth_file")" = 10001:10001:400 ] \
+      || { echo "Go preflight: public phone auth file missing or has unsafe permissions" >&2; return 1; }
+  setpriv --reuid 10001 --regid 10001 --clear-groups test -r "$public_auth_file" || {
+    echo "Go preflight: Go UID cannot read public phone auth file" >&2; return 1;
   }
   if [ -e "$phonebook_file" ] || [ -L "$phonebook_file" ]; then
     [ -f "$phonebook_file" ] && [ ! -L "$phonebook_file" ] || { echo "Go preflight: phonebook path is not a regular file" >&2; return 1; }
@@ -117,7 +124,7 @@ PY
   for item in ari.conf ari-password http.conf pjsip.conf modules.conf; do
     [ -f "$old_runtime/asterisk/$item" ] || { echo "Go preflight: Asterisk runtime file is missing: $item" >&2; return 1; }
   done
-  for item in Dockerfile.goweb go.mod go.sum cmd internal admin-ui web conference/asterisk deploy/compose.goweb.yaml deploy/compose.conference.yaml deploy/Caddyfile.goweb deploy/phonebook.initial.json deploy/phonebook.example.json deploy/webphone-directory.initial.json deploy/webphone-directory.example.json deploy/rollback-goweb-production.sh deploy/update_pjsip_wss_transport.py; do
+  for item in Dockerfile.goweb go.mod go.sum cmd internal admin-ui web conference/asterisk deploy/compose.goweb.yaml deploy/compose.conference.yaml deploy/Caddyfile.goweb deploy/phonebook.initial.json deploy/phonebook.example.json deploy/webphone-directory.initial.json deploy/webphone-directory.example.json deploy/rollback-goweb-production.sh deploy/update_pjsip_wss_transport.py deploy/configure-public-phone-auth.py; do
     [ -e "$release/$item" ] || { echo "Go release file is missing: $item" >&2; return 2; }
   done
 
@@ -136,7 +143,7 @@ PY
   chmod 0644 "$new_runtime/asterisk/sorcery.conf"
   install -d -o root -g root -m 0750 "$backup"
   chmod 0700 "$backup"
-  printf 'VOICE_GO_IMAGE=voice-go:production-%s\nVOICE_ARI_RUNTIME=%s\nVOICE_CONFERENCE_FIXTURES=%s\nCONFERENCE_TAG=%s\nCONFERENCE_RUNTIME=%s\nCONFERENCE_FIXTURES=%s\n' \
+  printf 'VOICE_GO_IMAGE=voice-go:production-%s\nVOICE_ARI_RUNTIME=%s\nVOICE_CONFERENCE_FIXTURES=%s\nVOICE_PHONE_TURN_SECRET_HOST_FILE=/etc/voice-phone/turn-shared-secret\nVOICE_PHONE_PUBLIC_AUTH_HOST_FILE=/etc/voice-phone-auth/public-auth.json\nCONFERENCE_TAG=%s\nCONFERENCE_RUNTIME=%s\nCONFERENCE_FIXTURES=%s\n' \
     "$stamp" "$new_runtime" "$fixtures" "$stamp" "$new_runtime" "$fixtures" > "$release/.env"
   chmod 0600 "$release/.env"
   cp -a "$caddy_live" "$backup/Caddyfile"
@@ -308,7 +315,7 @@ if ! rsync -a --delete conference/asterisk "$target:$remote_stage/conference/"; 
   ssh "$target" "rm -rf '$remote_stage'" || true
   exit 1
 fi
-if ! rsync -a --delete deploy/compose.goweb.yaml deploy/compose.conference.yaml deploy/Caddyfile.goweb deploy/rollback-goweb-production.sh deploy/update_pjsip_wss_transport.py deploy/phonebook.initial.json deploy/phonebook.example.json deploy/webphone-directory.initial.json deploy/webphone-directory.example.json \
+if ! rsync -a --delete deploy/compose.goweb.yaml deploy/compose.conference.yaml deploy/Caddyfile.goweb deploy/rollback-goweb-production.sh deploy/update_pjsip_wss_transport.py deploy/configure-public-phone-auth.py deploy/phonebook.initial.json deploy/phonebook.example.json deploy/webphone-directory.initial.json deploy/webphone-directory.example.json \
     "$target:$remote_stage/deploy/"; then
   ssh "$target" "rm -rf '$remote_stage'" || true
   exit 1

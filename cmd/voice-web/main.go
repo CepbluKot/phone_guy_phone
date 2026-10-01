@@ -22,6 +22,7 @@ import (
 	"voice-changer/internal/conference"
 	"voice-changer/internal/hostmetrics"
 	"voice-changer/internal/phonebook"
+	"voice-changer/internal/publicauth"
 	"voice-changer/internal/rvc"
 	"voice-changer/internal/selfmonitor"
 	"voice-changer/internal/telemetry"
@@ -141,6 +142,20 @@ func run() error {
 	if !info.IsDir() {
 		return fmt.Errorf("web root %q is not a directory", root)
 	}
+	var ownerPhoneAuth *publicauth.Auth
+	if publicOrigin := os.Getenv("VOICE_PHONE_PUBLIC_ORIGIN"); publicOrigin != "" {
+		if publicOrigin != "https://phone.awesomeio.ru" {
+			return errors.New("public phone origin unavailable")
+		}
+		authPath := os.Getenv("VOICE_PHONE_PUBLIC_AUTH_FILE")
+		if authPath == "" {
+			return errors.New("public phone auth file unavailable")
+		}
+		ownerPhoneAuth, err = publicauth.Load(authPath, "phone.awesomeio.ru")
+		if err != nil {
+			return errors.New("public phone auth unavailable")
+		}
+	}
 	address := os.Getenv("VOICE_WEB_ADDR")
 	if address == "" {
 		address = ":8080"
@@ -237,6 +252,9 @@ func run() error {
 		Addr:              address,
 		Handler:           newAppHandler(root, adminAPI, conferenceHandler, mirrorHandler, phoneAPI, phoneSignaling),
 		ReadHeaderTimeout: 5 * time.Second,
+	}
+	if ownerPhoneAuth != nil {
+		server.Handler = ownerPhoneAuth.Middleware(server.Handler)
 	}
 
 	result := make(chan error, 1)

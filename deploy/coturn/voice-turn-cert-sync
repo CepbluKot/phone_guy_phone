@@ -1,0 +1,28 @@
+#!/bin/sh
+set -eu
+
+src=/var/lib/caddy/.local/share/caddy/certificates/acme-v02.api.letsencrypt.org-directory/phone.awesomeio.ru
+dest=/etc/voice-phone
+cert_tmp=$(mktemp "$dest/.turn.crt.XXXXXX")
+key_tmp=$(mktemp "$dest/.turn.key.XXXXXX")
+trap 'rm -f "$cert_tmp" "$key_tmp"' EXIT
+
+test -s "$src/phone.awesomeio.ru.crt"
+test -s "$src/phone.awesomeio.ru.key"
+install -o root -g root -m 0644 "$src/phone.awesomeio.ru.crt" "$cert_tmp"
+install -o root -g turnserver -m 0640 "$src/phone.awesomeio.ru.key" "$key_tmp"
+
+changed=0
+if ! cmp -s "$cert_tmp" "$dest/turn.crt" 2>/dev/null; then
+	mv -f "$cert_tmp" "$dest/turn.crt"
+	changed=1
+fi
+if ! cmp -s "$key_tmp" "$dest/turn.key" 2>/dev/null; then
+	mv -f "$key_tmp" "$dest/turn.key"
+	changed=1
+fi
+if [ "$changed" -eq 1 ] && [ "${1:-}" != "--no-restart" ]; then
+	if /usr/bin/systemctl is-active --quiet voice-turn.service; then
+		/usr/bin/systemctl try-restart voice-turn.service
+	fi
+fi

@@ -43,16 +43,3 @@ https://voice-claude.lan.awesomeio.ru {
 	tls /etc/voice-certs/fullchain.pem /etc/voice-certs/key.pem
 	reverse_proxy 127.0.0.1:8093
 }
-
-# Teleport Application Service reaches this listener over loopback only. Its
-# explicit path allowlist exposes the phone UI and SIP signaling route without
-# publishing the passwordless admin API or any RVC/ARI routes.
-http://127.0.0.1:8181 {
-	@public_phone path /phone /phone/* /admin/assets/* /ws/phone-signaling
-	handle @public_phone {
-		reverse_proxy 192.168.20.70:8080
-	}
-	handle {
-		respond 404
-	}
-}
