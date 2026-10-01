@@ -2,6 +2,7 @@ package admin
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
@@ -10,8 +11,11 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
+	"time"
 
+	"voice-changer/internal/ari"
 	"voice-changer/internal/phonebook"
 	"voice-changer/internal/telemetry"
 	"voice-changer/internal/voiceconfig"
@@ -29,10 +33,16 @@ type Handler struct {
 	metrics       func() telemetry.TelemetrySnapshot
 	phones        *phonebook.Store
 	activeBrowser func(string) bool
+	asterisk      AsteriskReader
+}
+
+// AsteriskReader exposes only sanitized, read-only operational status.
+type AsteriskReader interface {
+	ReadStatus(context.Context, []string) (ari.Status, error)
 }
 
 func NewHandler(store voiceconfig.RouteStore, password, origins string, logger *log.Logger, authDisabled ...bool) http.Handler {
-	return newHandler(store, password, origins, logger, authDisabled, nil, nil, nil)
+	return newHandler(store, password, origins, logger, authDisabled, nil, nil, nil, nil)
 }
 
 func NewHandlerWithMetrics(store voiceconfig.RouteStore, password, origins string, logger *log.Logger, authDisabled bool, metrics func() telemetry.TelemetrySnapshot, phoneStores ...*phonebook.Store) http.Handler {
@@ -40,7 +50,7 @@ func NewHandlerWithMetrics(store voiceconfig.RouteStore, password, origins strin
 	if len(phoneStores) > 0 {
 		phones = phoneStores[0]
 	}
-	return newHandler(store, password, origins, logger, []bool{authDisabled}, metrics, phones, nil)
+	return newHandler(store, password, origins, logger, []bool{authDisabled}, metrics, phones, nil, nil)
 }
 
 // NewHandlerWithBrowserProfiles enables profile updates for currently active
@@ -50,10 +60,16 @@ func NewHandlerWithBrowserProfiles(store voiceconfig.RouteStore, password, origi
 	if len(phoneStores) > 0 {
 		phones = phoneStores[0]
 	}
-	return newHandler(store, password, origins, logger, []bool{authDisabled}, metrics, phones, activeBrowser)
+	return newHandler(store, password, origins, logger, []bool{authDisabled}, metrics, phones, activeBrowser, nil)
 }
 
-func newHandler(store voiceconfig.RouteStore, password, origins string, logger *log.Logger, authDisabled []bool, metrics func() telemetry.TelemetrySnapshot, phones *phonebook.Store, activeBrowser func(string) bool) http.Handler {
+// NewHandlerWithBrowserProfilesAndAsterisk adds the private, read-only
+// Asterisk status endpoint to the production admin handler.
+func NewHandlerWithBrowserProfilesAndAsterisk(store voiceconfig.RouteStore, password, origins string, logger *log.Logger, authDisabled bool, metrics func() telemetry.TelemetrySnapshot, activeBrowser func(string) bool, phones *phonebook.Store, asterisk AsteriskReader) http.Handler {
+	return newHandler(store, password, origins, logger, []bool{authDisabled}, metrics, phones, activeBrowser, asterisk)
+}
+
+func newHandler(store voiceconfig.RouteStore, password, origins string, logger *log.Logger, authDisabled []bool, metrics func() telemetry.TelemetrySnapshot, phones *phonebook.Store, activeBrowser func(string) bool, asterisk AsteriskReader) http.Handler {
 	allowedOrigins, validOrigins := parseOrigins(origins)
 	disabled := len(authDisabled) > 0 && authDisabled[0]
 	if !validOrigins || store == nil || (!disabled && password == "") {
@@ -74,7 +90,7 @@ func newHandler(store voiceconfig.RouteStore, password, origins string, logger *
 			})
 		}
 	}
-	h := &Handler{store: store, password: []byte(password), origins: allowedOrigins, sessions: state, logger: logger, authDisabled: disabled, metrics: metrics, phones: phones, activeBrowser: activeBrowser}
+	h := &Handler{store: store, password: []byte(password), origins: allowedOrigins, sessions: state, logger: logger, authDisabled: disabled, metrics: metrics, phones: phones, activeBrowser: activeBrowser, asterisk: asterisk}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /admin/api/v1/auth-mode", h.authMode)
 	mux.HandleFunc("POST /admin/api/v1/session", h.login)
@@ -90,7 +106,73 @@ func newHandler(store voiceconfig.RouteStore, password, origins string, logger *
 	}
 	mux.HandleFunc("PUT /admin/api/v1/voice-routes/{extension}", h.putRoute)
 	mux.HandleFunc("PUT /admin/api/v1/voice-routes/{extension}/browser", h.putBrowserRoute)
+	if h.asterisk != nil {
+		mux.HandleFunc("GET /admin/api/v1/asterisk", h.getAsterisk)
+	}
 	return mux
+}
+
+func (h *Handler) getAsterisk(w http.ResponseWriter, r *http.Request) {
+	if _, _, ok := h.authorize(w, r, false); !ok {
+		return
+	}
+	snapshot, err := h.store.Snapshot()
+	if err != nil {
+		h.log("route_config_read_failed")
+		writeError(w, http.StatusServiceUnavailable, "config_unavailable")
+		return
+	}
+	extensions := make([]string, 0, len(snapshot.Extensions))
+	for extension := range snapshot.Extensions {
+		extensions = append(extensions, extension)
+	}
+	sort.Strings(extensions)
+	result := struct {
+		Ready          bool                `json:"ready"`
+		ActiveChannels int                 `json:"activeChannels"`
+		Endpoints      []ari.EndpointState `json:"endpoints"`
+	}{Endpoints: unknownEndpoints(extensions)}
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+	status, err := h.asterisk.ReadStatus(ctx, extensions)
+	if err != nil {
+		h.log("asterisk_status_read_failed")
+	} else {
+		result.Ready = true
+		if status.ActiveChannels > 0 {
+			result.ActiveChannels = status.ActiveChannels
+		}
+		allowed := make(map[string]struct{}, len(extensions))
+		states := make(map[string]string, len(status.Endpoints))
+		for _, extension := range extensions {
+			allowed[extension] = struct{}{}
+		}
+		for _, endpoint := range status.Endpoints {
+			if _, ok := allowed[endpoint.Extension]; !ok {
+				continue
+			}
+			if endpoint.State == "online" || endpoint.State == "offline" {
+				states[endpoint.Extension] = endpoint.State
+			}
+		}
+		result.Endpoints = unknownEndpoints(extensions)
+		for i := range result.Endpoints {
+			if state := states[result.Endpoints[i].Extension]; state != "" {
+				result.Endpoints[i].State = state
+			}
+		}
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(result)
+}
+
+func unknownEndpoints(extensions []string) []ari.EndpointState {
+	endpoints := make([]ari.EndpointState, 0, len(extensions))
+	for _, extension := range extensions {
+		endpoints = append(endpoints, ari.EndpointState{Extension: extension, State: "unknown"})
+	}
+	return endpoints
 }
 
 func (h *Handler) getMetrics(w http.ResponseWriter, r *http.Request) {

@@ -1,5 +1,30 @@
 # Browser-to-browser call acceptance
 
+## 2026-10-01 read-only Asterisk dashboard release `20261001T144903Z` — call gate failed
+
+**Registration and admin visibility passed; call acceptance failed.** The Go
+service and Asterisk deployed healthy. The private Asterisk page showed ARI
+ready, 0 active channels, and the live static PJSIP registrations: `1983`
+online; `1987`, `1988`, and `2014` offline. The physical phone inventory page
+showed the same online/offline result for its assigned handsets. Admin phone
+profiles showed browser leases `345` and `3454` as connected while those test
+leases were active.
+
+For call testing, two independent browser contexts registered on the private
+phone hostname (`345` in Chrome and `3454` in the in-app browser). Both reached
+**Готов принимать звонки**, and the caller's directory listed the recipient as
+online. The `345`-to-`3454` attempt displayed **Звоним** at the caller, but the
+recipient never showed an incoming modal. Asterisk stayed at 0 active channels
+and 0 processed calls. The reverse direction was not attempted after this
+failure. No audio, RVC conversion, or in-call hangup was verified. The stuck
+caller tab was closed; the other browser was disconnected. Final Go browser
+status returned `{"sessions":[]}`, the test nicknames were restored, and
+Asterisk returned 0 active channels/calls.
+
+The dashboard, live endpoint states, and deployment health are verified. The
+required browser-call gate remains failed/incomplete until call signaling is
+diagnosed and both directions are rerun successfully.
+
 ## 2026-10-01 Asterisk release `20261001T124305Z` — incomplete
 
 **Live browser-call acceptance did not pass.** On the public page, temporary

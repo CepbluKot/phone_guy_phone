@@ -1,5 +1,5 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import { api, ApiError, BrowserPhone, MetricsSnapshot, PhoneDevice, PhonebookSnapshot, Profile, RouteSnapshot } from "./api";
+import { api, ApiError, AsteriskSnapshot, BrowserPhone, MetricsSnapshot, PhoneDevice, PhonebookSnapshot, Profile, RouteSnapshot } from "./api";
 import { VoiceShell, type VoicePage } from "./components/VoiceShell";
 import "./design-system.css";
 import "./styles.css";
@@ -30,6 +30,13 @@ const copy = {
     saveError: "Could not save this profile. Try again.",
     phones: "Phones",
     voiceProfiles: "Voice profiles",
+    asterisk: "Asterisk",
+    asteriskTitle: "Asterisk status",
+    asteriskSummary: "Live SIP registration and call state, refreshed every five seconds.",
+    activeChannels: "Active channels",
+    online: "Online",
+    offline: "Offline",
+    statusUnavailable: "Status unavailable",
     physicalPhones: "Physical phones",
     profilePhysicalPhones: "Physical phones",
     profilePhysicalSummary: "Voice profiles for phones assigned in the physical device register.",
@@ -111,6 +118,13 @@ const copy = {
     saveError: "Не удалось сохранить профиль. Попробуйте ещё раз.",
     phones: "Телефоны",
     voiceProfiles: "Профили голоса",
+    asterisk: "Asterisk",
+    asteriskTitle: "Статус Asterisk",
+    asteriskSummary: "Текущая регистрация SIP и состояние звонков. Обновление каждые пять секунд.",
+    activeChannels: "Активные каналы",
+    online: "В сети",
+    offline: "Не в сети",
+    statusUnavailable: "Статус недоступен",
     physicalPhones: "Физические телефоны",
     profilePhysicalPhones: "Физические телефоны",
     profilePhysicalSummary: "Профили голосов для аппаратов из реестра физических телефонов.",
@@ -187,6 +201,7 @@ export default function App() {
   const [authRequired, setAuthRequired] = useState<boolean | null>(null);
   const [snapshot, setSnapshot] = useState<RouteSnapshot | null>(null);
   const [metrics, setMetrics] = useState<MetricsSnapshot | null>(null);
+  const [asterisk, setAsterisk] = useState<AsteriskSnapshot | null>(null);
   const [browserPhones, setBrowserPhones] = useState<BrowserPhone[]>([]);
   const [browserDrafts, setBrowserDrafts] = useState<Record<string, Profile>>({});
   const [browserMessages, setBrowserMessages] = useState<Record<string, string>>({});
@@ -275,6 +290,22 @@ export default function App() {
     const refresh = async () => {
       try { const value = await api.metrics(); if (!disposed) setMetrics(value); }
       catch { if (!disposed) setMetrics(null); }
+    };
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 5000);
+    return () => { disposed = true; window.clearInterval(timer); };
+  }, [status]);
+
+  useEffect(() => {
+    if (status !== "ready") return;
+    let disposed = false;
+    const refresh = async () => {
+      try {
+        const value = await api.asterisk();
+        if (!disposed) setAsterisk(value);
+      } catch {
+        if (!disposed) setAsterisk(null);
+      }
     };
     void refresh();
     const timer = window.setInterval(() => void refresh(), 5000);
@@ -495,9 +526,10 @@ export default function App() {
               onSave={savePhone}
               onAdd={addPhone}
               metrics={metrics}
+              asterisk={asterisk}
               language={language}
             />
-          ) : <>
+          ) : page === "asterisk" ? <AsteriskPage value={asterisk} labels={t} language={language} /> : <>
             <div className="page-heading">
             <div>
               <p className="eyebrow">{t.phones.toUpperCase()}</p>
@@ -676,6 +708,7 @@ function PhysicalPhonesPage({
   onSave,
   onAdd,
   metrics,
+  asterisk,
   language,
 }: {
   inventory: PhonebookSnapshot | null;
@@ -691,6 +724,7 @@ function PhysicalPhonesPage({
   onSave: (device: PhoneDevice) => void;
   onAdd: (event: FormEvent<HTMLFormElement>) => void;
   metrics: MetricsSnapshot | null;
+  asterisk: AsteriskSnapshot | null;
   language: Language;
 }) {
   const allDevices = inventory?.devices ?? [];
@@ -706,7 +740,7 @@ function PhysicalPhonesPage({
       <div className="panel-heading"><div><h2>{labels.assignedHeading}</h2><p className="muted">{labels.mappingOnly}</p></div><button className="button primary" type="button" onClick={() => document.getElementById("phone-add-panel")?.scrollIntoView({ behavior: "smooth", block: "center" })}>＋ {labels.addDevice}</button></div>
       <div className="table-scroll"><table className="inventory-table">
         <thead><tr><th>{labels.device}</th><th>{labels.mac}</th><th>IP</th><th>{labels.phone}</th><th>{labels.status}</th><th><span className="sr-only">{labels.save}</span></th></tr></thead>
-        <tbody>{assignedDevices.map((device) => <PhoneInventoryRow key={device.mac} device={device} allDevices={allDevices} extensions={extensions} draft={drafts[device.mac] ?? { label: device.label, extension: device.extension ?? "" }} message={messages[device.mac]} saving={saving === device.mac} labels={labels} setDraft={(value) => setDraft(device.mac, value)} onSave={() => void onSave(device)} />)}
+        <tbody>{assignedDevices.map((device) => <PhoneInventoryRow key={device.mac} device={device} allDevices={allDevices} extensions={extensions} asterisk={asterisk} draft={drafts[device.mac] ?? { label: device.label, extension: device.extension ?? "" }} message={messages[device.mac]} saving={saving === device.mac} labels={labels} setDraft={(value) => setDraft(device.mac, value)} onSave={() => void onSave(device)} />)}
           {assignedDevices.length === 0 && <tr><td colSpan={6} className="inventory-empty">{labels.noPhones}</td></tr>}
         </tbody>
       </table></div>
@@ -737,10 +771,11 @@ function PhysicalPhonesPage({
   </>;
 }
 
-function PhoneInventoryRow({ device, allDevices, extensions, draft, message, saving, labels, setDraft, onSave }: {
+function PhoneInventoryRow({ device, allDevices, extensions, asterisk, draft, message, saving, labels, setDraft, onSave }: {
   device: PhoneDevice;
   allDevices: PhoneDevice[];
   extensions: string[];
+  asterisk: AsteriskSnapshot | null;
   draft: { label: string; extension: string };
   message?: string;
   saving: boolean;
@@ -750,13 +785,32 @@ function PhoneInventoryRow({ device, allDevices, extensions, draft, message, sav
 }) {
   const occupied = new Set(allDevices.filter((other) => other.mac !== device.mac).map((other) => other.extension).filter(Boolean));
   const changed = draft.label !== device.label || draft.extension !== (device.extension ?? "");
+  const liveState = asterisk?.ready && device.extension ? asterisk.endpoints.find((endpoint) => endpoint.extension === device.extension)?.state ?? "unknown" : "unknown";
+  const liveLabel = liveState === "online" ? labels.online : liveState === "offline" ? labels.offline : labels.statusUnavailable;
   return <tr>
     <td data-label={labels.device}><label className="sr-only" htmlFor={`label-${device.mac}`}>{labels.label} {device.mac}</label><input className="device-label-input" id={`label-${device.mac}`} value={draft.label} maxLength={80} onChange={(event) => setDraft({ ...draft, label: event.target.value })} /></td>
     <td className="device-mac" data-label={labels.mac}>{device.mac}</td><td data-label="IP">{device.lastSeenIp ?? labels.unknown}</td>
     <td data-label={labels.phone}><label className="sr-only" htmlFor={`extension-${device.mac}`}>{labels.phone} {device.mac}</label><select id={`extension-${device.mac}`} value={draft.extension} onChange={(event) => setDraft({ ...draft, extension: event.target.value })}><option value="">{labels.unassigned}</option>{extensions.map((extension) => <option key={extension} value={extension} disabled={occupied.has(extension)}>{extension}</option>)}</select></td>
-    <td data-label={labels.status}><span className={`observation-pill ${device.lastSeenAt ? "observed" : "unknown"}`} title={device.lastSeenAt ?? labels.unknown}><span />{device.lastSeenAt ? labels.historyAvailable : labels.historyMissing}</span></td>
+    <td data-label={labels.status}><span className={`observation-pill ${liveState}`} title={languageStatusTitle(liveState, device.lastSeenAt, labels)}><span />{liveLabel}</span></td>
     <td className="row-actions" data-label=""><span className="save-message saved" role={message ? "status" : undefined}>{message}</span><button className="button primary save-button" disabled={!changed || saving} onClick={onSave}>{saving ? "…" : labels.save}</button></td>
   </tr>;
+}
+
+function languageStatusTitle(state: string, lastSeenAt: string | undefined, labels: Record<string, string>) {
+  if (state === "online" || state === "offline") return `${labels.status}: ${state}; ${labels.lastObserved}: ${lastSeenAt ?? labels.unknown}`;
+  return `${labels.status}: ${labels.statusUnavailable}`;
+}
+
+function AsteriskPage({ value, labels, language }: { value: AsteriskSnapshot | null; labels: Record<string, string>; language: Language }) {
+  const endpointLabel = (state: string) => state === "online" ? labels.online : state === "offline" ? labels.offline : labels.statusUnavailable;
+  return <>
+    <div className="page-heading"><div><p className="eyebrow">ASTERISK</p><h1>{labels.asteriskTitle}</h1><p className="muted">{labels.asteriskSummary}</p></div></div>
+    <section className="panel" aria-label={labels.asteriskTitle}>
+      <div className="panel-heading"><div><h2>{labels.asterisk}</h2><p className="muted">{value?.ready ? (language === "en" ? "ARI is available" : "ARI доступен") : labels.statusUnavailable}</p></div><span className={`observation-pill ${value?.ready ? "online" : "unknown"}`}><span />{value?.ready ? (language === "en" ? "Ready" : "Готова") : labels.statusUnavailable}</span></div>
+      <div className="metrics-grid"><section className="panel metric-card"><p className="muted">{labels.activeChannels}</p><strong>{value?.ready ? value.activeChannels : "—"}</strong></section></div>
+      <div className="table-scroll"><table><thead><tr><th>{labels.phone}</th><th>{labels.status}</th></tr></thead><tbody>{(value?.endpoints ?? []).map((endpoint) => <tr key={endpoint.extension}><td>{endpoint.extension}</td><td><span className={`observation-pill ${endpoint.state}`}><span />{endpointLabel(endpoint.state)}</span></td></tr>)}</tbody></table></div>
+    </section>
+  </>;
 }
 
 function LanguageControl({
@@ -780,5 +834,7 @@ function LanguageControl({
 }
 
 function pageFromHash(hash: string): VoicePage {
-  return hash === "#/profiles" ? "profiles" : "phones";
+  if (hash === "#/profiles") return "profiles";
+  if (hash === "#/asterisk") return "asterisk";
+  return "phones";
 }

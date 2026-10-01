@@ -14,6 +14,11 @@ export type PhoneDevice = {
 };
 export type PhonebookSnapshot = { revision: number; devices: PhoneDevice[] };
 export type BrowserPhone = { nickname: string; extension: string; expiresAt: string };
+export type AsteriskSnapshot = {
+  ready: boolean;
+  activeChannels: number;
+  endpoints: { extension: string; state: "online" | "offline" | "unknown" }[];
+};
 export type MetricsSnapshot = {
   updatedAt: string;
   rvc: { status: string; active: boolean; running: boolean; queuedWindows: number; lastSuccessAt?: string; fresh: boolean; error?: string };
@@ -52,6 +57,7 @@ export const api = {
   routes: () => request<RouteSnapshot>("/admin/api/v1/voice-routes"),
   metrics: () => request<MetricsSnapshot>("/admin/api/v1/metrics"),
   phones: () => request<PhonebookSnapshot>("/admin/api/v1/phones"),
+  asterisk: () => request<AsteriskSnapshot>("/admin/api/v1/asterisk"),
   browserPhones: () => request<{ sessions: BrowserPhone[] }>("/admin/api/v1/browser-phones"),
   login: (password: string) =>
     request<{ csrfToken: string }>("/admin/api/v1/session", {

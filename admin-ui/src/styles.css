@@ -935,6 +935,10 @@ td { color: #171717; }
 .login-card label { color: #111; font-weight: 800; }
 .observation-pill { border: 1px solid #111; border-radius: 2px; }
 .observation-pill.observed { color: #0038c9; background: #e5edff; }
+.observation-pill.online { color: #075c3b; background: #e5f6eb; }
+.observation-pill.online > span { background: #20a765; }
+.observation-pill.offline { color: #8a2929; background: #fae8e5; }
+.observation-pill.offline > span { background: #d14343; }
 .inventory-empty-state { border: 2px dashed #111; border-radius: 2px; background: #fffbea; }
 .phone-add-form label { color: #111; font-weight: 800; }
 
