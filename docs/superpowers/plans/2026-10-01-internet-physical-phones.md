@@ -1,8 +1,9 @@
 # Internet physical SIP phones implementation plan
 
 > **Execution status (2026-10-01):** the server-side gates passed and the narrow
-> public edge is enabled. Remaining acceptance is a real off-VPN handset test;
-> do not confuse this with the separate browser-phone HTTPS login.
+> public edge is enabled. The browser-to-browser acceptance rerun is currently
+> incomplete after a call stalled before Asterisk; a real off-VPN handset test
+> also remains. See `docs/BROWSER_CALL_ACCEPTANCE.md` and `docs/LIVE_STATUS.md`.
 
 **Goal:** Prepare secure direct Internet registration for the existing hardware
 phones, keeping Asterisk private behind the current WireGuard VPS and preserving

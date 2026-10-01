@@ -18,6 +18,18 @@ case "$old_release" in "$go_root"/releases/*) ;; *) echo "Invalid previous relea
   echo "SIP rollout backup is incomplete" >&2; exit 1;
 }
 
+assert_no_active_calls() {
+  local channels
+  channels=$(docker exec voice-conference-asterisk-1 asterisk -rx 'core show channels count')
+  if ! printf '%s\n' "$channels" | grep -Eq '0 active channels'; then
+    echo "ROLLBACK_BLOCKED active-call; retry after calls end" >&2
+    return 75
+  fi
+}
+
+# Leave the live firewall and release untouched if a call is already active.
+assert_no_active_calls
+
 iptables -D DOCKER-USER -i eth0 -p tcp --dport 5061 -j VOICE_SIP_INGRESS 2>/dev/null || true
 iptables -D DOCKER-USER -i eth0 -p udp --dport 10000:10019 -j VOICE_SIP_INGRESS 2>/dev/null || true
 iptables -F VOICE_SIP_INGRESS 2>/dev/null || true
@@ -25,6 +37,9 @@ iptables -X VOICE_SIP_INGRESS 2>/dev/null || true
 install -o root -g root -m 0755 "$backup/firewall.sh" "$firewall_source"
 /bin/sh "$firewall_source"
 
+# Recheck immediately before replacing Asterisk in case a call started during
+# the brief firewall restore window.
+assert_no_active_calls
 docker compose -p voice-conference -f "$old_release/deploy/compose.conference.yaml" \
   --env-file "$old_release/.env" up -d --no-build --no-deps --force-recreate asterisk
 ready=0
