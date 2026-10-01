@@ -1,0 +1,8 @@
+[Unit]
+Description=Synchronize the Caddy phone certificate to coturn
+After=caddy.service
+Requires=caddy.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/voice-turn-cert-sync

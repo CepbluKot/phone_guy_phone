@@ -73,6 +73,17 @@ if [[ ! -f "$go_release/deploy/compose.goweb.yaml" || ! -f "$go_release/.env" \
   echo "ROLLBACK_FAILED production snapshot is incomplete" >&2
   exit 1
 fi
+
+# Once the public edge serves the custom cookie-auth flow, never restore a Go
+# release that predates it: that would leave the public phone route unauthenticated.
+public_auth_root="$(path /etc/voice-phone-auth)"
+if [ -f "$public_auth_root/public-cookie-route.enabled" ] \
+    && grep -q '^VOICE_PHONE_PUBLIC_AUTH_HOST_FILE=' "$go_release/.env" \
+    && ! grep -q '^VOICE_PHONE_PUBLIC_AUTH_HOST_FILE=' "$backup/go.env" \
+    && [ ! -f "$public_auth_root/public-basic-restored.enabled" ]; then
+  echo "ROLLBACK_BLOCKED public cookie auth is enabled; prior Go release has no cookie auth" >&2
+  exit 1
+fi
 if { [ "$phonebook_was_present" = true ] && { [ ! -f "$backup/phonebook.json" ] || [ ! -s "$backup/phonebook-sha256" ]; }; } \
     || { [ "$phonebook_was_present" = false ] && [ ! -f "$backup/phonebook-absent" ]; }; then
   echo "ROLLBACK_FAILED phonebook snapshot does not match manifest" >&2

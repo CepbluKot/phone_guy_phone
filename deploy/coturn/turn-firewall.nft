@@ -2,13 +2,24 @@ table inet voice_phone_turn {
 	chain input {
 		type filter hook input priority filter - 10; policy accept;
 		ip daddr 94.102.89.13 tcp dport 5349 accept
-		ip daddr 94.102.89.13 udp dport 49160-49219 accept
+		iifname != "wg-vpn87" ip daddr 10.19.87.1 udp dport 49160-49219 accept
 	}
 	chain output {
 		type filter hook output priority filter - 10; policy accept;
 		meta skuid turnserver ip daddr 192.168.20.70 udp dport 10000-10019 accept
-		meta skuid turnserver ip daddr 192.168.20.70 udp drop
+		meta skuid turnserver ip daddr 192.168.20.70 drop
 		meta skuid turnserver ip daddr { 0.0.0.0/8, 10.0.0.0/8, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, 224.0.0.0/4, 240.0.0.0/4 } drop
 		meta skuid turnserver ip6 daddr { ::/128, ::1/128, fc00::/7, fe80::/10, ff00::/8 } drop
+	}
+}
+
+table ip voice_phone_turn_nat {
+	chain prerouting {
+		type nat hook prerouting priority dstnat; policy accept;
+		ip daddr 94.102.89.13 udp dport 49160-49219 dnat to 10.19.87.1
+	}
+	chain postrouting {
+		type nat hook postrouting priority srcnat; policy accept;
+		oifname != "wg-vpn87" ip saddr 10.19.87.1 udp sport 49160-49219 snat to 94.102.89.13
 	}
 }

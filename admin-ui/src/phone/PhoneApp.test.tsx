@@ -38,6 +38,11 @@ describe("browser phone",()=>{
     render(<PhoneApp/>);await screen.findByLabelText("Ваш ник");fireEvent.change(screen.getByLabelText("Ваш ник"),{target:{value:"Alice"}});fireEvent.change(screen.getByLabelText("Внутренний номер"),{target:{value:"1983"}});fireEvent.click(screen.getByRole("button",{name:/Подключиться/}));await screen.findByText("Готов принимать звонки");
     expect(sipMocks.iceServers).toEqual(iceServers);
   });
+  it("shows the public access hint on the public phone domain",async()=>{
+    vi.stubGlobal("location",new URL("https://phone.awesomeio.ru/phone/"));
+    render(<PhoneApp/>);
+    expect(await screen.findByText("Публичный доступ защищён")).not.toBeNull();
+  });
   it("registers the browser and calls only another configured internal number",async()=>{
     render(<PhoneApp/>);await screen.findByLabelText("Ваш ник");fireEvent.change(screen.getByLabelText("Ваш ник"),{target:{value:"Alice"}});fireEvent.change(screen.getByLabelText("Внутренний номер"),{target:{value:"1983"}});fireEvent.click(screen.getByRole("button",{name:/Подключиться/}));await screen.findByText("Готов принимать звонки");expect(BrowserSIPSession).toBeDefined();
     expect(screen.getByRole("option",{name:/Bob/})).not.toBeNull();expect(screen.queryByRole("option",{name:/Alice/})).toBeNull();fireEvent.click(screen.getByRole("button",{name:/Позвонить/}));await waitFor(()=>expect(sipMocks.call).toHaveBeenCalledWith("1988"));

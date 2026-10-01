@@ -8,6 +8,7 @@ COPY internal/calls/ internal/calls/
 COPY internal/conference/ internal/conference/
 COPY internal/hostmetrics/ internal/hostmetrics/
 COPY internal/phonebook/ internal/phonebook/
+COPY internal/publicauth/ internal/publicauth/
 COPY internal/rvc/ internal/rvc/
 COPY internal/selfmonitor/ internal/selfmonitor/
 COPY internal/telemetry/ internal/telemetry/

@@ -21,7 +21,7 @@ stage="/tmp/voice-go-update-$stamp"
 ssh -o BatchMode=yes -o ConnectTimeout=8 "$target" "mkdir -m 0700 '$stage' && mkdir -m 0755 '$stage/conference' && mkdir -m 0755 '$stage/deploy'"
 rsync -a --delete Dockerfile.goweb go.mod go.sum cmd internal admin-ui web "$target:$stage/"
 rsync -a --delete conference/asterisk "$target:$stage/conference/"
-rsync -a --delete deploy/compose.goweb.yaml deploy/compose.conference.yaml deploy/Caddyfile.goweb deploy/rollback-goweb-production.sh deploy/update_pjsip_wss_transport.py deploy/phonebook.initial.json deploy/phonebook.example.json deploy/webphone-directory.initial.json deploy/webphone-directory.example.json "$target:$stage/deploy/"
+rsync -a --delete deploy/compose.goweb.yaml deploy/compose.conference.yaml deploy/Caddyfile.goweb deploy/rollback-goweb-production.sh deploy/update_pjsip_wss_transport.py deploy/configure-public-phone-auth.py deploy/phonebook.initial.json deploy/phonebook.example.json deploy/webphone-directory.initial.json deploy/webphone-directory.example.json "$target:$stage/deploy/"
 ssh -o BatchMode=yes -o ConnectTimeout=8 "$target" sudo bash -s -- "$stamp" "$stage" <<'REMOTE'
 set -euo pipefail
 stamp=$1; stage=$2
@@ -58,6 +58,9 @@ new_runtime="$release/runtime"
 webphone=/etc/voice-changer/webphone-directory.json
 if [[ ! -e "$webphone" ]]; then install -o 10001 -g 10001 -m 0600 "$release/deploy/webphone-directory.initial.json" "$webphone"; fi
 [[ -f "$webphone" && ! -L "$webphone" && "$(stat -c '%u:%g:%a' "$webphone")" = 10001:10001:600 ]] || { echo "Browser directory file ownership or mode invalid" >&2; exit 1; }
+public_auth=/etc/voice-phone-auth/public-auth.json
+[[ -f "$public_auth" && ! -L "$public_auth" && "$(stat -c '%u:%g:%a' "$public_auth")" = 10001:10001:400 ]] || { echo "Public phone auth file ownership or mode invalid" >&2; exit 1; }
+setpriv --reuid 10001 --regid 10001 --clear-groups test -r "$public_auth" || { echo "Go UID cannot read public phone auth file" >&2; exit 1; }
 install -d -m 0700 "$new_runtime/asterisk"
 cp -a "$old_runtime/asterisk/." "$new_runtime/asterisk/"
 cp "$release/conference/asterisk/extensions.conf" "$new_runtime/asterisk/extensions.conf"
@@ -68,7 +71,7 @@ python3 "$release/deploy/update_pjsip_wss_transport.py" \
 chown root:root "$new_runtime/asterisk/extensions.conf" "$new_runtime/asterisk/sorcery.conf"; chmod 0644 "$new_runtime/asterisk/extensions.conf" "$new_runtime/asterisk/sorcery.conf"
 chown --reference="$old_runtime/asterisk/modules.conf" "$new_runtime/asterisk/modules.conf"; chmod --reference="$old_runtime/asterisk/modules.conf" "$new_runtime/asterisk/modules.conf"
 chown --reference="$old_runtime/asterisk/pjsip.conf" "$new_runtime/asterisk/pjsip.conf"; chmod --reference="$old_runtime/asterisk/pjsip.conf" "$new_runtime/asterisk/pjsip.conf"
-printf 'VOICE_GO_IMAGE=voice-go:update-%s\nVOICE_ARI_RUNTIME=%s\nVOICE_CONFERENCE_FIXTURES=%s\nCONFERENCE_TAG=update-%s\nCONFERENCE_RUNTIME=%s\nCONFERENCE_FIXTURES=%s\n' "$stamp" "$new_runtime" "$fixtures" "$stamp" "$new_runtime" "$fixtures" > "$release/.env"
+printf 'VOICE_GO_IMAGE=voice-go:update-%s\nVOICE_ARI_RUNTIME=%s\nVOICE_CONFERENCE_FIXTURES=%s\nVOICE_PHONE_TURN_SECRET_HOST_FILE=/etc/voice-phone/turn-shared-secret\nVOICE_PHONE_PUBLIC_AUTH_HOST_FILE=/etc/voice-phone-auth/public-auth.json\nCONFERENCE_TAG=update-%s\nCONFERENCE_RUNTIME=%s\nCONFERENCE_FIXTURES=%s\n' "$stamp" "$new_runtime" "$fixtures" "$stamp" "$new_runtime" "$fixtures" > "$release/.env"
 chmod 0600 "$release/.env"
 cp -a /etc/caddy/Caddyfile "$backup/Caddyfile"; cp -a "$voice/deploy/Caddyfile" "$backup/source-Caddyfile"
 cp -a "$go_env" "$backup/go.env"; cp -a "$ast_env" "$backup/asterisk.env"
@@ -78,7 +81,14 @@ rollback() {
   rc=$?; trap - EXIT
   if (( rc != 0 )); then
     echo "Update failed; restoring previous Go and Asterisk containers" >&2
-    docker compose -p voice-go -f "$go_cfg" --env-file "$go_env" up -d --no-build --force-recreate || true
+    if [[ -f /etc/voice-phone-auth/public-cookie-route.enabled ]] \
+        && ! grep -q '^VOICE_PHONE_PUBLIC_AUTH_HOST_FILE=' "$go_env" \
+        && [[ ! -f /etc/voice-phone-auth/public-basic-restored.enabled ]]; then
+      echo "Public cookie auth is active; stopping Go rather than restoring an unauthenticated release" >&2
+      docker compose -p voice-go -f "$go_cfg" --env-file "$go_env" down --remove-orphans || true
+    else
+      docker compose -p voice-go -f "$go_cfg" --env-file "$go_env" up -d --no-build --force-recreate || true
+    fi
     docker compose -p voice-conference -f "$ast_cfg" --env-file "$ast_env" up -d --no-build --no-deps --force-recreate asterisk || true
     cp -a "$backup/Caddyfile" /etc/caddy/Caddyfile; cp -a "$backup/source-Caddyfile" "$voice/deploy/Caddyfile"; caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy || true
   fi

@@ -1,8 +1,8 @@
 [Unit]
 Description=Owner-only browser phone TURN relay
-After=network-online.target nftables.service
+After=network-online.target nftables.service caddy.service
 Wants=network-online.target
-Requires=voice-turn-firewall.service
+Requires=voice-turn-firewall.service caddy.service
 
 [Service]
 Type=simple
@@ -11,6 +11,7 @@ Group=turnserver
 RuntimeDirectory=voice-turn
 RuntimeDirectoryMode=0750
 ExecStartPre=+/usr/bin/python3 /usr/local/sbin/voice-turn-render-config.py
+ExecStartPre=+/usr/local/sbin/voice-turn-cert-sync --no-restart
 ExecStart=/usr/bin/turnserver -c /run/voice-turn/turnserver.conf --no-cli
 Restart=on-failure
 RestartSec=3s

@@ -1,29 +1,48 @@
 # Текущее развёртывание Phone Guy
 
+## Исправление подключения публичного телефона — 2026-09-30
+
+На VM209 активен Go release `20260930T203223Z`. В мобильном Chrome
+same-origin `GET /phone/api/v1/config` пришёл без `Origin`, из-за чего API
+возвращал `origin_forbidden` до регистрации. Для read-only конфигурации Go
+теперь принимает такой запрос только с `Sec-Fetch-Site: same-origin` и точным
+разрешённым Host. Запросы регистрации и остальные изменения по-прежнему требуют
+точный `Origin`.
+
+Публичная страница после обновления перезагружена; тестовая регистрация
+`codex-check · 1988` дошла до статуса «Готов принимать звонки», затем была
+отключена. Временная запись удалена, 1988 возвращён к прежнему состоянию.
+Контейнер `voice-go` после очистки перезапущен и прошёл health check.
+На публичной странице подпись теперь показывает «Публичный доступ защищён»,
+что подтверждено в браузере после выкладки. Полный двусторонний звонок и звук
+для этого исправления не проверялись.
+
 ## Проверка публичного доступа — 2026-09-30
 
-Публичный доступ к браузерному телефону **не включён**. Авторитетные DNS
-серверы REG.RU уже отвечают для `phone.awesomeio.ru` адресом VPS
-`94.102.89.13`, но на публичном Caddy нет host-маршрута для этого имени;
-прямой HTTPS-запрос к нему завершается TLS-ошибкой. `.lan` имена на публичном
-edge также отклоняются.
+Публичный браузерный телефон развёрнут на `https://phone.awesomeio.ru/` в Go
+release `20260930T185105Z`. Вместо всплывающего Basic Auth теперь показывается
+фирменная форма. После входа браузер сохраняет Secure/HttpOnly/SameSite=Strict
+cookie на 90 дней; активное использование автоматически продлевает срок.
+Пароль проверяется через PBKDF2-HMAC-SHA256 (600 000 итераций); на VM лежат
+только salted verifier и отдельный случайный ключ подписи сессий.
 
-Go/Caddy support deployed to VM209, release `20260930T173000Z`. Local Caddy
-listens on `127.0.0.1:8181` and allows only `/phone`, `/phone/*`,
-`/admin/assets/*`, and `/ws/phone-signaling`; `/admin/`, `/admin/api/*`,
-`/healthz`, and `/ws/rvc-v2` return 404 there. The public-origin phone config
-returns 503 because TURN credentials have not been provisioned. The private
-phone page and API return HTTP 200; Go and Asterisk are healthy and Asterisk
-has no active calls.
+Публичный smoke пройден: страница входа — 200 без `WWW-Authenticate`, неверный
+пароль и Origin отклоняются, cookie открывает phone API и WSS handshake,
+logout очищает её, `/admin/` и `/healthz` — 404. Приватные phone/admin smoke
+проверки прошли в релизном скрипте. Старый Caddy Basic Auth snippet убран из
+активного каталога и сохранён в `/var/backups/caddy-phone-cookie-20260930T185105Z`.
+Для основного UI добавлено проксирование `/admin/assets/*`: анонимный запрос
+получает 401, эти JS/CSS файлы доступны через Go только с cookie. На VPS Caddy
+валидирован и перезагружен; его исходник и конфиг сохранены в
+`/var/backups/phone-cookie-assets-20260930T191455Z`. На VM209 установлен
+root-only marker для блокировки rollback на версию без cookie-auth. В открытом Chrome проверена
+фирменная форма входа. Реальный вход в профиль пользователя и перезапуск
+браузера не выполнялись; первый вход создаст cookie именно в его профиле.
 
-This update passed `go test ./...`, `go vet ./...`, 40 Node tests, 19 React
-tests, the TypeScript/Vite production build, and 30 selected Python deploy,
-rollback, WebRTC, and public-access tests. Candidate and live Caddy configs
-validated. The two-browser live call acceptance was not run for this release;
-the prior 2026-09-29 private-network acceptance does not verify public access.
-The public rollout remains gated on a phone-only Teleport role, the owner's
-MFA enrollment, the Teleport Application Service, TURN deployment, and external
-call/media/security probes.
+Полный браузерный звонок на этой версии не проверялся: для auth-обновления не
+были запущены два независимых профиля телефона. Signaling handshake и TURN
+smoke не подтверждают звонок, двусторонний звук, RVC и hangup. См.
+[инструкцию звонкового acceptance](BROWSER_CALL_ACCEPTANCE.md).
 
 ## Актуальная проверка браузерного телефона — 2026-09-29
 

@@ -125,6 +125,60 @@ func TestPublicPhoneOriginUsesPublicSignalingAndSIPDomain(t *testing.T) {
 	}
 }
 
+func TestPublicConfigAllowsSameOriginGetWithoutOriginHeader(t *testing.T) {
+	s, _, _ := testSessions(t)
+	api, err := NewAPIWithPhoneOrigins(s, map[string]PhoneOrigin{
+		"https://phone.awesomeio.ru": {
+			SignalingURL: "wss://phone.awesomeio.ru/ws/phone-signaling",
+			SIPDomain:    "phone.awesomeio.ru",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	phoneAPI := api.(*API)
+	phoneAPI.SetTurnCredentialProvider(fixedTURNProvider{servers: []ICEServer{{URLs: []string{"turns:phone.awesomeio.ru:5349?transport=tcp"}, Username: "123456:voice-phone", Credential: "short-lived"}}})
+
+	request := httptest.NewRequest(http.MethodGet, "https://phone.awesomeio.ru/phone/api/v1/config", nil)
+	request.Header.Set("Sec-Fetch-Site", "same-origin")
+	response := httptest.NewRecorder()
+	phoneAPI.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("same-origin config status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestPublicConfigWithoutOriginRejectsCrossSiteAndUnknownHost(t *testing.T) {
+	s, _, _ := testSessions(t)
+	api, err := NewAPIWithPhoneOrigins(s, map[string]PhoneOrigin{
+		"https://phone.awesomeio.ru": {
+			SignalingURL: "wss://phone.awesomeio.ru/ws/phone-signaling",
+			SIPDomain:    "phone.awesomeio.ru",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name      string
+		host      string
+		fetchSite string
+	}{
+		{name: "cross-site", host: "phone.awesomeio.ru", fetchSite: "cross-site"},
+		{name: "unknown-host", host: "attacker.example", fetchSite: "same-origin"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, "https://"+test.host+"/phone/api/v1/config", nil)
+			request.Header.Set("Sec-Fetch-Site", test.fetchSite)
+			response := httptest.NewRecorder()
+			api.ServeHTTP(response, request)
+			if response.Code != http.StatusForbidden {
+				t.Fatalf("config status=%d body=%s", response.Code, response.Body.String())
+			}
+		})
+	}
+}
+
 type fixedTURNProvider struct {
 	servers []ICEServer
 }

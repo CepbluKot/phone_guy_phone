@@ -1,13 +1,24 @@
 # Browser-to-browser call acceptance
 
-## 2026-09-30 release `20260930T173000Z`
+## 2026-09-30 public same-origin config fix — release `20260930T203223Z`
 
-**Incomplete for this release.** Deployment health and private `/phone/` page/API
-checks passed, and Asterisk reported zero active calls. The public hostname is
-still gated and no new two-browser call was run after this deployment. Two
-independent browser profiles were not available in this task session. The
-previous 2026-09-29 private call acceptance remains historical evidence only;
-it does not validate the new public origin, Teleport, or TURN path.
+**Registration smoke passed; browser-to-browser call acceptance incomplete.**
+The authenticated public phone page at `phone.awesomeio.ru` was reloaded and
+connected to test extension 1988. It reached **Готов принимать звонки**, proving
+the config request without `Origin` and the subsequent claim succeeded. The
+test lease was released and its temporary directory nickname removed. No second
+browser call, bidirectional audio, RVC, or hangup acceptance was run for this
+release; the previous call run below is historical evidence only.
+
+## 2026-09-30 release `20260930T185105Z`
+
+**Browser-to-browser call acceptance incomplete.** The public owner-login flow
+passed its HTTPS acceptance (custom page, invalid credentials and Origin
+rejected, persistent cookie, protected API and WSS, logout, and public admin/
+health isolation). Two independent browser phone sessions were not set up for
+this auth-only update, so call UI, media, RVC, and hangup acceptance remain
+unverified. The previous 2026-09-29 private call acceptance is historical only
+and does not validate this public route.
 
 Run this live acceptance stage after deploying any change to browser SIP,
 signaling, incoming-call UI, call teardown, or WebRTC audio. A successful build

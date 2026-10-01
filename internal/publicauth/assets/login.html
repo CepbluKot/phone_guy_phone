@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Вход в телефон · Voice</title>
+  <link rel="stylesheet" href="/phone/auth.css">
+  <script src="/phone/auth.js" defer></script>
+</head>
+<body>
+  <div class="login-backdrop" aria-hidden="true">
+    <div class="preview-top"></div>
+    <div class="preview-side"></div>
+    <div class="preview-card preview-card-one"></div>
+    <div class="preview-card preview-card-two"></div>
+  </div>
+  <main class="login-stage">
+    <section class="login-modal" role="dialog" aria-modal="true" aria-labelledby="login-title">
+      <div class="login-brand"><span class="brand-mark">V</span><span>VOICE <small>ВНУТРЕННЯЯ СВЯЗЬ</small></span></div>
+      <p class="login-eyebrow">ЗАЩИЩЁННЫЙ ДОСТУП</p>
+      <h1 id="login-title">Войти в телефон</h1>
+      <p class="login-copy">Введите свои данные, чтобы открыть браузерный телефон.</p>
+      <form id="owner-login" autocomplete="on">
+        <label for="owner-username">Логин</label>
+        <input id="owner-username" name="username" type="text" value="voice-owner" autocomplete="username" autocapitalize="none" spellcheck="false" required>
+        <label for="owner-password">Пароль</label>
+        <input id="owner-password" name="password" type="password" autocomplete="current-password" required>
+        <p id="login-error" class="login-error" role="alert" hidden>Не удалось войти. Проверьте логин и пароль.</p>
+        <button id="login-submit" type="submit"><span>Продолжить</span><b aria-hidden="true">→</b></button>
+      </form>
+      <p class="login-footnote"><i></i> Вход сохранится в этом браузере на 90 дней и будет продлеваться автоматически.</p>
+    </section>
+  </main>
+</body>
+</html>

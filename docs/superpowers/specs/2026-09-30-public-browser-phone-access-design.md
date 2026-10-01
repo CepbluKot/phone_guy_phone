@@ -1,5 +1,10 @@
 # Public browser-phone access design
 
+> **Superseded implementation choice (2026-09-30):** owner explicitly chose to
+> bypass Teleport. The route first used Caddy HTTP Basic Auth, then moved to the
+> branded Go login and persistent owner cookie. See
+> [LIVE_STATUS.md](../../LIVE_STATUS.md) for current implementation and evidence.
+
 ## Goal
 
 Allow the owner to use the browser phone from the public internet while keeping

@@ -1,13 +1,13 @@
 # Personal access to the browser phone from the internet
 
-Status (2026-09-30): public phone access is approved but still gated. The public
-`phone.awesomeio.ru` A record already points to the existing VPS; however, there
-is no public Caddy route or Teleport Application Service for it, so the phone
-is not available from the internet. The Go release contains the public WSS and
-TURN contracts, but its public phone config returns 503 while the TURN secret
-is absent. The public Caddy route remains disabled until the owner-only
-Teleport role, mandatory MFA enrollment, app registration, TURN, and external
-acceptance are verified. The admin remains private.
+> **Implementation update (2026-09-30):** this plan's proposed Teleport/MFA
+> route was replaced by the owner's explicit request to bypass Teleport. The
+> live route uses VPS Caddy's phone-only path allowlist, a branded Go login
+> with a persistent HttpOnly cookie, and
+> authenticated TURN. Current state and checks: [LIVE_STATUS.md](LIVE_STATUS.md)
+> and [OPERATIONS.md](OPERATIONS.md).
+
+Status (2026-09-30): public phone access is deployed. The admin remains private.
 
 ## Existing private access
 
@@ -29,15 +29,10 @@ does not prove that WebRTC media works.
 
 ## Approved public route
 
-Use `phone.awesomeio.ru` for the phone only. Authenticate the owner at the edge
-with a revocable Teleport identity and MFA before serving `/phone/` or its API.
-The current nickname and extension form is not authentication. Keep the admin
-private. Replace the hardcoded private signaling URL and SIP domain with a
-publicly reachable, authenticated WSS route. Add a TURN relay for WebRTC media
-and configure ICE to use it; the current Asterisk host candidates and RTP
-ports are private. Restrict both signaling and TURN credentials to the signed-in
-owner, then verify that a logged-out client cannot claim an extension, register
-SIP, or reach media ports. Make the public route only after these gates pass.
+The Go app authenticates the owner with a password and persistent signed cookie.
+Keep the admin private. Public signaling and TURN credentials are restricted to
+this signed-in phone origin; verify a logged-out client cannot claim an
+extension, register SIP, or reach media ports.
 
 The implementation plan and security gates are tracked in
 [`superpowers/plans/2026-09-30-public-browser-phone-access.md`](superpowers/plans/2026-09-30-public-browser-phone-access.md).
