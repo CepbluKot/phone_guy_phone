@@ -19,15 +19,6 @@ export type AsteriskSnapshot = {
   activeChannels: number;
   endpoints: { extension: string; state: "online" | "offline" | "unknown" }[];
 };
-export type MetricsSnapshot = {
-  updatedAt: string;
-  rvc: { status: string; active: boolean; running: boolean; queuedWindows: number; lastSuccessAt?: string; fresh: boolean; error?: string };
-  calls: { active: number; limit: number };
-  processing: { samples: number; lastSampleAt?: string; p50Millis?: number; p95Millis?: number };
-  errors: { code: string; count: number }[];
-  host: { status: string; sampledAt?: string; cpuPercent?: number; cpuReady: boolean; memoryUsedBytes?: number; memoryTotalBytes?: number; rvcMemoryBytes?: number; rvcMemoryLimitBytes?: number; rvcCpuPercent?: number; rvcCpuReady: boolean; error?: string };
-};
-
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
@@ -55,7 +46,6 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 export const api = {
   authMode: () => request<{ required: boolean }>("/admin/api/v1/auth-mode"),
   routes: () => request<RouteSnapshot>("/admin/api/v1/voice-routes"),
-  metrics: () => request<MetricsSnapshot>("/admin/api/v1/metrics"),
   phones: () => request<PhonebookSnapshot>("/admin/api/v1/phones"),
   asterisk: () => request<AsteriskSnapshot>("/admin/api/v1/asterisk"),
   browserPhones: () => request<{ sessions: BrowserPhone[] }>("/admin/api/v1/browser-phones"),
@@ -92,15 +82,6 @@ export const api = {
       method: "PUT",
       headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
       body: JSON.stringify({ profile, revision }),
-    }),
-  addPhone: (device: PhoneDevice, revision: number, csrfToken: string) =>
-    request<PhonebookSnapshot>("/admin/api/v1/phones", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-CSRF-Token": csrfToken,
-      },
-      body: JSON.stringify({ ...device, revision }),
     }),
   updatePhone: (
     mac: string,

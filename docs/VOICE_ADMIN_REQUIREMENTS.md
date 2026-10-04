@@ -26,8 +26,8 @@ voice-conversion limit and measured capacity.
   (`admin-ui/src/design-system.css`): neutral canvas and surfaces, blue
   navigation state, compact status badges, accessible focus rings, and
   reduced-motion behavior. The admin uses a collapsible icon sidebar and
-  breadcrumb top bar with Voice-specific sections for physical phones,
-  unassigned phones, voice profiles, and processing load. The browser phone
+  breadcrumb top bar with a phones page focused on unassigned physical phones,
+  voice profiles, and Asterisk status. The browser phone
   keeps its call-focused layout while using the shared colors, typography,
   and surface tokens.
 - Keep Python for the existing RVC inference runtime, where the model and
@@ -69,30 +69,28 @@ voice-conversion limit and measured capacity.
   record only: changing it does not change the handset's SIP credentials or
   Asterisk endpoint configuration. Display its provenance and last-observed
   address as historical evidence, not live presence.
-- Support manual enrollment in the inventory when no safe device-discovery
-  source is available. Do not label a manually entered record as automatically
-  discovered or currently online.
-- Show known physical phones with MAC, verified model/firmware where available,
-  current IP, SIP registration state, assigned extension, voice profile, and
-  provisioning state.
-- Give the inventory two separate admin navigation points:
-  - **Existing phones**: every phone already enrolled/assigned in the app,
-    including currently offline phones, with registration and provisioning
-    status.
-  - **New / unassigned phones**: newly discovered candidates and any known
-    device that has no phone-to-extension assignment yet. This view is the
-    explicit place to assign a free SIP extension.
-- A phone moves from “new / unassigned” to “existing phones” only after an
-  administrator saves its assignment. A temporary loss of SIP registration
-  must not move an enrolled phone back into the new-device list.
+- Keep the admin phones page focused on known physical devices without an
+  assigned SIP extension. Do not show already-assigned devices, virtual
+  placeholders, browser phones, a manual-add form, or system-load cards there.
+- Each unassigned device row shows its label, MAC, last observed IP and history
+  indicator, and lets the administrator choose and save a free configured SIP
+  extension. Saving moves it out of the unassigned list; assigned phones remain
+  visible on the voice-profile page.
+- The inventory is administrative only: changing it does not change the
+  handset's SIP credentials or Asterisk endpoint configuration. Observation
+  dates and addresses are historical evidence, not live presence.
+- Do not imply that an unknown handset was discovered or is currently online.
+  The current deployment has no verified read-only DHCP lease API and no
+  confirmed AMI contact reader, so an unregistered new handset will not appear
+  automatically until a safe discovery source is implemented.
 - Discover phones already visible as PJSIP contacts. Also discover unregistered
   new phones from a read-only DHCP-client/lease source when the router exposes a
   safe, supported way to read it. A discovered device is a candidate, not an
   enrolled phone; do not infer its model or identity from an IP address alone.
 - Do not change DHCP, router settings, network-wide provisioning options, or
   perform active subnet scans as a fallback. If DHCP lease access is unavailable,
-  show that discovery limitation and retain Asterisk registration/manual
-  enrollment as the supported sources.
+  keep the discovery limitation explicit; do not substitute manual entry on the
+  phones page or label a historical record as live discovery.
 - Let the administrator map an inventory phone to an available, configured SIP
   extension. Prevent duplicate active MAC and extension assignments. Keep
   voice-profile selection separate from this administrative map.
@@ -182,9 +180,11 @@ Asterisk apply path.
 active browser registrations and links to it. Deployment and live acceptance
 status are recorded in the browser-phone implementation plan.
 
-- Users connect a browser client to one configured internal extension and can
-  call another configured internal extension or receive calls there. The
-  physical handset and browser ring together; the first answer wins.
+- Users connect a browser client to one configured internal extension that is
+  not assigned to a physical handset, and can call another configured internal
+  extension or receive calls there. Physical handset extensions cannot be
+  claimed by a browser, including through direct API requests or the new-number
+  form. A physical handset and browser must use separate extensions.
 - Keep call origination server-side in the Go service through Asterisk ARI.
   The browser must not receive ARI credentials or choose arbitrary Asterisk
   channel names or endpoints.
@@ -196,12 +196,14 @@ status are recorded in the browser-phone implementation plan.
   SIP credentials are generated per browser session and are not persisted.
   Enforce the current one-processed-call limit unless a separate capacity
   change is approved and measured.
+- Filter physical-handset extensions out of the browser registration choices
+  and reject them at the claim API using the current phonebook assignments.
+  Calls to physical handsets remain available as call targets.
 - The browser phone can use an existing internal number or create a three- or
   four-digit number. Reject numbers already configured or reserved by the
   dialplan, and retain accepted numbers in the directory.
 - The call target list labels assigned physical handsets by their configured
-  device name and browser clients by nickname plus current online state. If
-  both devices share a number, show both endpoints.
+  device name and browser clients by nickname plus current online state.
 
 ## Related project documents
 

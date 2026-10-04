@@ -1,5 +1,5 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import { api, ApiError, AsteriskSnapshot, BrowserPhone, MetricsSnapshot, PhoneDevice, PhonebookSnapshot, Profile, RouteSnapshot } from "./api";
+import { api, ApiError, AsteriskSnapshot, BrowserPhone, PhoneDevice, PhonebookSnapshot, Profile, RouteSnapshot } from "./api";
 import { VoiceShell, type VoicePage } from "./components/VoiceShell";
 import "./design-system.css";
 import "./styles.css";
@@ -49,7 +49,11 @@ const copy = {
     existingPhones: "Existing phones",
     newUnassigned: "New / unassigned",
     assignedHeading: "Assigned phones",
-    unassignedHeading: "New / unassigned phones",
+    unassignedHeading: "Phones without a number",
+    unassignedListHeading: "Awaiting assignment",
+    unassignedSummary: "Known physical phones without an assigned internal number.",
+    unassignedInstruction: "Choose a free SIP extension and save the mapping.",
+    unassignedCount: "without a number",
     systemLoad: "System load",
     device: "Device",
     status: "Status",
@@ -69,7 +73,7 @@ const copy = {
     revision: "Registry revision",
     stalePhonebook: "The mapping changed elsewhere. The latest list was loaded.",
     noPhones: "No physical phones in the inventory yet.",
-    noUnassigned: "No unassigned phones in the inventory.",
+    noUnassigned: "No known physical phones are waiting for a number.",
     manualInventory: "These records are entered manually; automatic network discovery is not configured.",
     signOut: "Sign out",
     collapseSidebar: "Collapse sidebar",
@@ -137,7 +141,11 @@ const copy = {
     existingPhones: "Назначенные телефоны",
     newUnassigned: "Новые / без номера",
     assignedHeading: "Назначенные телефоны",
-    unassignedHeading: "Новые / неназначенные телефоны",
+    unassignedHeading: "Телефоны без номера",
+    unassignedListHeading: "Ожидают назначения",
+    unassignedSummary: "Известные физические телефоны, которым ещё не назначен внутренний номер.",
+    unassignedInstruction: "Выберите свободный внутренний номер SIP и сохраните привязку.",
+    unassignedCount: "без номера",
     systemLoad: "Нагрузка системы",
     device: "Устройство",
     status: "Статус",
@@ -157,7 +165,7 @@ const copy = {
     revision: "Версия реестра",
     stalePhonebook: "Реестр изменился в другой сессии. Список обновлён.",
     noPhones: "Физических телефонов пока нет в реестре.",
-    noUnassigned: "В реестре нет телефонов без номера.",
+    noUnassigned: "Нет известных физических телефонов, ожидающих назначения номера.",
     manualInventory: "Эти записи добавляются вручную; автоматическое обнаружение в сети не настроено.",
     signOut: "Выйти",
     collapseSidebar: "Свернуть меню",
@@ -200,7 +208,6 @@ export default function App() {
   const [csrfToken, setCsrfToken] = useState<string | null>(null);
   const [authRequired, setAuthRequired] = useState<boolean | null>(null);
   const [snapshot, setSnapshot] = useState<RouteSnapshot | null>(null);
-  const [metrics, setMetrics] = useState<MetricsSnapshot | null>(null);
   const [asterisk, setAsterisk] = useState<AsteriskSnapshot | null>(null);
   const [browserPhones, setBrowserPhones] = useState<BrowserPhone[]>([]);
   const [browserDrafts, setBrowserDrafts] = useState<Record<string, Profile>>({});
@@ -211,8 +218,6 @@ export default function App() {
   const [phoneDrafts, setPhoneDrafts] = useState<Record<string, { label: string; extension: string }>>({});
   const [phoneMessages, setPhoneMessages] = useState<Record<string, string>>({});
   const [phoneSaving, setPhoneSaving] = useState<string | null>(null);
-  const [newPhone, setNewPhone] = useState({ mac: "", label: "", extension: "" });
-  const [addingPhone, setAddingPhone] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, Profile>>({});
   const [status, setStatus] = useState<
     "loading" | "login" | "ready" | "unavailable"
@@ -283,18 +288,6 @@ export default function App() {
       }
     })();
   }, [loadRoutes]);
-
-  useEffect(() => {
-    if (status !== "ready") return;
-    let disposed = false;
-    const refresh = async () => {
-      try { const value = await api.metrics(); if (!disposed) setMetrics(value); }
-      catch { if (!disposed) setMetrics(null); }
-    };
-    void refresh();
-    const timer = window.setInterval(() => void refresh(), 5000);
-    return () => { disposed = true; window.clearInterval(timer); };
-  }, [status]);
 
   useEffect(() => {
     if (status !== "ready") return;
@@ -418,31 +411,6 @@ export default function App() {
     }
   }
 
-  async function addPhone(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!phonebook || (authRequired && !csrfToken)) return;
-    setAddingPhone(true);
-    try {
-      const next = await api.addPhone({ mac: newPhone.mac, label: newPhone.label, extension: newPhone.extension }, phonebook.revision, csrfToken ?? "");
-      setPhonebook(next);
-      setPhoneDrafts(Object.fromEntries(next.devices.map((item) => [item.mac, { label: item.label, extension: item.extension ?? "" }])));
-      setNewPhone({ mac: "", label: "", extension: "" });
-      setPhoneMessages((current) => ({ ...current, form: "" }));
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 409) {
-        await loadRoutes();
-        setPhoneMessages((current) => ({ ...current, form: t.stalePhonebook }));
-      } else if (error instanceof ApiError && error.status === 401) {
-        setStatus("login");
-        setCsrfToken(null);
-      } else {
-        setPhoneMessages((current) => ({ ...current, form: t.mappingError }));
-      }
-    } finally {
-      setAddingPhone(false);
-    }
-  }
-
   const profilePhysicalPhones = (phonebook?.devices ?? [])
     .filter((device) => Boolean(device.extension))
     .sort((a, b) => (a.extension ?? "").localeCompare(b.extension ?? "", undefined, { numeric: true }));
@@ -518,16 +486,9 @@ export default function App() {
               drafts={phoneDrafts}
               messages={phoneMessages}
               saving={phoneSaving}
-              newPhone={newPhone}
-              adding={addingPhone}
               labels={t}
               setDraft={(mac, value) => setPhoneDrafts((current) => ({ ...current, [mac]: value }))}
-              setNewPhone={setNewPhone}
               onSave={savePhone}
-              onAdd={addPhone}
-              metrics={metrics}
-              asterisk={asterisk}
-              language={language}
             />
           ) : page === "asterisk" ? <AsteriskPage value={asterisk} labels={t} language={language} /> : <>
             <div className="page-heading">
@@ -700,82 +661,41 @@ function PhysicalPhonesPage({
   drafts,
   messages,
   saving,
-  newPhone,
-  adding,
   labels,
   setDraft,
-  setNewPhone,
   onSave,
-  onAdd,
-  metrics,
-  asterisk,
-  language,
 }: {
   inventory: PhonebookSnapshot | null;
   routes: RouteSnapshot | null;
   drafts: Record<string, { label: string; extension: string }>;
   messages: Record<string, string>;
   saving: string | null;
-  newPhone: { mac: string; label: string; extension: string };
-  adding: boolean;
   labels: Record<string, string>;
   setDraft: (mac: string, value: { label: string; extension: string }) => void;
-  setNewPhone: (value: { mac: string; label: string; extension: string }) => void;
   onSave: (device: PhoneDevice) => void;
-  onAdd: (event: FormEvent<HTMLFormElement>) => void;
-  metrics: MetricsSnapshot | null;
-  asterisk: AsteriskSnapshot | null;
-  language: Language;
 }) {
   const allDevices = inventory?.devices ?? [];
-  const assignedDevices = allDevices.filter((device) => Boolean(device.extension));
   const unassignedDevices = allDevices.filter((device) => !device.extension);
   const extensions = Object.keys(routes?.extensions ?? {}).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  const assignmentComplete = Object.values(messages).includes(labels.assignmentSaved);
   return <>
     <div className="page-heading">
-      <div><p className="eyebrow">{labels.phones.toUpperCase()}</p><h1>{labels.physicalPhones}</h1><p className="muted">{language === "en" ? "Assign SIP extensions to the physical phones connected to your service." : "Назначайте внутренние SIP-номера физическим телефонам, подключённым к сервису."}</p></div>
-      <span className="count-badge">{allDevices.length} {labels.physicalPhones.toLowerCase()}</span>
+      <div><p className="eyebrow">{labels.phones.toUpperCase()}</p><h1>{labels.unassignedHeading}</h1><p className="muted">{labels.unassignedSummary}</p></div>
+      <span className="count-badge">{unassignedDevices.length} {labels.unassignedCount}</span>
     </div>
-    <section className="panel inventory-panel" aria-label={labels.assignedHeading}>
-      <div className="panel-heading"><div><h2>{labels.assignedHeading}</h2><p className="muted">{labels.mappingOnly}</p></div><button className="button primary" type="button" onClick={() => document.getElementById("phone-add-panel")?.scrollIntoView({ behavior: "smooth", block: "center" })}>＋ {labels.addDevice}</button></div>
-      <div className="table-scroll"><table className="inventory-table">
-        <thead><tr><th>{labels.device}</th><th>{labels.mac}</th><th>IP</th><th>{labels.phone}</th><th>{labels.status}</th><th><span className="sr-only">{labels.save}</span></th></tr></thead>
-        <tbody>{assignedDevices.map((device) => <PhoneInventoryRow key={device.mac} device={device} allDevices={allDevices} extensions={extensions} asterisk={asterisk} draft={drafts[device.mac] ?? { label: device.label, extension: device.extension ?? "" }} message={messages[device.mac]} saving={saving === device.mac} labels={labels} setDraft={(value) => setDraft(device.mac, value)} onSave={() => void onSave(device)} />)}
-          {assignedDevices.length === 0 && <tr><td colSpan={6} className="inventory-empty">{labels.noPhones}</td></tr>}
-        </tbody>
-      </table></div>
-      <div className="panel-footer"><span>{labels.revision}: {inventory?.revision ?? "—"}</span></div>
-    </section>
     <section className="panel inventory-panel unassigned-panel" aria-label={labels.unassignedHeading}>
-      <div className="panel-heading"><div><h2>{labels.unassignedHeading}</h2><p className="muted">{language === "en" ? "Phones listed here do not have an extension assigned yet." : "Здесь собраны телефоны, которым ещё не назначен внутренний номер."}</p></div><button className="button secondary" type="button" onClick={() => document.getElementById("phone-add-panel")?.scrollIntoView({ behavior: "smooth", block: "center" })}>＋ {labels.addDevice}</button></div>
-      {unassignedDevices.length ? <div className="table-scroll"><table className="inventory-table"><thead><tr><th>{labels.device}</th><th>{labels.mac}</th><th>IP</th><th>{labels.status}</th></tr></thead><tbody>{unassignedDevices.map((device) => <tr key={device.mac}><td data-label={labels.device}><strong>{device.label}</strong></td><td data-label={labels.mac} className="device-mac">{device.mac}</td><td data-label="IP">{device.lastSeenIp ?? labels.unknown}</td><td data-label={labels.status}><span className={`observation-pill ${device.lastSeenAt ? "observed" : "unknown"}`}><span />{device.lastSeenAt ? labels.historyAvailable : labels.historyMissing}</span></td></tr>)}</tbody></table></div> : <div className="inventory-empty-state"><span className="empty-phone-icon" aria-hidden="true">▯</span><strong>{labels.noUnassigned}</strong><p>{language === "en" ? "New phones will appear here when they are added to the inventory." : "Новые телефоны появятся здесь после добавления в реестр."}</p></div>}
-    </section>
-    <section className="panel phone-add-panel" id="phone-add-panel" aria-label={labels.addDevice}>
-      <div className="panel-heading"><div><h2>{labels.addDevice}</h2><p className="muted">{labels.mappingOnly}</p></div></div>
-      <form className="phone-add-form" onSubmit={onAdd}>
-        <label>{labels.mac}<input required value={newPhone.mac} onChange={(event) => setNewPhone({ ...newPhone, mac: event.target.value })} placeholder="00:11:22:33:44:55" /></label>
-        <label>{labels.label}<input required maxLength={80} value={newPhone.label} onChange={(event) => setNewPhone({ ...newPhone, label: event.target.value })} /></label>
-        <label>{labels.phone}<select value={newPhone.extension} onChange={(event) => setNewPhone({ ...newPhone, extension: event.target.value })}><option value="">{labels.unassigned}</option>{extensions.map((extension) => <option key={extension} value={extension} disabled={allDevices.some((device) => device.extension === extension)}>{extension}</option>)}</select></label>
-        <button className="button primary" type="submit" disabled={adding}>{adding ? "…" : labels.addDevice}</button>
-      </form>
-      {messages.form && <p className="field-error" role="alert">{messages.form}</p>}
-    </section>
-    <section className="panel compact-load" aria-label={labels.systemLoad}>
-      <div className="compact-load-heading"><div><h2>{labels.systemLoad}</h2><p className="muted">{labels.loadSummary}</p></div></div>
-      <div className="compact-load-grid">
-        <div className="compact-load-stat"><span className={`online-dot ${metrics?.rvc.status === "ready" ? "" : "offline"}`} /><div><strong>{metrics?.rvc.status === "ready" ? (language === "en" ? "RVC ready" : "RVC готов") : labels.unavailableMetric}</strong><small>{labels.worker}</small></div></div>
-        <div className="compact-load-stat"><span className="load-stat-icon" aria-hidden="true">☎</span><div><strong>{metrics?.calls.active ?? "—"}</strong><small>{labels.callsActive}</small></div></div>
-        <div className="compact-load-stat"><span className="load-stat-icon" aria-hidden="true">▥</span><div><strong>{metrics?.calls.limit ?? "—"}</strong><small>{language === "en" ? "Concurrent call limit" : "Одновременных звонков"}</small></div></div>
-      </div>
+      <div className="panel-heading"><div><h2>{labels.unassignedListHeading}</h2><p className="muted">{labels.unassignedInstruction}</p></div></div>
+      {assignmentComplete && <p className="assignment-notice" role="status">{labels.assignmentSaved}</p>}
+      {unassignedDevices.length ? <div className="table-scroll"><table className="inventory-table"><thead><tr><th>{labels.device}</th><th>{labels.mac}</th><th>IP</th><th>{labels.phone}</th><th>{labels.status}</th><th><span className="sr-only">{labels.save}</span></th></tr></thead><tbody>{unassignedDevices.map((device) => <PhoneInventoryRow key={device.mac} device={device} allDevices={allDevices} extensions={extensions} draft={drafts[device.mac] ?? { label: device.label, extension: device.extension ?? "" }} message={messages[device.mac]} saving={saving === device.mac} labels={labels} setDraft={(value) => setDraft(device.mac, value)} onSave={() => void onSave(device)} />)}</tbody></table></div> : <div className="inventory-empty-state"><span className="empty-phone-icon" aria-hidden="true">▯</span><strong>{labels.noUnassigned}</strong></div>}
+      <div className="panel-footer"><span>{labels.revision}: {inventory?.revision ?? "—"}</span></div>
     </section>
   </>;
 }
 
-function PhoneInventoryRow({ device, allDevices, extensions, asterisk, draft, message, saving, labels, setDraft, onSave }: {
+function PhoneInventoryRow({ device, allDevices, extensions, draft, message, saving, labels, setDraft, onSave }: {
   device: PhoneDevice;
   allDevices: PhoneDevice[];
   extensions: string[];
-  asterisk: AsteriskSnapshot | null;
   draft: { label: string; extension: string };
   message?: string;
   saving: boolean;
@@ -785,20 +705,14 @@ function PhoneInventoryRow({ device, allDevices, extensions, asterisk, draft, me
 }) {
   const occupied = new Set(allDevices.filter((other) => other.mac !== device.mac).map((other) => other.extension).filter(Boolean));
   const changed = draft.label !== device.label || draft.extension !== (device.extension ?? "");
-  const liveState = asterisk?.ready && device.extension ? asterisk.endpoints.find((endpoint) => endpoint.extension === device.extension)?.state ?? "unknown" : "unknown";
-  const liveLabel = liveState === "online" ? labels.online : liveState === "offline" ? labels.offline : labels.statusUnavailable;
+  const observed = Boolean(device.lastSeenAt);
   return <tr>
     <td data-label={labels.device}><label className="sr-only" htmlFor={`label-${device.mac}`}>{labels.label} {device.mac}</label><input className="device-label-input" id={`label-${device.mac}`} value={draft.label} maxLength={80} onChange={(event) => setDraft({ ...draft, label: event.target.value })} /></td>
     <td className="device-mac" data-label={labels.mac}>{device.mac}</td><td data-label="IP">{device.lastSeenIp ?? labels.unknown}</td>
     <td data-label={labels.phone}><label className="sr-only" htmlFor={`extension-${device.mac}`}>{labels.phone} {device.mac}</label><select id={`extension-${device.mac}`} value={draft.extension} onChange={(event) => setDraft({ ...draft, extension: event.target.value })}><option value="">{labels.unassigned}</option>{extensions.map((extension) => <option key={extension} value={extension} disabled={occupied.has(extension)}>{extension}</option>)}</select></td>
-    <td data-label={labels.status}><span className={`observation-pill ${liveState}`} title={languageStatusTitle(liveState, device.lastSeenAt, labels)}><span />{liveLabel}</span></td>
+    <td data-label={labels.status}><span className={`observation-pill ${observed ? "observed" : "unknown"}`} title={`${labels.lastObserved}: ${device.lastSeenAt ?? labels.unknown}`}><span />{observed ? labels.historyAvailable : labels.historyMissing}</span></td>
     <td className="row-actions" data-label=""><span className="save-message saved" role={message ? "status" : undefined}>{message}</span><button className="button primary save-button" disabled={!changed || saving} onClick={onSave}>{saving ? "…" : labels.save}</button></td>
   </tr>;
-}
-
-function languageStatusTitle(state: string, lastSeenAt: string | undefined, labels: Record<string, string>) {
-  if (state === "online" || state === "offline") return `${labels.status}: ${state}; ${labels.lastObserved}: ${lastSeenAt ?? labels.unknown}`;
-  return `${labels.status}: ${labels.statusUnavailable}`;
 }
 
 function AsteriskPage({ value, labels, language }: { value: AsteriskSnapshot | null; labels: Record<string, string>; language: Language }) {

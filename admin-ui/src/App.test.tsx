@@ -33,7 +33,7 @@ afterEach(() => {
 });
 
 describe("phone profile admin", () => {
-  it("shows live SIP registration state for assigned physical phones", async () => {
+  it("shows live SIP registration state on the Asterisk page", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input);
       if (path === "/admin/api/v1/auth-mode") return response(200, { required: false });
@@ -56,11 +56,11 @@ describe("phone profile admin", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<App />);
 
-    expect(await screen.findByText("В сети")).toBeInTheDocument();
-    expect(screen.getByText("Не в сети")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Asterisk" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Asterisk" }));
     expect(await screen.findByRole("heading", { name: "Статус Asterisk" })).toBeInTheDocument();
     expect(screen.getByText("Активные каналы")).toBeInTheDocument();
+    expect(screen.getByText("В сети")).toBeInTheDocument();
+    expect(screen.getByText("Не в сети")).toBeInTheDocument();
     expect(window.location.hash).toBe("#/asterisk");
   });
 
@@ -70,8 +70,7 @@ describe("phone profile admin", () => {
     vi.stubGlobal("fetch", vi.fn()
       .mockResolvedValueOnce(response(200, { required: false }))
       .mockResolvedValueOnce(response(200, routes))
-      .mockResolvedValueOnce(response(200, phonebook))
-      .mockResolvedValueOnce(response(200, metrics)));
+      .mockResolvedValueOnce(response(200, phonebook)));
     render(<App />);
 
     const menu = await screen.findByRole("button", { name: "Открыть меню" });
@@ -90,14 +89,60 @@ describe("phone profile admin", () => {
     vi.stubGlobal("fetch", vi.fn()
       .mockResolvedValueOnce(response(200, { required: false }))
       .mockResolvedValueOnce(response(200, routes))
-      .mockResolvedValueOnce(response(200, { revision: 2, devices: [{ mac: "00:0b:82:f4:f2:8b", label: "Grandstream desk phone", extension: "1988", lastSeenIp: "192.168.20.66", lastSeenAt: "2026-09-29" }] }))
-      .mockResolvedValueOnce(response(200, metrics)));
+      .mockResolvedValueOnce(response(200, { revision: 2, devices: [{ mac: "00:0b:82:f4:f2:8b", label: "Grandstream desk phone", lastSeenIp: "192.168.20.66", lastSeenAt: "2026-09-29" }] }))
+      );
     render(<App />);
 
     const deviceName = await screen.findByDisplayValue("Grandstream desk phone");
     expect(deviceName.closest("td")).toHaveAttribute("data-label", "Устройство");
     expect(screen.getByText("00:0b:82:f4:f2:8b").closest("td")).toHaveAttribute("data-label", "MAC-адрес");
     expect(screen.getByText("192.168.20.66").closest("td")).toHaveAttribute("data-label", "IP");
+  });
+
+  it("shows only known phones without an extension and lets me assign one", async () => {
+    let inventory: { revision: number; devices: { mac: string; label: string; extension?: string; lastSeenIp?: string; lastSeenAt?: string }[] } = {
+      revision: 1,
+      devices: [
+        { mac: "00:11:22:33:44:55", label: "Assigned desk phone", extension: "1983" },
+        { mac: "00:11:22:33:44:66", label: "New desk phone", lastSeenIp: "192.168.20.99", lastSeenAt: "2026-10-01" },
+      ],
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/admin/api/v1/auth-mode") return response(200, { required: false });
+      if (path === "/admin/api/v1/voice-routes") return response(200, routes);
+      if (path.startsWith("/admin/api/v1/phones/") && init?.method === "PUT") {
+        inventory = {
+          revision: 2,
+          devices: [
+            { mac: "00:11:22:33:44:55", label: "Assigned desk phone", extension: "1983" },
+            { mac: "00:11:22:33:44:66", label: "New desk phone", extension: "1987", lastSeenIp: "192.168.20.99" },
+          ],
+        };
+        return response(200, inventory);
+      }
+      if (path === "/admin/api/v1/phones") return response(200, inventory);
+      if (path === "/admin/api/v1/asterisk") return response(200, { ready: true, activeChannels: 0, endpoints: [] });
+      if (path === "/admin/api/v1/browser-phones") return response(200, { sessions: [] });
+      return response(200, metrics);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+
+    const unassigned = await screen.findByRole("region", { name: "Телефоны без номера" });
+    expect(within(unassigned).getByDisplayValue("New desk phone")).toBeInTheDocument();
+    expect(within(unassigned).queryByDisplayValue("Assigned desk phone")).not.toBeInTheDocument();
+    expect(within(unassigned).getByText("Есть в истории")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Нагрузка системы" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Добавить телефон" })).not.toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalledWith("/admin/api/v1/metrics", expect.anything());
+
+    await userEvent.selectOptions(within(unassigned).getByRole("combobox", { name: "Телефон 00:11:22:33:44:66" }), "1987");
+    await userEvent.click(within(unassigned).getByRole("button", { name: "Сохранить" }));
+    await waitFor(() => expect(screen.getByText("Привязка сохранена")).toBeInTheDocument());
+    const put = fetchMock.mock.calls.find(([path, init]) => String(path).includes("/admin/api/v1/phones/") && init?.method === "PUT");
+    expect(put).toBeTruthy();
+    expect(JSON.parse(String(put?.[1]?.body))).toEqual({ label: "New desk phone", extension: "1987", revision: 1 });
   });
 
   it("exposes the selected Voice section in an accessible application navigation", async () => {
@@ -128,8 +173,7 @@ describe("phone profile admin", () => {
       .mockResolvedValueOnce(response(401, { error: "unauthorized" }))
       .mockResolvedValueOnce(response(201, { csrfToken: "csrf-one" }))
       .mockResolvedValueOnce(response(200, routes))
-      .mockResolvedValueOnce(response(200, phonebook))
-      .mockResolvedValueOnce(response(200, metrics));
+      .mockResolvedValueOnce(response(200, phonebook));
     vi.stubGlobal("fetch", fetchMock);
     render(<App />);
     await userEvent.click(await screen.findByRole("button", { name: "EN" }));
@@ -158,7 +202,6 @@ describe("phone profile admin", () => {
       .mockResolvedValueOnce(response(201, { csrfToken: "csrf-two" }))
       .mockResolvedValueOnce(response(200, routes))
       .mockResolvedValueOnce(response(200, phonebook))
-      .mockResolvedValueOnce(response(200, metrics))
       .mockResolvedValueOnce(response(200, { ready: true, activeChannels: 0, endpoints: [] }))
       .mockResolvedValueOnce(response(200, { sessions: [] }))
       .mockResolvedValueOnce(response(200, updated))
@@ -200,7 +243,6 @@ describe("phone profile admin", () => {
       .mockResolvedValueOnce(response(201, { csrfToken: "csrf-three" }))
       .mockResolvedValueOnce(response(200, routes))
       .mockResolvedValueOnce(response(200, phonebook))
-      .mockResolvedValueOnce(response(200, metrics))
       .mockResolvedValueOnce(response(200, { ready: true, activeChannels: 0, endpoints: [] }))
       .mockResolvedValueOnce(response(200, { sessions: [] }))
       .mockResolvedValueOnce(response(409, { error: "stale_revision" }))
@@ -237,7 +279,6 @@ describe("phone profile admin", () => {
       .mockResolvedValueOnce(response(200, { required: false }))
       .mockResolvedValueOnce(response(200, routes))
       .mockResolvedValueOnce(response(200, phonebook))
-      .mockResolvedValueOnce(response(200, metrics))
       .mockResolvedValueOnce(response(200, { ready: true, activeChannels: 0, endpoints: [] }))
       .mockResolvedValueOnce(response(200, { sessions: [] }))
       .mockResolvedValueOnce(response(200, updated))
@@ -266,7 +307,6 @@ describe("phone profile admin", () => {
       .mockResolvedValueOnce(response(200, { required: false }))
       .mockResolvedValueOnce(response(200, browserRoutes))
       .mockResolvedValueOnce(response(200, phonebook))
-      .mockResolvedValueOnce(response(200, metrics))
       .mockResolvedValueOnce(response(200, { ready: true, activeChannels: 0, endpoints: [] }))
       .mockResolvedValueOnce(response(200, { sessions: [{ nickname: "phoneguy123", extension: "3454", expiresAt: "2026-09-27T20:00:00Z" }] }))
       .mockResolvedValueOnce(response(200, saved))
@@ -312,7 +352,6 @@ describe("phone profile admin", () => {
       .mockResolvedValueOnce(response(200, { required: false }))
       .mockResolvedValueOnce(response(200, configuredRoutes))
       .mockResolvedValueOnce(response(200, inventory))
-      .mockResolvedValueOnce(response(200, metrics))
       .mockResolvedValueOnce(response(200, { ready: true, activeChannels: 0, endpoints: [] }))
       .mockResolvedValueOnce(response(200, { sessions: [{ nickname: "browser3454", extension: "3454", expiresAt: "2026-09-29T20:00:00Z" }] }))
       .mockResolvedValue(response(200, metrics));
