@@ -61,6 +61,21 @@ describe("browser phone",()=>{
     expect(screen.getByRole("option",{name:/1988.*физический телефон/})).not.toBeNull();
     expect(screen.getByRole("option",{name:/3454.*браузер/})).not.toBeNull();
   });
+  it("hides extensions assigned to physical phones from browser registration",async()=>{
+    render(<PhoneApp/>);await screen.findByLabelText("Ваш ник");
+    expect(screen.queryByRole("option",{name:/1988/})).toBeNull();
+    expect(screen.getByRole("option",{name:/1983/})).not.toBeNull();
+  });
+  it("explains when the API rejects a physical phone extension",async()=>{
+    vi.mocked(phoneAPI.claim).mockRejectedValue(new Error("physical_phone_extension_reserved"));
+    vi.mocked(phoneAPI.directory).mockResolvedValue({people:[{nickname:"Physical",extension:"1983",active:false,physicalPhone:"Yealink"},{nickname:"Alice",extension:"1987",active:false}]});
+    render(<PhoneApp/>);await screen.findByLabelText("Ваш ник");
+    fireEvent.change(screen.getByLabelText("Ваш ник"),{target:{value:"Alice"}});
+    fireEvent.change(screen.getByLabelText("Выберите номер"),{target:{value:"1987"}});
+    fireEvent.click(screen.getByRole("button",{name:/Подключиться/}));
+    expect((await screen.findByRole("alert")).textContent).toContain("Этот номер назначен физическому телефону");
+    expect(phoneAPI.claim).toHaveBeenCalledWith("Alice","1987",false);
+  });
   it("refreshes browser presence while the phone page stays open",async()=>{
     vi.useFakeTimers();
     vi.mocked(phoneAPI.directory)

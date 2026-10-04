@@ -157,8 +157,12 @@ The Go admin's phonebook maps MAC addresses to configured SIP extensions for
 administrative tracking only. It does not change a handset account, Asterisk
 endpoint, or voice route. Initial rows are seeded from point-in-time PJSIP and
 neighbor observations; the UI labels their IP and observation date as history.
-Additional phones can be entered manually. Do not interpret those rows as live
-registration or automatic discovery.
+The admin phones page now lists only known devices without an assigned
+extension and lets an administrator assign a configured extension. Its manual
+add form is removed. New unregistered phones are not discovered automatically:
+the deployment has no verified read-only DHCP lease API or confirmed AMI
+contact reader. Do not interpret historical rows as live registration or
+automatic discovery.
 
 Do not enable a credential-bearing provisioning URL until handset model and
 firmware, certificate trust, stable approved source IP, and a constrained
@@ -320,8 +324,11 @@ React-страница `/phone/` использует Go API на том же HT
 
 Go хранит каталог в `/etc/voice-changer/webphone-directory.json` (schemaVersion
 1, mode `0600`, UID/GID `10001`). Там только ник и настроенный внутренний номер.
-На один номер разрешена одна браузерная сессия; физический телефон остаётся
-зарегистрированным. Go продлевает lease каждые 10 секунд, истёкший lease
+Браузер может занять только номер, не назначенный физическому аппарату. Это
+проверяется в актуальном phonebook при каждом claim; API отклоняет попытку
+занять аппаратный номер, даже если запрос отправлен напрямую. Для физического
+телефона и браузера используются разные внутренние номера. На одном разрешённом
+номере может быть одна браузерная сессия. Go продлевает lease каждые 10 секунд, истёкший lease
 отзывает динамические PJSIP endpoint/AOR/auth через ARI до освобождения номера.
 Временный пароль выдаётся только в ответе claim по HTTPS и находится в памяти
 страницы. Не копировать claim-ответы, пароли, SIP payload или аудио в логи и

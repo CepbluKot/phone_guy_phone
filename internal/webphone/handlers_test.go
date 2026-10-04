@@ -12,9 +12,7 @@ import (
 
 func TestDirectoryReturnsLivePhysicalAndBrowserPresence(t *testing.T) {
 	s, _, _ := testSessions(t)
-	handler, err := NewAPI(s, "https://voice.lan.awesomeio.ru", func() map[string]string {
-		return map[string]string{"1983": "Yealink"}
-	})
+	handler, err := NewAPI(s, "https://voice.lan.awesomeio.ru")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,6 +28,7 @@ func TestDirectoryReturnsLivePhysicalAndBrowserPresence(t *testing.T) {
 	if response.Code != http.StatusCreated {
 		t.Fatalf("claim status=%d", response.Code)
 	}
+	api.physicalPhones = func() map[string]string { return map[string]string{"1983": "Yealink"} }
 	response = httptest.NewRecorder()
 	api.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/phone/api/v1/directory", nil))
 	var body struct {
@@ -76,6 +75,32 @@ func TestClaimRequiresSameOriginAndReturnsSessionCredential(t *testing.T) {
 	}
 	if response.Header().Get("Cache-Control") != "no-store" {
 		t.Fatal("claim response is cacheable")
+	}
+}
+
+func TestClaimRejectsExtensionsAssignedToPhysicalPhones(t *testing.T) {
+	s, _, _ := testSessions(t)
+	api, err := NewAPI(s, "https://voice.lan.awesomeio.ru", func() map[string]string {
+		return map[string]string{"1983": "Yealink"}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, body := range []string{
+		`{"nickname":"Alice","extension":"1983"}`,
+		`{"nickname":"Alice","extension":"1983","createExtension":true}`,
+	} {
+		request := httptest.NewRequest(http.MethodPost, "/phone/api/v1/claim", strings.NewReader(body))
+		request.Header.Set("Origin", "https://voice.lan.awesomeio.ru")
+		request.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		api.ServeHTTP(response, request)
+		if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), `"error":"physical_phone_extension_reserved"`) {
+			t.Fatalf("physical extension claim status=%d body=%s", response.Code, response.Body.String())
+		}
+	}
+	if sessions := s.Status(); len(sessions) != 0 {
+		t.Fatalf("physical extension claim created sessions: %+v", sessions)
 	}
 }
 

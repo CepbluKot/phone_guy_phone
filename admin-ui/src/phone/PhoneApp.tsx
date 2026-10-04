@@ -6,6 +6,7 @@ import "./phone.css";
 
 const labels: Record<string, string> = {
   extension_busy: "Этот внутренний номер уже занят браузерным телефоном.",
+  physical_phone_extension_reserved: "Этот номер назначен физическому телефону. Подключите браузер на другой номер.",
   invalid_request: "Проверьте ник и внутренний номер.",
   session_not_found: "Сессия завершилась. Подключитесь снова.",
   phone_unavailable: "Телефонный сервис сейчас недоступен.",
@@ -44,6 +45,7 @@ export function PhoneApp() {
   const connected = registration === "registered";
   const callModalVisible = callStatus === "calling" || callStatus === "ringing" || callStatus === "connected";
   const targetOptions = useMemo(() => people.filter((person) => person.extension !== extension && (person.active || !!person.physicalPhone)), [people, extension]);
+  const browserRegistrationOptions = useMemo(() => people.filter((person) => !person.physicalPhone), [people]);
   const activePeer = people.find((person) => person.extension === peerExtension);
   const activePeerName = activePeer?.nickname || peerExtension || "Внутренний номер";
   const mediaDevices = navigator.mediaDevices as (MediaDevices & { selectAudioOutput?: () => Promise<MediaDeviceInfo> }) | undefined;
@@ -96,7 +98,8 @@ export function PhoneApp() {
   const refreshDirectory = useCallback(async () => {
     const result = await phoneAPI.directory();
     setPeople(result.people);
-    setExtension((current) => current || result.people[0]?.extension || "");
+    const browserOptions = result.people.filter((person) => !person.physicalPhone);
+    setExtension((current) => browserOptions.some((person) => person.extension === current) ? current : browserOptions[0]?.extension || "");
     setTarget((current) => current || result.people.find((person) => person.extension !== extension)?.extension || "");
   }, [extension]);
 
@@ -334,8 +337,8 @@ export function PhoneApp() {
             <form onSubmit={startSession} className="phone-form">
               <label>Ваш ник<input value={nickname} onChange={(event) => setNickname(event.target.value)} maxLength={48} autoComplete="nickname" required placeholder="phoneguy123" /></label>
               <label>Внутренний номер<select value={newExtensionMode ? "new" : "existing"} onChange={(event) => setNewExtensionMode(event.target.value === "new")}><option value="existing">Выбрать существующий</option><option value="new">Придумать новый</option></select></label>
-              {newExtensionMode ? <label>Новый номер<input aria-label="Новый внутренний номер" aria-describedby="new-extension-hint" type="text" inputMode="numeric" autoComplete="off" pattern="(?:[3-9][0-9]{2}|[3-9][0-9]{3})" minLength={3} maxLength={4} value={newExtension} onChange={(event) => setNewExtension(event.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="Например, 345" required /><span id="new-extension-hint" className="phone-number-hint">Можно придумать номер из трёх или четырёх цифр. Служебный номер 600 зарезервирован.</span></label> : <label>Выберите номер<select aria-label="Выберите номер" value={extension} onChange={(event) => setExtension(event.target.value)} required>{people.map((person) => <option key={person.extension} value={person.extension}>{person.extension}{person.nickname ? ` · ${person.nickname}` : " · свободен"}{person.active ? " · браузер занят" : ""}</option>)}</select></label>}
-              <button className="phone-primary-button" type="submit" disabled={busy || (newExtensionMode ? !/^(?:[3-9]\d{2}|[3-9]\d{3})$/.test(newExtension) || newExtension === "600" : !extension)}>{busy ? "Подключаем…" : "Подключиться"}<span aria-hidden="true">→</span></button>
+              {newExtensionMode ? <label>Новый номер<input aria-label="Новый внутренний номер" aria-describedby="new-extension-hint" type="text" inputMode="numeric" autoComplete="off" pattern="(?:[3-9][0-9]{2}|[3-9][0-9]{3})" minLength={3} maxLength={4} value={newExtension} onChange={(event) => setNewExtension(event.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="Например, 345" required /><span id="new-extension-hint" className="phone-number-hint">Можно придумать номер из трёх или четырёх цифр. Служебный номер 600 зарезервирован.</span></label> : <label>Выберите номер<select aria-label="Выберите номер" value={extension} onChange={(event) => setExtension(event.target.value)} required>{browserRegistrationOptions.length === 0 && <option value="">Нет доступных номеров для браузера</option>}{browserRegistrationOptions.map((person) => <option key={person.extension} value={person.extension}>{person.extension}{person.nickname ? ` · ${person.nickname}` : " · свободен"}{person.active ? " · браузер занят" : ""}</option>)}</select></label>}
+              <button className="phone-primary-button" type="submit" disabled={busy || (newExtensionMode ? !/^(?:[3-9]\d{2}|[3-9]\d{3})$/.test(newExtension) || newExtension === "600" : !extension || browserRegistrationOptions.length === 0)}>{busy ? "Подключаем…" : "Подключиться"}<span aria-hidden="true">→</span></button>
             </form>
             <p className="phone-helper">На одном внутреннем номере может быть один активный браузер. Физический аппарат продолжит работать.</p>
             </section>

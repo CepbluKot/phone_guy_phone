@@ -1,5 +1,35 @@
 # Browser-to-browser call acceptance
 
+## 2026-10-01 physical-number reservation and browser-call acceptance — media path passed; speech quality partial
+
+| Field | Result |
+| --- | --- |
+| Date/time and deployed release | 2026-10-01; Go update `20261001T182748Z` |
+| Browser registration choices | **Passed** — in the in-app phone page, the selector contained 2014, 444, 1987, 345, and 3454; assigned physical extensions 1983 and 1988 were absent. The call-target selector continued to list physical phones. |
+| Direct API protection | **Passed in tests** — Go regression tests reject existing-number and new-number claims for physical assignments without creating a session. A live claim was not attempted. |
+| Test registrations and admin view | **Passed** — two temporary in-app browser tabs registered on nonphysical extensions 3454 and 345. Both showed **Готов принимать звонки** and each other online. After a reload, admin profiles listed both active browser numbers with the Phone Guy profile. |
+| A-to-B call | **Passed** — 345 called 3454; the recipient showed **Вам звонят**, answering showed **Идёт разговор** on both tabs, and the caller-side hangup returned both pages to idle. |
+| B-to-A call | **Passed** — 3454 called 345; the recipient showed **Вам звонят**, answering showed **Идёт разговор** on both tabs, and the recipient-side hangup returned both pages to idle. |
+| RTP and RVC path | **Passed at transport/pipeline level** — Asterisk channel statistics showed increasing packet counters in both calls. The server logged nonzero input frames and nonzero RVC output blocks; live route config mapped both test extensions to Phone Guy. This confirms signal and processed frames moved through the route, not that speech sounded intelligible. |
+| Audible speech quality | **Not verified** — this run used two tabs in one in-app browser profile and no person spoke a known phrase for listening comparison. Microphone input contained signal, but the logs cannot distinguish speech from background noise. |
+| Teardown and cleanup | **Passed with a log caveat** — after each hangup both pages were idle; Asterisk ended at 0 active channels and 0 active calls. The temporary registrations were disconnected, the API returned an empty session list, and only the user's original tabs remained open. Two `ari_resource_not_owned` messages appeared around the tested teardown times; their cause is not isolated, despite clean final call/session state. |
+| Final result | Physical-number exclusion and both-direction browser call signaling, RTP flow, RVC frame flow, and hangup are verified live. Human-audible speech quality and the teardown log warning remain unverified/open. The deployed release is `20261001T182748Z`; this acceptance run made no application code or deployment changes. |
+
+## 2026-10-01 unassigned-phone admin page — live acceptance incomplete
+
+| Field | Result |
+| --- | --- |
+| Date/time and deployed release | 2026-10-01 17:23 UTC; release `20261001T170648Z` |
+| Admin phones page | **Passed** — production showed only the known physical phones without an extension; the current inventory has none. Manual add, assigned-phone list, and load cards were absent. |
+| Admin browser registration visibility | **Passed** — while test browsers were registered, profiles showed `авпап · 345` and `ыыва · 3454` as connected. |
+| Browser A / Browser B | Chrome `345` and in-app browser `3454`; both registrations reached **Готов принимать звонки** and showed each other online. |
+| A-to-B incoming modal / answer / two-way audio | **Failed before answer** — caller stayed at **Звоним**; the recipient stayed idle and showed no incoming modal. |
+| Microphone permission | Both browser origins reported microphone permission state `prompt`; it was not granted during this run. The call likely stalled before sending its SIP INVITE while WebRTC awaited microphone access; that browser-side wait was not instrumented, so this remains a likely cause rather than a confirmed root cause. |
+| Asterisk call state | **0 active channels, 0 calls processed** after the attempt; no call or media was established. |
+| B-to-A / hangup | Not attempted because A-to-B did not reach the recipient. No connected call existed to hang up. |
+| Cleanup | **Passed** — test pages were disconnected/reloaded; Go status returned `{"sessions":[]}` and Asterisk returned 0 active channels/calls. |
+| Final result | The admin UI is deployed and verified, but mandatory call acceptance remains **incomplete** until microphone access is allowed and both call directions, audio, and hangup are tested. |
+
 ## 2026-10-01 read-only Asterisk dashboard release `20261001T144903Z` — call gate failed
 
 **Registration and admin visibility passed; call acceptance failed.** The Go

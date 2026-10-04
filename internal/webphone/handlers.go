@@ -209,6 +209,10 @@ func (a *API) claim(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "invalid_request")
 		return
 	}
+	if a.physicalPhones != nil && a.physicalPhones()[request.Extension] != "" {
+		writeAPIError(w, http.StatusConflict, "physical_phone_extension_reserved")
+		return
+	}
 	var view SessionView
 	var credential TemporarySIPCredentials
 	var err error

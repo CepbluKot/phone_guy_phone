@@ -277,19 +277,6 @@ a:focus-visible {
 .observation-pill > span { width: 6px; height: 6px; border-radius: 50%; background: #94a3b8; }
 .observation-pill.observed { background: #eff6ff; color: #1d4ed8; }
 .observation-pill.observed > span { background: #3b82f6; }
-.compact-load { padding: 0 20px 19px; }
-.compact-load-heading { min-height: 70px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.compact-load-heading h2 { margin: 0; color: #273248; font-size: 13px; }
-.compact-load-heading .muted { margin-top: 4px; font-size: 11px; }
-.compact-load-heading .text-button { color: var(--pm-blue-hover); font-weight: 600; }
-.compact-load-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
-.compact-load-stat { min-height: 66px; padding: 12px 14px; display: flex; align-items: center; gap: 11px; background: #fbfcfe; border: 1px solid var(--pm-border); border-radius: 9px; }
-.compact-load-stat strong, .compact-load-stat small { display: block; }
-.compact-load-stat strong { color: #273248; font-size: 13px; }
-.compact-load-stat small { margin-top: 3px; color: var(--pm-text-muted); font-size: 10px; }
-.compact-load-stat .online-dot { margin: 0 2px; }
-.compact-load-stat .online-dot.offline { background: #94a3b8; box-shadow: 0 0 0 3px rgb(148 163 184 / .14); }
-.load-stat-icon { color: var(--pm-blue); font-size: 17px; }
 .metric-card { min-height: 145px; padding: 20px 22px; display: flex; flex-direction: column; align-items: flex-start; }
 .metric-card strong { margin-top: 12px; font-size: 25px; letter-spacing: -0.5px; color: #172033; }
 .metric-card > span { margin-top: 5px; color: #7f8a9c; font-size: 12px; }
@@ -297,12 +284,8 @@ a:focus-visible {
 .metrics-updated { text-align: right; margin-top: 14px; }
 .device-mac { margin-top: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
 .device-observation { margin-top: 4px; max-width: 320px; font-size: 11px; }
-.phone-add-panel { margin-top: 18px; padding-bottom: 22px; }
-.phone-add-form { display: grid; grid-template-columns: 1.1fr 1fr 0.7fr auto; gap: 13px; align-items: end; padding: 0 22px; }
-.phone-add-form label { display: grid; gap: 7px; color: #667388; font-size: 12px; }
-.phone-add-form input, .phone-add-form select, .table-scroll td input { min-width: 0; height: 38px; padding: 0 10px; border: 1px solid #dfe5ed; border-radius: 7px; color: #273348; background: #fff; }
-.phone-add-form .button { height: 38px; }
-.phone-add-panel > .field-error { margin: 14px 22px 0; }
+.assignment-notice { margin: 0; padding: 12px 22px; color: #08783d; font-weight: 800; border-bottom: 1px solid var(--pm-border); }
+.table-scroll td input { min-width: 0; height: 38px; padding: 0 10px; border: 1px solid #dfe5ed; border-radius: 7px; color: #273348; background: #fff; }
 .page-heading {
   display: flex;
   align-items: flex-end;
@@ -580,7 +563,6 @@ select {
 }
 
 @media (max-width: 850px) {
-  .phone-add-form { grid-template-columns: 1fr 1fr; }
   .sidebar-collapsed .sidebar { z-index: 2; }
   .sidebar-expanded .sidebar {
     z-index: 2;
@@ -596,10 +578,8 @@ select {
   }
   .metrics-grid { grid-template-columns: 1fr; }
   .inventory-table { min-width: 780px; }
-  .compact-load-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 580px) {
-  .phone-add-form { grid-template-columns: 1fr; }
   .topbar {
     height: 58px;
     padding: 0 13px;
@@ -780,8 +760,6 @@ td {
 }
 .row-actions select,
 select,
-.phone-add-form input,
-.phone-add-form select,
 .table-scroll td input,
 .login-card input {
   border-color: #cbd5e1;
@@ -795,15 +773,11 @@ select,
 }
 .row-actions select:hover,
 select:hover,
-.phone-add-form input:hover,
-.phone-add-form select:hover,
 .table-scroll td input:hover {
   border-color: #94a3b8;
 }
 .row-actions select:focus-visible,
 select:focus-visible,
-.phone-add-form input:focus-visible,
-.phone-add-form select:focus-visible,
 .table-scroll td input:focus-visible,
 .login-card input:focus-visible {
   border-color: var(--pm-blue);
@@ -907,9 +881,7 @@ select:focus-visible,
 .count-badge { box-shadow: 3px 3px 0 #064bff; }
 .panel, .login-card { color: #111; background: #fffef9; border: 3px solid #111; border-radius: 3px; box-shadow: 6px 6px 0 #111; }
 .panel-heading { background: #ffe600; border-bottom: 3px solid #111; }
-.panel-heading h2, .compact-load-heading h2 { color: #111; font-weight: 900; }
-.compact-load-stat { background: #fffef9; border: 2px solid #111; border-radius: 2px; }
-.compact-load-stat:nth-child(2n) { box-shadow: 3px 3px 0 #064bff; }
+.panel-heading h2 { color: #111; font-weight: 900; }
 .metric-card strong { color: #111; font-weight: 900; }
 thead { background: #064bff; }
 th { color: #fff; font-family: Arial, sans-serif; font-weight: 900; letter-spacing: .08em; }
@@ -918,7 +890,7 @@ tbody tr:hover { background: #eaf0ff; }
 td { color: #171717; }
 .phone-avatar { color: #111; background: #ffe600; border: 2px solid #111; border-radius: 2px; }
 .phone-number { color: #111; font-weight: 900; }
-.row-actions select, select, .phone-add-form input, .phone-add-form select, .table-scroll td input, .login-card input { color: #111; background: #fff; border: 2px solid #111; border-radius: 2px; box-shadow: 2px 2px 0 #c8c3b6; }
+.row-actions select, select, .table-scroll td input, .login-card input { color: #111; background: #fff; border: 2px solid #111; border-radius: 2px; box-shadow: 2px 2px 0 #c8c3b6; }
 .button { border: 2px solid #111; border-radius: 2px; font-weight: 900; }
 .button:disabled { opacity: 1; color: #555248; background: #dedacd; border-color: #555248; box-shadow: none; }
 .button.primary { color: #111; background: #ffe600; border-color: #111; box-shadow: 3px 3px 0 #111; }
@@ -940,7 +912,6 @@ td { color: #171717; }
 .observation-pill.offline { color: #8a2929; background: #fae8e5; }
 .observation-pill.offline > span { background: #d14343; }
 .inventory-empty-state { border: 2px dashed #111; border-radius: 2px; background: #fffbea; }
-.phone-add-form label { color: #111; font-weight: 800; }
 
 /* Keep profile controls readable when the admin content area gets narrow. */
 .voice-profile-table {
@@ -1087,24 +1058,6 @@ td { color: #171717; }
   }
 }
 
-/* Give the assigned-phone intro some breathing room before its column labels. */
-.existing-phones-panel > .panel-heading {
-  padding-bottom: 72px;
-}
-
-.phone-add-panel > .panel-heading {
-  padding-bottom: 52px;
-}
-
-@media (max-width: 580px) {
-  .existing-phones-panel > .panel-heading {
-    padding-bottom: 52px;
-  }
-
-  .phone-add-panel > .panel-heading {
-    padding-bottom: 40px;
-  }
-}
 @media (max-width: 850px) { .sidebar-expanded .sidebar { box-shadow: 6px 0 0 #ffe600; } }
 
 /* Mobile navigation and inventory cards. */
@@ -1226,9 +1179,6 @@ td { color: #171717; }
     padding-top: 9px;
     border-top: 1px solid #d4d0c4;
   }
-  .phone-add-form { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-  .phone-add-form input,
-  .phone-add-form select { width: 100%; min-width: 0; }
 }
 
 @media (max-width: 580px) {
@@ -1248,10 +1198,5 @@ td { color: #171717; }
   .panel-heading .button { flex: 0 0 auto; max-width: 45%; white-space: normal; }
   .inventory-panel .inventory-table tbody { padding: 10px; }
   .inventory-panel .inventory-table tbody tr { gap: 12px 9px; padding: 13px 10px; }
-  .phone-add-form { grid-template-columns: minmax(0, 1fr); padding: 0 14px; }
-  .phone-add-form .button { width: 100%; }
-  .compact-load { padding: 0 14px 14px; }
-  .compact-load-heading { align-items: flex-start; padding: 14px 0 8px; }
-  .compact-load-grid { grid-template-columns: minmax(0, 1fr); }
   .metrics-grid { grid-template-columns: minmax(0, 1fr); }
 }
