@@ -1,5 +1,16 @@
 # Browser-to-browser call acceptance
 
+## 2026-10-10 RVC recovery after call declined on answer — acceptance pending
+
+| Field | Result |
+| --- | --- |
+| Symptom | Owner reports the call rings, then fails with `Decline` when the callee answers. |
+| Live diagnosis | Four `voice-go` call attempts failed opening the RVC stream (`rvc_model_unavailable`). RVC `/healthz` returned `503 model_unavailable`; CUDA initialization logged error 804, with loaded NVIDIA module `580.173.02` but installed module/libraries `580.178.04`. |
+| Recovery | VM209 rebooted at 2026-10-10 11:50 UTC while Asterisk had 0 active channels. After boot, module `580.178.04` loaded, GTX 1050 Ti was visible, RVC returned `ready`, and Go/Asterisk were healthy. |
+| Physical call after recovery | **Pending** — the owner has not yet confirmed a repeat call, two-way audio, hangup, and cleared channels after the reboot. |
+| Browser-to-browser call | **Not run** — this operational recovery has not passed the repository's separate two-independent-browser acceptance gate. |
+| Final result | RVC service recovery is verified; end-to-end phone acceptance remains open. |
+
 ## 2026-10-01 physical-number reservation and browser-call acceptance — media path passed; speech quality partial
 
 | Field | Result |

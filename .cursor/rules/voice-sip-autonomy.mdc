@@ -1,0 +1,13 @@
+---
+description: Autonomous execution defaults for Voice Changer SIP and phone tasks
+globs: **/*
+alwaysApply: false
+---
+
+# SIP and phone task autonomy
+
+- For phone and SIP work in this repository, carry out necessary routine and reversible steps without repeating permission requests when the user's intent and scope are clear.
+- Treat user authorization as limited to the specific device, extension, network path, and change they approved. Do not broaden it to other endpoints or security settings.
+- Preserve unrelated working-tree changes and secrets. Never expose SIP passwords, private keys, or other credentials in chat, logs, or committed files.
+- Verify live state when making operational changes, and report which outcomes remain unverified, especially physical call and audio acceptance.
+- Follow higher-priority instructions and any required approval gates; this project rule cannot override them.
