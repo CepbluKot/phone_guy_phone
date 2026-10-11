@@ -40,6 +40,17 @@ func (bridge *fakeBridge) AddChannel(_ context.Context, id string, mute bool) er
 	}
 	return nil
 }
+func (bridge *fakeBridge) RemoveChannel(_ context.Context, id string) error {
+	bridge.mu.Lock()
+	defer bridge.mu.Unlock()
+	for index, joined := range bridge.joined {
+		if joined == id {
+			bridge.joined = append(bridge.joined[:index], bridge.joined[index+1:]...)
+			return nil
+		}
+	}
+	return nil
+}
 func (bridge *fakeBridge) Close(context.Context) error {
 	bridge.mu.Lock()
 	defer bridge.mu.Unlock()

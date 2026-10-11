@@ -1,5 +1,18 @@
 # Browser-to-browser call acceptance
 
+## 2026-10-11 external-media recovery — deployed, phone call confirmed, browser gate pending
+
+| Field | Result |
+| --- | --- |
+| Release | Go-only release `20261011T115534Z`, image `voice-go:update-20261011T115534Z`; built from the active release source plus `internal/calls/session.go`. |
+| Source change | Recreate failed external-media WebSockets with five short backoff attempts. If processing cannot recover, keep the SIP legs connected and switch to direct phone audio; Phone Guy conversion stops for that call. |
+| Verification | `go test ./internal/calls -count=1`, `go build ./...`, and `git diff --check` passed. Docker image build passed; admin UI tests passed `26/26`. |
+| Deployment smoke | **Passed** — Go and Asterisk healthy; Asterisk container unchanged; Go API returned `{"status":"ok"}`; RVC `ready`, inactive, queue `0`; Asterisk had `0` active channels after rollout. |
+| Physical call | **Passed for the user's phone test** — live call `1234` → `2015` remained up for at least 3:44 while monitored. Four external-media listener recoveries followed `asterisk_media_backpressure` (12:02:45, 12:03:25, 12:04:00, 12:04:33 UTC), with no call teardown. At 3:44, channel stats showed 1234 with 1/10,866 received packets lost and none transmitted; 2015 with 17/10,851 received and 1/10,823 transmitted lost. Both rounded to 0% loss; RTT was 39/59 ms and jitter 0–5 ms. After hangup, Asterisk showed 0 active channels/calls. The user reported: “супер! починилось!” |
+| Browser-to-browser acceptance | **Not run** — only one in-app browser was available; the required second independent browser profile was unavailable. |
+| Network limitation | This protects the call from external-media/RVC path failures. It does not repair RTP packet loss or make a weak mobile radio link clean. |
+| Final result | The deployed change recovered the external-media listener four times without dropping the user's monitored phone call; the user confirmed the issue is fixed, and Asterisk cleared all channels after hangup. The repository's separate two-browser gate remains incomplete because a second independent browser profile was unavailable. This call did not reproduce severe RTP packet loss. |
+
 ## 2026-10-10 RVC recovery after call declined on answer — acceptance pending
 
 | Field | Result |

@@ -15,7 +15,9 @@ import (
 	"voice-changer/internal/rvc"
 )
 
-var ErrSessionClosed = errors.New("voice_call_session_closed")
+var (
+	ErrSessionClosed = errors.New("voice_call_session_closed")
+)
 
 type Session struct {
 	ari          ARI
@@ -30,6 +32,7 @@ type Session struct {
 	injection    Media
 	model        rvc.RVCStream
 	lease        ProcessingLease
+	streamID     string
 	ctx          context.Context
 	cancel       context.CancelFunc
 	done         chan struct{}
@@ -66,7 +69,7 @@ func StartPhoneGuy(ctx context.Context, ariClient ARI, main Bridge, sourceID, pe
 		return nil, err
 	}
 	sessionCtx, cancel := context.WithCancel(ctx)
-	session := &Session{ari: ariClient, main: main, sourceID: sourceID, peerID: peerID, lease: lease, ctx: sessionCtx, cancel: cancel, done: make(chan struct{})}
+	session := &Session{ari: ariClient, main: main, sourceID: sourceID, peerID: peerID, lease: lease, streamID: callID, ctx: sessionCtx, cancel: cancel, done: make(chan struct{})}
 	if err := session.setup(ctx, callID, rvcClient); err != nil {
 		cancel()
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
@@ -147,16 +150,25 @@ func (session *Session) run() {
 	results := make(chan error, 2)
 	go func() { results <- session.forwardInput() }()
 	go func() { results <- session.forwardOutput() }()
+	var runErr error
 	select {
 	case err := <-results:
-		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, ari.ErrMediaClosed) {
-			session.setError(err)
-		}
+		runErr = err
 	case <-session.ctx.Done():
 	}
+	externallyCanceled := session.ctx.Err() != nil
 	session.cancel()
-	if err := <-results; err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, ari.ErrMediaClosed) {
-		session.setError(err)
+	if err := <-results; runErr == nil {
+		runErr = err
+	}
+	if !externallyCanceled && runErr != nil && !errors.Is(runErr, context.Canceled) {
+		fallbackCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		if err := session.fallbackToPassthrough(fallbackCtx); err != nil {
+			session.setError(errors.Join(runErr, err))
+		} else {
+			log.Printf("voice processing stopped; call audio switched to direct passthrough: %v", runErr)
+		}
+		cancel()
 	}
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -167,7 +179,7 @@ func (session *Session) forwardInput() error {
 	var frames, nonzero uint64
 	var peak int16
 	for {
-		frame, err := session.listener.ReadFrame(session.ctx)
+		frame, err := session.readListenerFrame()
 		if err != nil {
 			return err
 		}
@@ -191,6 +203,24 @@ func (session *Session) forwardInput() error {
 		if err := session.model.SendFrame(session.ctx, frame); err != nil {
 			return err
 		}
+	}
+}
+
+func (session *Session) readListenerFrame() ([]byte, error) {
+	for {
+		frame, err := session.listener.ReadFrame(session.ctx)
+		if err == nil {
+			return frame, nil
+		}
+		if !recoverableMediaError(err) || session.ctx.Err() != nil {
+			return nil, err
+		}
+		replacement, recoverErr := session.recreateMedia(session.listener, "call-listen", true, session.private)
+		if recoverErr != nil {
+			return nil, errors.Join(err, fmt.Errorf("recreate listener media channel: %w", recoverErr))
+		}
+		session.listener = replacement
+		log.Printf("voice media listener recovered after transport error: %v", err)
 	}
 }
 
@@ -224,10 +254,114 @@ func (session *Session) forwardOutput() error {
 				// chan_websocket queues and times PCM frames itself. Delaying each
 				// write here makes the one-block RVC output queue drift behind live
 				// audio until it overflows and ends the call.
-				if err := session.injection.SendFrame(session.ctx, block[offset:offset+rvc.FrameBytes]); err != nil {
+				if err := session.sendInjectionFrame(block[offset : offset+rvc.FrameBytes]); err != nil {
 					return err
 				}
 			}
+		}
+	}
+}
+
+func (session *Session) sendInjectionFrame(frame []byte) error {
+	for {
+		err := session.injection.SendFrame(session.ctx, frame)
+		if err == nil {
+			return nil
+		}
+		if !recoverableMediaError(err) || session.ctx.Err() != nil {
+			return err
+		}
+		replacement, recoverErr := session.recreateMedia(session.injection, "call-output", false, session.main)
+		if recoverErr != nil {
+			return errors.Join(err, fmt.Errorf("recreate output media channel: %w", recoverErr))
+		}
+		session.injection = replacement
+		log.Printf("voice media output recovered after transport error: %v", err)
+		// Retry the current frame. If the old transport delivered it before the
+		// disconnect became visible, one duplicate 20 ms frame is preferable to
+		// terminating both phone legs.
+	}
+}
+
+func recoverableMediaError(err error) bool {
+	return errors.Is(err, ari.ErrEventDisconnected) ||
+		errors.Is(err, ari.ErrMediaClosed) ||
+		errors.Is(err, ari.ErrMediaHangup) ||
+		errors.Is(err, ari.ErrMediaBackpressure)
+}
+
+func (session *Session) recreateMedia(old Media, role string, receive bool, bridge Bridge) (Media, error) {
+	// Tear down the stale Asterisk channel once, then create a fresh external
+	// media channel with bounded backoff. A failed replacement falls through to
+	// direct phone audio in run(), leaving the SIP call intact.
+	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	if old != nil {
+		_ = old.Close(cleanupCtx)
+	}
+	cleanupCancel()
+
+	delays := [...]time.Duration{50 * time.Millisecond, 100 * time.Millisecond, 200 * time.Millisecond, 400 * time.Millisecond, 800 * time.Millisecond}
+	var lastErr error
+	for attempt, delay := range delays {
+		timer := time.NewTimer(delay)
+		select {
+		case <-timer.C:
+		case <-session.ctx.Done():
+			timer.Stop()
+			return nil, session.ctx.Err()
+		}
+		roleID := fmt.Sprintf("%s-%s-retry-%d", role, session.streamID, attempt+1)
+		media, err := session.ari.CreateMediaChannel(session.ctx, roleID, receive)
+		if err == nil {
+			err = bridge.AddChannel(session.ctx, media.ID(), false)
+			if err == nil {
+				return media, nil
+			}
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 3*time.Second)
+			_ = media.Close(cleanupCtx)
+			cleanupCancel()
+		}
+		lastErr = err
+		log.Printf("voice media recovery attempt %d/%d failed (%s): %v", attempt+1, len(delays), role, err)
+		if session.ctx.Err() != nil {
+			return nil, session.ctx.Err()
+		}
+	}
+	if lastErr == nil {
+		lastErr = ari.ErrEventDisconnected
+	}
+	return nil, lastErr
+}
+
+func (session *Session) fallbackToPassthrough(ctx context.Context) error {
+	session.stopProcessedPath(ctx)
+	remover, ok := session.private.(interface {
+		RemoveChannel(context.Context, string) error
+	})
+	if !ok {
+		return errors.New("private bridge does not support channel removal")
+	}
+	if err := remover.RemoveChannel(ctx, session.sourceID); err != nil {
+		return fmt.Errorf("remove source from processed-audio bridge: %w", err)
+	}
+	if err := session.main.AddChannel(ctx, session.sourceID, false); err != nil {
+		restoreCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		restoreErr := session.private.AddChannel(restoreCtx, session.sourceID, false)
+		cancel()
+		return errors.Join(fmt.Errorf("move source to direct-audio bridge: %w", err), restoreErr)
+	}
+	return nil
+}
+
+func (session *Session) stopProcessedPath(ctx context.Context) {
+	if session.injection != nil {
+		if err := session.injection.Close(ctx); err != nil {
+			log.Printf("voice fallback: close output media channel: %v", err)
+		}
+	}
+	if session.returnBridge != nil {
+		if err := session.returnBridge.Close(ctx); err != nil {
+			log.Printf("voice fallback: close return bridge: %v", err)
 		}
 	}
 }
