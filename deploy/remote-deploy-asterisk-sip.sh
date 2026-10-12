@@ -59,6 +59,8 @@ cp -a "$old_release" "$new_release"
 cp -a "$stage/conference/asterisk/." "$new_release/conference/asterisk/"
 install -o root -g root -m 0644 "$stage/deploy/compose.conference.yaml" "$new_release/deploy/compose.conference.yaml"
 install -o root -g root -m 0644 "$stage/deploy/update_pjsip_wss_transport.py" "$new_release/deploy/update_pjsip_wss_transport.py"
+install -o root -g root -m 0644 "$stage/deploy/sync_asterisk_pstn_runtime.py" "$new_release/deploy/sync_asterisk_pstn_runtime.py"
+install -o root -g root -m 0644 "$stage/deploy/sync_asterisk_extensions_runtime.py" "$new_release/deploy/sync_asterisk_extensions_runtime.py"
 install -o root -g root -m 0644 "$stage/deploy/firewall.sh" "$new_release/deploy/firewall.sh"
 install -o root -g root -m 0755 "$stage/deploy/rollback-asterisk-sip.sh" "$new_release/deploy/rollback-asterisk-sip.sh"
 
@@ -87,9 +89,25 @@ env_path.write_text(text)
 env_path.chmod(0o600)
 PY
 
+python3 "$new_release/deploy/sync_asterisk_pstn_runtime.py" \
+  "$new_release/runtime/asterisk" \
+  "$new_release/conference/asterisk/nateks-pstn.conf.template"
 python3 "$new_release/deploy/update_pjsip_wss_transport.py" \
   "$new_release/runtime/asterisk/pjsip.conf" \
   "$new_release/conference/asterisk/pjsip.conf.template"
+python3 "$new_release/deploy/sync_asterisk_extensions_runtime.py" \
+  "$new_release/runtime/asterisk/extensions.conf" \
+  "$new_release/conference/asterisk/extensions.conf" \
+  "$new_release/runtime/asterisk/nateks-pstn.conf"
+install -o root -g root -m 0644 \
+  "$new_release/conference/asterisk/sorcery.conf" \
+  "$new_release/runtime/asterisk/sorcery.conf"
+cp "$new_release/conference/asterisk/modules.conf" \
+  "$new_release/runtime/asterisk/modules.conf"
+chown --reference="$old_release/runtime/asterisk/modules.conf" \
+  "$new_release/runtime/asterisk/modules.conf"
+chmod --reference="$old_release/runtime/asterisk/modules.conf" \
+  "$new_release/runtime/asterisk/modules.conf"
 docker compose -p voice-conference -f "$new_release/deploy/compose.conference.yaml" \
   --env-file "$new_release/.env" config --quiet
 docker build -f "$new_release/conference/asterisk/Dockerfile" \
@@ -145,6 +163,19 @@ fi
 [[ "$app_ready" == 1 ]] || { echo "Go ARI app did not reconnect to Asterisk" >&2; exit 1; }
 channels=$(docker exec voice-conference-asterisk-1 asterisk -rx 'core show channels count')
 printf '%s\n' "$channels" | grep -Eq '0 active channels' || { echo "Unexpected active call after Asterisk restart" >&2; exit 1; }
+
+if grep -Fq 'exten => _7XXXXXXXXXX,1,' "$new_release/runtime/asterisk/extensions.conf"; then
+  docker exec voice-conference-asterisk-1 asterisk -rx 'module show like res_pjsip_endpoint_identifier_ip.so' \
+    | grep -Eq 'res_pjsip_endpoint_identifier_ip\.so.*Running'
+  docker exec voice-conference-asterisk-1 asterisk -rx 'pjsip show endpoint nateks-fxo' \
+    | grep -Eq 'Endpoint:[[:space:]]+nateks-fxo([/[:space:]]|$)'
+  docker exec voice-conference-asterisk-1 asterisk -rx 'pjsip show identify nateks-fxo-identify' \
+    | grep -Fq nateks-fxo
+  for pattern in _7XXXXXXXXXX _8XXXXXXXXXX; do
+    docker exec voice-conference-asterisk-1 asterisk -rx "dialplan show ${pattern}@phoneguy-sip" \
+      | grep -Fq 'nateks-fxo'
+  done
+fi
 
 live_changed=0
 trap - EXIT

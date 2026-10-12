@@ -65,6 +65,7 @@ RUN ./configure \
         --enable res_pjproject \
         --enable res_pjsip \
         --enable res_pjsip_authenticator_digest \
+        --enable res_pjsip_endpoint_identifier_ip \
         --enable res_pjsip_endpoint_identifier_user \
         --enable res_pjsip_nat \
         --enable res_pjsip_pubsub \

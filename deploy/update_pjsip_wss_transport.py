@@ -8,6 +8,9 @@ import sys
 from pathlib import Path
 
 
+PSTN_INCLUDE = "#include nateks-pstn.conf"
+
+
 def section_pattern(name: str) -> re.Pattern[str]:
     return re.compile(
         rf"(?ms)^\[{re.escape(name)}\](?:[ \t]*\([^)]*\))?[^\n]*\r?\n.*?(?=^\[|\Z)"
@@ -57,7 +60,12 @@ def replace_section(text: str, name: str, block: str) -> str:
     match = pattern.search(text)
     if match is None:
         return text.rstrip() + "\n\n" + block.rstrip() + "\n"
-    return text[: match.start()] + block.rstrip() + "\n" + text[match.end() :]
+    pieces = (
+        text[: match.start()].rstrip("\n"),
+        block.rstrip(),
+        text[match.end() :].lstrip("\n"),
+    )
+    return "\n\n".join(piece for piece in pieces if piece).rstrip() + "\n"
 
 
 def set_section_option(text: str, name: str, option: str, value: str | None) -> str:
@@ -77,18 +85,35 @@ def set_section_option(text: str, name: str, option: str, value: str | None) -> 
     return text[: match.start()] + updated + text[match.end() :]
 
 
+def ensure_pstn_include(text: str) -> str:
+    """Include the runtime-owned PSTN file exactly once without replacing it."""
+    count = sum(line.strip() == PSTN_INCLUDE for line in text.splitlines())
+    if count > 1:
+        raise ValueError("runtime PJSIP config has duplicate Nateks PSTN includes")
+    if count == 1:
+        return text
+    first_section = re.search(r"(?m)^[ \t]*\[", text)
+    if first_section is None:
+        return PSTN_INCLUDE + "\n" + text
+    return text[: first_section.start()] + PSTN_INCLUDE + "\n\n" + text[first_section.start() :]
+
+
 def update_runtime(runtime_path: Path, template_path: Path) -> None:
     current = runtime_path.read_text()
     template = template_path.read_text()
     updated = current
     for name in ("transport-wss", "transport-tls-internet"):
         updated = replace_section(updated, name, transport_section(template, name))
+    if section_pattern("global").search(updated) is None:
+        updated = updated.rstrip() + "\n\n[global]\ntype=global\n"
+    updated = set_section_option(updated, "global", "endpoint_identifier_order", "ip,username")
     updated = set_section_option(updated, "phone-endpoint", "symmetric_transport", None)
     updated = set_section_option(updated, "phone-endpoint", "media_encryption", "sdes")
     updated = set_section_option(updated, "phone-endpoint", "media_encryption_optimistic", None)
     for extension in ("1983", "1987", "1988", "2014"):
         updated = set_section_option(updated, extension, "media_encryption", None)
         updated = set_section_option(updated, extension, "media_encryption_optimistic", None)
+    updated = ensure_pstn_include(updated)
     if updated != current:
         runtime_path.write_text(updated)
 

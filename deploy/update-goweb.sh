@@ -13,7 +13,7 @@ if [[ "${DEPLOY_GOWEB_SKIP_CHECKS:-0}" != 1 ]]; then
   (cd admin-ui && npm test -- --run && npm run build)
   pytest_bin=${DEPLOY_GOWEB_PYTEST:-$(command -v pytest || true)}
   [[ -x "$pytest_bin" ]] || { echo "Set DEPLOY_GOWEB_PYTEST to the project test runner" >&2; exit 2; }
-  "$pytest_bin" -q tests/test_bootstrap_goweb.py tests/test_goweb_stage_rollback.py tests/test_rollback_goweb_production.py tests/test_legacy_deploy_owner_guard.py tests/test_browser_webrtc_config.py tests/test_public_phone_access.py
+  "$pytest_bin" -q tests/test_bootstrap_goweb.py tests/test_goweb_stage_rollback.py tests/test_rollback_goweb_production.py tests/test_legacy_deploy_owner_guard.py tests/test_browser_webrtc_config.py tests/test_public_phone_access.py tests/test_nateks_pstn_runtime.py tests/test_nateks_extensions_runtime.py
   git diff --check
 fi
 
@@ -21,7 +21,7 @@ stage="/tmp/voice-go-update-$stamp"
 ssh -o BatchMode=yes -o ConnectTimeout=8 "$target" "mkdir -m 0700 '$stage' && mkdir -m 0755 '$stage/conference' && mkdir -m 0755 '$stage/deploy'"
 rsync -a --delete Dockerfile.goweb go.mod go.sum cmd internal admin-ui web "$target:$stage/"
 rsync -a --delete conference/asterisk "$target:$stage/conference/"
-rsync -a --delete deploy/compose.goweb.yaml deploy/compose.conference.yaml deploy/Caddyfile.goweb deploy/rollback-goweb-production.sh deploy/update_pjsip_wss_transport.py deploy/configure-public-phone-auth.py deploy/phonebook.initial.json deploy/phonebook.example.json deploy/webphone-directory.initial.json deploy/webphone-directory.example.json "$target:$stage/deploy/"
+rsync -a --delete deploy/compose.goweb.yaml deploy/compose.conference.yaml deploy/Caddyfile.goweb deploy/rollback-goweb-production.sh deploy/update_pjsip_wss_transport.py deploy/sync_asterisk_pstn_runtime.py deploy/sync_asterisk_extensions_runtime.py deploy/configure-public-phone-auth.py deploy/phonebook.initial.json deploy/phonebook.example.json deploy/webphone-directory.initial.json deploy/webphone-directory.example.json "$target:$stage/deploy/"
 ssh -o BatchMode=yes -o ConnectTimeout=8 "$target" sudo bash -s -- "$stamp" "$stage" <<'REMOTE'
 set -euo pipefail
 stamp=$1; stage=$2
@@ -63,7 +63,11 @@ public_auth=/etc/voice-phone-auth/public-auth.json
 setpriv --reuid 10001 --regid 10001 --clear-groups test -r "$public_auth" || { echo "Go UID cannot read public phone auth file" >&2; exit 1; }
 install -d -m 0700 "$new_runtime/asterisk"
 cp -a "$old_runtime/asterisk/." "$new_runtime/asterisk/"
-cp "$release/conference/asterisk/extensions.conf" "$new_runtime/asterisk/extensions.conf"
+python3 "$release/deploy/sync_asterisk_pstn_runtime.py" \
+  "$new_runtime/asterisk" "$release/conference/asterisk/nateks-pstn.conf.template"
+python3 "$release/deploy/sync_asterisk_extensions_runtime.py" \
+  "$new_runtime/asterisk/extensions.conf" "$release/conference/asterisk/extensions.conf" \
+  "$new_runtime/asterisk/nateks-pstn.conf"
 cp "$release/conference/asterisk/sorcery.conf" "$new_runtime/asterisk/sorcery.conf"
 cp "$release/conference/asterisk/modules.conf" "$new_runtime/asterisk/modules.conf"
 python3 "$release/deploy/update_pjsip_wss_transport.py" \

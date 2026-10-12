@@ -31,6 +31,7 @@ assert_no_active_calls() {
 assert_no_active_calls
 
 iptables -D DOCKER-USER -i eth0 -p tcp --dport 5061 -j VOICE_SIP_INGRESS 2>/dev/null || true
+iptables -D DOCKER-USER -i eth0 -p udp --dport 5060 -j VOICE_SIP_INGRESS 2>/dev/null || true
 iptables -D DOCKER-USER -i eth0 -p udp --dport 10000:10019 -j VOICE_SIP_INGRESS 2>/dev/null || true
 iptables -F VOICE_SIP_INGRESS 2>/dev/null || true
 iptables -X VOICE_SIP_INGRESS 2>/dev/null || true

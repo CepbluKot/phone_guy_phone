@@ -14,6 +14,11 @@ type=transport
 protocol=udp
 bind=0.0.0.0:5060
 
+[global]
+type=global
+endpoint_identifier_order=username,ip
+user_agent=preserve-this
+
 [transport-wss]
 type=transport
 protocol=wss
@@ -90,6 +95,8 @@ max_contacts=1
     update_runtime(runtime, template)
 
     rendered = runtime.read_text()
+    assert "endpoint_identifier_order=ip,username" in rendered
+    assert "user_agent=preserve-this" in rendered
     assert rendered.count("[transport-tls-internet]") == 1
     assert "protocol=tls" in rendered
     assert "bind=0.0.0.0:5061" in rendered
@@ -106,3 +113,5 @@ max_contacts=1
     assert "password=do-not-change-1983-secret" in rendered
     assert "password=do-not-change-1988-secret" in rendered
     assert "contact=sip:1983@192.168.20.134:5062" in rendered
+    assert rendered.count("#include nateks-pstn.conf") == 1
+    assert rendered.startswith("#include nateks-pstn.conf\n\n[transport-udp]")

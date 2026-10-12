@@ -13,7 +13,7 @@ stage="/tmp/voice-sip-stage-$stamp"
 
 required=(
   conference/asterisk deploy/compose.conference.yaml
-  deploy/update_pjsip_wss_transport.py deploy/firewall.sh
+  deploy/update_pjsip_wss_transport.py deploy/sync_asterisk_pstn_runtime.py deploy/sync_asterisk_extensions_runtime.py deploy/firewall.sh
   deploy/remote-deploy-asterisk-sip.sh deploy/rollback-asterisk-sip.sh
 )
 for item in "${required[@]}"; do
@@ -30,6 +30,8 @@ if [[ "${DEPLOY_SIP_SKIP_CHECKS:-0}" != 1 ]]; then
   [[ -x "$pytest_bin" ]] || { echo "pytest executable not found; set PYTEST_BIN" >&2; exit 2; }
   "$pytest_bin" -q \
     tests/test_internet_sip_security.py \
+    tests/test_nateks_pstn_runtime.py \
+    tests/test_nateks_extensions_runtime.py \
     tests/test_sip_cert_bundle.py \
     tests/test_update_pjsip_transport.py \
     tests/test_browser_webrtc_config.py \
@@ -41,7 +43,7 @@ fi
 ssh -o BatchMode=yes -o ConnectTimeout=8 "$target" "mkdir -m 0700 '$stage'"
 rsync -a --relative \
   conference/asterisk deploy/compose.conference.yaml \
-  deploy/update_pjsip_wss_transport.py deploy/firewall.sh \
+  deploy/update_pjsip_wss_transport.py deploy/sync_asterisk_pstn_runtime.py deploy/sync_asterisk_extensions_runtime.py deploy/firewall.sh \
   deploy/remote-deploy-asterisk-sip.sh deploy/rollback-asterisk-sip.sh \
   "$target:$stage/"
 ssh -o BatchMode=yes -o ConnectTimeout=8 "$target" \

@@ -45,6 +45,7 @@ def test_goweb_update_replaces_existing_runtime_wss_transport(tmp_path):
 
     subprocess.run([sys.executable, str(helper), str(runtime), str(template)], check=True)
     updated = runtime.read_text()
+    assert "[global]\ntype=global\nendpoint_identifier_order=ip,username" in updated
     assert updated.count("[transport-wss]") == 1
     assert "[transport-wss]\ntype=transport\nprotocol=wss\nbind=0.0.0.0\nexternal_media_address=192.168.20.70\nlocal_net=172.19.0.0/16" in updated
     assert "symmetric_transport=yes" in updated

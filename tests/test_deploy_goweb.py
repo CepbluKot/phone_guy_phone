@@ -78,13 +78,20 @@ def test_production_caddy_keeps_call_page_and_moves_go_websocket_paths_to_go():
     assert "reverse_proxy 127.0.0.1:8097" not in caddy
 
 
-def test_production_cutover_clones_protected_asterisk_runtime_into_release():
+def test_production_cutover_clones_protected_asterisk_runtime_and_merges_only_nateks_context():
     source = SCRIPT.read_text()
 
     assert 'new_runtime="$release/runtime"' in source
     assert 'cp -a "$old_runtime/asterisk/$item" "$new_runtime/asterisk/"' in source
     assert 'cp -a "$old_runtime/asterisk/sounds" "$new_runtime/asterisk/"' in source
-    assert 'cp "$release/conference/asterisk/extensions.conf" "$new_runtime/asterisk/extensions.conf"' in source
+    assert 'sync_asterisk_extensions_runtime.py' in source
+    assert '"$new_runtime/asterisk/extensions.conf" "$release/conference/asterisk/extensions.conf" \\' in source
+    assert '"$new_runtime/asterisk/nateks-pstn.conf"' in source
+    assert 'cp "$release/conference/asterisk/extensions.conf" "$new_runtime/asterisk/extensions.conf"' not in source
+    assert 'cp "$release/conference/asterisk/modules.conf" "$new_runtime/asterisk/modules.conf"' in source
+    assert 'chown --reference="$old_runtime/asterisk/modules.conf" "$new_runtime/asterisk/modules.conf"' in source
+    assert "^(1234|1983|1987|1988|2014|2015|2016)$" in source
+    assert '&& ",$endpoints," == *,2015,*' in source
     assert '"$stamp" "$new_runtime" "$fixtures" "$stamp" "$new_runtime" "$fixtures"' in source
 
 

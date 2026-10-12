@@ -1,5 +1,6 @@
 [global]
 type=global
+endpoint_identifier_order=ip,username
 
 [transport-udp]
 type=transport

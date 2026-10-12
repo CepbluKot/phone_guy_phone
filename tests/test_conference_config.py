@@ -58,6 +58,7 @@ def test_module_allowlist_is_exact_and_contains_release_dependencies():
         "res_pjsip",
         "res_pjsip_transport_websocket",
         "res_pjsip_authenticator_digest",
+        "res_pjsip_endpoint_identifier_ip",
         "res_pjsip_endpoint_identifier_user",
         "res_pjsip_nat",
         "res_pjsip_pubsub",
@@ -138,14 +139,22 @@ def test_dialplan_profile_and_accounting_are_bounded_and_non_recording():
 
 def test_phone_routes_enter_go_with_trusted_endpoint_identity():
     extensions = read("extensions.conf")
+    phoneguy_sip = extensions.split("[phoneguy-sip]", 1)[1].split("[nateks-inbound]", 1)[0]
     assert "[phoneguy-sip]" in extensions
     assert "exten => 1999,1,Stasis(selfmonitor)" in extensions
     assert "Set(PHONEGUY_SOURCE=${CHANNEL(endpoint)})" in extensions
     assert "Stasis(voice-control,source=${PHONEGUY_SOURCE},peer=${EXTEN})" in extensions
     assert "Stasis(voice-control,source=${PHONEGUY_SOURCE},peer=conference)" in extensions
     assert "Stasis(voice-control,source=${PHONEGUY_SOURCE},peer=1983,mode=callback-1900)" in extensions
-    # Once the route is handed to Go, no endpoint may be dialed natively before policy runs.
-    assert not re.search(r"(?:^|\n)\s*(?:same\s*=>\s*n|exten\s*=>).*\bDial\(", extensions)
+    # PSTN is the only direct Dial exception; internal/user routes still enter Go first.
+    pstn = phoneguy_sip.split("; BEGIN NATEKS PSTN OUTBOUND", 1)[1].split(
+        "; END NATEKS PSTN OUTBOUND", 1
+    )[0]
+    assert pstn.count("Dial(PJSIP/701${NATEKS_NUMBER}@nateks-fxo,60)") == 2
+    without_pstn = phoneguy_sip.replace(
+        "; BEGIN NATEKS PSTN OUTBOUND" + pstn + "; END NATEKS PSTN OUTBOUND", ""
+    )
+    assert not re.search(r"(?:^|\n)\s*(?:same\s*=>\s*n|exten\s*=>).*\bDial\(", without_pstn)
 
 
 def test_legacy_recording_extensions_enter_go_then_retain_their_exact_loops():
@@ -202,11 +211,27 @@ def test_asterisk_image_builds_active_pjsip_and_audio_dependencies():
         "res_pjsip_registrar", "res_pjsip_session", "res_rtp_asterisk",
     ):
         assert f"--enable {module}" in dockerfile
-    assert "modules.conf rtp.conf stasis.conf" in dockerfile
+    assert "modules.conf rtp.conf sorcery.conf stasis.conf" in dockerfile
     assert "COPY pjsip.conf.template" in dockerfile
     pjsip = read("pjsip.conf.template")
     for endpoint in ("1983", "1987", "1988", "2014"):
         assert f"[{endpoint}](phone-endpoint)" in pjsip
+
+
+def test_pjsip_ip_identifier_is_built_loaded_healthchecked_and_sorcery_mapped():
+    dockerfile = read("Dockerfile")
+    modules = read("modules.conf")
+    healthcheck = read("healthcheck.sh")
+    sorcery = read("sorcery.conf")
+
+    assert "--enable res_pjsip_endpoint_identifier_ip" in dockerfile
+    assert "load => res_pjsip_endpoint_identifier_ip.so" in modules
+    assert "    res_pjsip_endpoint_identifier_ip \\" in healthcheck
+    assert "[res_pjsip_endpoint_identifier_ip]" in sorcery
+    assert "identify=config,pjsip.conf,criteria=type=identify" in sorcery
+    pjsip = read("pjsip.conf.template")
+    global_options = pjsip.split("[global]", 1)[1].split("\n[", 1)[0]
+    assert "endpoint_identifier_order=ip,username" in global_options
 
 
 def test_staging_compose_uses_distinct_loopback_ports_and_ari_app():

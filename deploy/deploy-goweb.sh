@@ -102,7 +102,13 @@ PY
   printf '%s\n' "$channels" | grep -Eq '0 active channels' || { echo "Go preflight: active calls detected" >&2; return 1; }
   endpoints=$(docker exec voice-conference-asterisk-1 asterisk -rx 'pjsip show endpoints' \
     | awk '/^[[:space:]]*Endpoint:[[:space:]]+[0-9]+/ {print $2}' | sort -n | paste -sd, -)
-  [ "$endpoints" = 1983,1987,1988,2014 ] || { echo "Go preflight: endpoint inventory changed" >&2; return 1; }
+  unexpected_endpoints=$(tr ',' '\n' <<< "$endpoints" \
+    | grep -Ev '^(1234|1983|1987|1988|2014|2015|2016)$' || true)
+  [ -z "$unexpected_endpoints" ] \
+    && [[ ",$endpoints," == *,1234,* && ",$endpoints," == *,1987,* \
+      && ",$endpoints," == *,1988,* && ",$endpoints," == *,2014,* \
+      && ",$endpoints," == *,2015,* && ",$endpoints," == *,2016,* ]] \
+    || { echo "Go preflight: endpoint inventory changed" >&2; return 1; }
   docker exec voice-conference-asterisk-1 asterisk -rx 'module show like res_ari_events.so' \
     | grep -Eq '^res_ari_events\.so[[:space:]].*[[:space:]][[:digit:]]+[[:space:]]+Running[[:space:]]' \
     || { echo "Go preflight: ARI events module is unavailable" >&2; return 1; }
@@ -122,26 +128,33 @@ PY
   fixtures=$(sed -n 's/^CONFERENCE_FIXTURES=//p' "$old_env")
   [ -f "$old_runtime/asterisk/ari-password" ] && [ -d "$old_runtime/asterisk/sounds" ] \
     && [ -d "$fixtures" ] || { echo "Go preflight: ARI, sound, or fixture runtime is missing" >&2; return 1; }
-  for item in ari.conf ari-password http.conf pjsip.conf modules.conf; do
+  for item in ari.conf ari-password http.conf pjsip.conf extensions.conf modules.conf; do
     [ -f "$old_runtime/asterisk/$item" ] || { echo "Go preflight: Asterisk runtime file is missing: $item" >&2; return 1; }
   done
-  for item in Dockerfile.goweb go.mod go.sum cmd internal admin-ui web conference/asterisk deploy/compose.goweb.yaml deploy/compose.conference.yaml deploy/Caddyfile.goweb deploy/phonebook.initial.json deploy/phonebook.example.json deploy/webphone-directory.initial.json deploy/webphone-directory.example.json deploy/rollback-goweb-production.sh deploy/update_pjsip_wss_transport.py deploy/configure-public-phone-auth.py; do
+  for item in Dockerfile.goweb go.mod go.sum cmd internal admin-ui web conference/asterisk deploy/compose.goweb.yaml deploy/compose.conference.yaml deploy/Caddyfile.goweb deploy/phonebook.initial.json deploy/phonebook.example.json deploy/webphone-directory.initial.json deploy/webphone-directory.example.json deploy/rollback-goweb-production.sh deploy/update_pjsip_wss_transport.py deploy/sync_asterisk_pstn_runtime.py deploy/sync_asterisk_extensions_runtime.py deploy/configure-public-phone-auth.py; do
     [ -e "$release/$item" ] || { echo "Go release file is missing: $item" >&2; return 2; }
   done
 
   install -d -o root -g root -m 0700 "$new_runtime/asterisk"
-  for item in ari.conf ari-password http.conf pjsip.conf modules.conf; do
+  for item in ari.conf ari-password http.conf pjsip.conf extensions.conf modules.conf; do
     cp -a "$old_runtime/asterisk/$item" "$new_runtime/asterisk/"
   done
+  python3 "$release/deploy/sync_asterisk_pstn_runtime.py" \
+    "$new_runtime/asterisk" "$release/conference/asterisk/nateks-pstn.conf.template"
   python3 "$release/deploy/update_pjsip_wss_transport.py" \
     "$new_runtime/asterisk/pjsip.conf" "$release/conference/asterisk/pjsip.conf.template"
   cp -a "$old_runtime/asterisk/sounds" "$new_runtime/asterisk/"
-  cp "$release/conference/asterisk/extensions.conf" "$new_runtime/asterisk/extensions.conf"
+  python3 "$release/deploy/sync_asterisk_extensions_runtime.py" \
+    "$new_runtime/asterisk/extensions.conf" "$release/conference/asterisk/extensions.conf" \
+    "$new_runtime/asterisk/nateks-pstn.conf"
   cp "$release/conference/asterisk/sorcery.conf" "$new_runtime/asterisk/sorcery.conf"
+  cp "$release/conference/asterisk/modules.conf" "$new_runtime/asterisk/modules.conf"
   chown root:root "$new_runtime/asterisk/extensions.conf"
   chmod 0644 "$new_runtime/asterisk/extensions.conf"
   chown root:root "$new_runtime/asterisk/sorcery.conf"
   chmod 0644 "$new_runtime/asterisk/sorcery.conf"
+  chown --reference="$old_runtime/asterisk/modules.conf" "$new_runtime/asterisk/modules.conf"
+  chmod --reference="$old_runtime/asterisk/modules.conf" "$new_runtime/asterisk/modules.conf"
   install -d -o root -g root -m 0750 "$backup"
   chmod 0700 "$backup"
   printf 'VOICE_GO_IMAGE=voice-go:production-%s\nVOICE_ARI_RUNTIME=%s\nVOICE_CONFERENCE_FIXTURES=%s\nVOICE_PHONE_TURN_SECRET_HOST_FILE=/etc/voice-phone/turn-shared-secret\nVOICE_PHONE_PUBLIC_AUTH_HOST_FILE=/etc/voice-phone-auth/public-auth.json\nCONFERENCE_TAG=%s\nCONFERENCE_RUNTIME=%s\nCONFERENCE_FIXTURES=%s\n' \
@@ -299,7 +312,7 @@ if [ "${DEPLOY_GOWEB_SKIP_CHECKS:-0}" != 1 ]; then
   if [ -z "$pytest_bin" ] && [ -x .venv/bin/pytest ]; then pytest_bin=.venv/bin/pytest; fi
   if [ -z "$pytest_bin" ]; then pytest_bin=$(command -v pytest || true); fi
   [ -n "$pytest_bin" ] && [ -x "$pytest_bin" ] || { echo "Set DEPLOY_GOWEB_PYTEST to the project test runner" >&2; exit 2; }
-  "$pytest_bin" -q tests/test_bootstrap_goweb.py tests/test_goweb_stage_rollback.py tests/test_rollback_goweb_production.py tests/test_legacy_deploy_owner_guard.py tests/test_public_phone_access.py
+  "$pytest_bin" -q tests/test_bootstrap_goweb.py tests/test_goweb_stage_rollback.py tests/test_rollback_goweb_production.py tests/test_legacy_deploy_owner_guard.py tests/test_public_phone_access.py tests/test_nateks_pstn_runtime.py tests/test_nateks_extensions_runtime.py
   git diff --check
 fi
 
@@ -316,7 +329,7 @@ if ! rsync -a --delete conference/asterisk "$target:$remote_stage/conference/"; 
   ssh "$target" "rm -rf '$remote_stage'" || true
   exit 1
 fi
-if ! rsync -a --delete deploy/compose.goweb.yaml deploy/compose.conference.yaml deploy/Caddyfile.goweb deploy/rollback-goweb-production.sh deploy/update_pjsip_wss_transport.py deploy/configure-public-phone-auth.py deploy/phonebook.initial.json deploy/phonebook.example.json deploy/webphone-directory.initial.json deploy/webphone-directory.example.json \
+if ! rsync -a --delete deploy/compose.goweb.yaml deploy/compose.conference.yaml deploy/Caddyfile.goweb deploy/rollback-goweb-production.sh deploy/update_pjsip_wss_transport.py deploy/sync_asterisk_pstn_runtime.py deploy/sync_asterisk_extensions_runtime.py deploy/configure-public-phone-auth.py deploy/phonebook.initial.json deploy/phonebook.example.json deploy/webphone-directory.initial.json deploy/webphone-directory.example.json \
     "$target:$remote_stage/deploy/"; then
   ssh "$target" "rm -rf '$remote_stage'" || true
   exit 1

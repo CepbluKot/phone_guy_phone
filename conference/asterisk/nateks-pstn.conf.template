@@ -1,0 +1,9 @@
+; Nateks PSTN is intentionally disabled until the verified line and number
+; choices are entered with a private authenticated gateway credential.
+;
+; This file is included from the runtime PJSIP configuration. A release creates
+; it only when absent and preserves an existing runtime-owned file verbatim.
+; Do not store credentials in this source template. Add the endpoint only in
+; the protected runtime copy after the owner approves the secret at action time.
+;
+; PSTN remains disabled: there is no type=endpoint section in this template.

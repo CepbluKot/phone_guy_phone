@@ -28,6 +28,7 @@ for required_module in \
     res_pjsip \
     res_pjsip_transport_websocket \
     res_pjsip_authenticator_digest \
+    res_pjsip_endpoint_identifier_ip \
     res_pjsip_endpoint_identifier_user \
     res_pjsip_nat \
     res_pjsip_pubsub \

@@ -125,13 +125,21 @@ def test_certificate_reader_pins_vps_host_and_uses_an_exact_forced_key():
     assert "phone.awesomeio.ru.crt" in exporter
 
 
-def test_vm_firewall_scopes_new_sip_and_rtp_ports_without_changing_http_or_udp_5060():
+def test_vm_firewall_scopes_udp_sip_tls_and_rtp_to_trusted_private_sources():
     firewall = (ROOT / "deploy/firewall.sh").read_text()
 
     assert "iptables -N VOICE_INGRESS" in firewall
     assert "--dport 8080 -j VOICE_INGRESS" in firewall
     assert "iptables -N VOICE_SIP_INGRESS" in firewall
     assert "--dport 5061" in firewall
+    sip_udp_allow_sources = re.findall(
+        r"iptables -A VOICE_SIP_INGRESS -p udp --dport 5060 -s (\S+) -j ACCEPT",
+        firewall,
+    )
+    assert sip_udp_allow_sources == ["192.168.20.0/24"]
+    assert "-p udp --dport 5060 -s 10.19.87.0/24" not in firewall
+    assert "iptables -A VOICE_SIP_INGRESS -p udp --dport 5060 -j DROP" in firewall
+    assert "-i eth0 -p udp --dport 5060 -j VOICE_SIP_INGRESS" in firewall
     sip_tcp_allow_sources = re.findall(
         r"iptables -A VOICE_SIP_INGRESS -p tcp --dport 5061 -s (\S+) -j ACCEPT",
         firewall,
@@ -140,7 +148,6 @@ def test_vm_firewall_scopes_new_sip_and_rtp_ports_without_changing_http_or_udp_5
     assert "--dport 10000:10019" in firewall
     assert "-s 192.168.20.0/24" in firewall
     assert "-s 10.19.87.0/24" in firewall
-    assert "--dport 5060" not in firewall
     assert "--dport 8091" not in firewall
 
 
@@ -211,6 +218,7 @@ def test_asterisk_only_deployer_preserves_the_live_go_release_and_has_rollback()
     assert 'Endpoint:[[:space:]]+$extension' in remote
     assert "media_encryption.*sdes" not in remote
     assert "iptables -X VOICE_SIP_INGRESS" in rollback
+    assert "iptables -D DOCKER-USER -i eth0 -p udp --dport 5060 -j VOICE_SIP_INGRESS" in rollback
 
 
 def test_asterisk_rollback_refuses_to_change_firewall_or_restart_during_a_call():
