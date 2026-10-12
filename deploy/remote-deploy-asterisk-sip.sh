@@ -74,6 +74,7 @@ install -o root -g root -m 0644 "$stage/deploy/update_pjsip_wss_transport.py" "$
 install -o root -g root -m 0644 "$stage/deploy/sync_asterisk_pstn_runtime.py" "$new_release/deploy/sync_asterisk_pstn_runtime.py"
 install -o root -g root -m 0644 "$stage/deploy/sync_asterisk_extensions_runtime.py" "$new_release/deploy/sync_asterisk_extensions_runtime.py"
 install -o root -g root -m 0644 "$stage/deploy/configure_nateks_pstn_runtime.py" "$new_release/deploy/configure_nateks_pstn_runtime.py"
+install -o root -g root -m 0644 "$stage/deploy/verify_nateks_outbound_dialplan.py" "$new_release/deploy/verify_nateks_outbound_dialplan.py"
 install -o root -g root -m 0755 "$stage/deploy/activate-nateks-pstn.sh" "$new_release/deploy/activate-nateks-pstn.sh"
 install -o root -g root -m 0644 "$stage/deploy/firewall.sh" "$new_release/deploy/firewall.sh"
 install -o root -g root -m 0755 "$stage/deploy/rollback-asterisk-sip.sh" "$new_release/deploy/rollback-asterisk-sip.sh"
@@ -152,10 +153,10 @@ docker exec voice-conference-asterisk-1 asterisk -rx 'pjsip show transport trans
   | grep -q 'Transport:  transport-tls-internet'
 grep -Eq '^\[2015\]\(phone-endpoint\)$' "$new_release/runtime/asterisk/pjsip.conf" \
   || { echo "Selected inbound phone 2015 is missing from runtime PJSIP config" >&2; exit 1; }
+endpoints=$(docker exec voice-conference-asterisk-1 asterisk -rx 'pjsip show endpoints')
 for extension in 1987 1988 2014 2015 2016 1234; do
   if grep -Eq "^\[$extension\]\(phone-endpoint\)$" "$new_release/runtime/asterisk/pjsip.conf"; then
-    docker exec voice-conference-asterisk-1 asterisk -rx "pjsip show endpoint $extension" \
-      | grep -Eq "Endpoint:[[:space:]]+$extension(/|[[:space:]]|$)"
+    printf '%s\n' "$endpoints" | grep -Eq "Endpoint:[[:space:]]+$extension(/|[[:space:]]|$)"
   fi
 done
 openssl s_client -connect 192.168.20.70:5061 -servername phone.awesomeio.ru \
@@ -193,16 +194,15 @@ printf '%s\n' "$channels" | grep -Eq '0 active channels' || { echo "Unexpected a
 if grep -Fq 'exten => _7XXXXXXXXXX,1,' "$new_release/runtime/asterisk/extensions.conf"; then
   docker exec voice-conference-asterisk-1 asterisk -rx 'module show like res_pjsip_endpoint_identifier_ip.so' \
     | grep -Eq 'res_pjsip_endpoint_identifier_ip\.so.*Running'
-  docker exec voice-conference-asterisk-1 asterisk -rx 'pjsip show endpoint nateks-fxo' \
+  printf '%s\n' "$endpoints" \
     | grep -Eq 'Endpoint:[[:space:]]+nateks-fxo([/[:space:]]|$)'
   docker exec voice-conference-asterisk-1 asterisk -rx 'pjsip show aor 701' \
-    | grep -Fq 'Aor: 701'
+    | grep -Eq 'Aor:[[:space:]]+701([[:space:]]|$)'
   docker exec voice-conference-asterisk-1 asterisk -rx 'pjsip show identify nateks-fxo-identify' \
     | grep -Fq nateks-fxo
-  for pattern in _7XXXXXXXXXX _8XXXXXXXXXX; do
-    docker exec voice-conference-asterisk-1 asterisk -rx "dialplan show ${pattern}@phoneguy-sip" \
-      | grep -Fq 'nateks-fxo'
-  done
+  outbound_context=$(docker exec voice-conference-asterisk-1 asterisk -rx 'dialplan show phoneguy-sip')
+  printf '%s\n' "$outbound_context" \
+    | python3 "$new_release/deploy/verify_nateks_outbound_dialplan.py"
 fi
 
 live_changed=0

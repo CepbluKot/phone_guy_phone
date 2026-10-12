@@ -220,6 +220,7 @@ def test_inbound_context_has_one_fixed_phone_target_and_no_go_or_rvc_handoff():
 
 
 def test_every_sip_runtime_release_creates_and_mounts_the_preserved_include():
+    sip_entry = (ROOT / "deploy" / "deploy-asterisk-sip.sh").read_text()
     scripts = tuple(
         (ROOT / "deploy" / name).read_text()
         for name in (
@@ -234,6 +235,7 @@ def test_every_sip_runtime_release_creates_and_mounts_the_preserved_include():
     assert all("configure_nateks_pstn_runtime.py" in script for script in scripts)
 
     sip_remote = scripts[1]
+    assert "deploy/verify_nateks_outbound_dialplan.py" in sip_entry
     sip_remote_flat = " ".join(sip_remote.replace("\\\n", " ").split())
     assert '"$new_release/conference/asterisk/sorcery.conf"' in sip_remote
     assert '"$new_release/runtime/asterisk/sorcery.conf"' in sip_remote
@@ -247,15 +249,80 @@ def test_every_sip_runtime_release_creates_and_mounts_the_preserved_include():
         "sync_asterisk_extensions_runtime.py"
     )
     assert 'cp "$release/conference/asterisk/modules.conf" "$new_runtime/asterisk/modules.conf"' in update_goweb
-    assert "pjsip show endpoint nateks-fxo" in sip_remote
+    assert "pjsip show endpoints" in sip_remote
+    assert "pjsip show endpoint nateks-fxo" not in sip_remote
     assert "pjsip show aor 701" in sip_remote
     assert "pjsip show identify nateks-fxo-identify" in sip_remote
     assert "test -r /etc/asterisk/nateks-pstn.conf" in sip_remote
     assert "dialplan show nateks-inbound" in sip_remote
     assert "PRELIVE_CANDIDATE_REMOVED" in sip_remote
     assert "iptables -C DOCKER-USER -i eth0 -p udp --dport 5060 -j VOICE_SIP_INGRESS" in sip_remote
-    assert "for pattern in _7XXXXXXXXXX _8XXXXXXXXXX" in sip_remote
-    assert 'dialplan show ${pattern}@phoneguy-sip' in sip_remote
+    assert '"$stage/deploy/verify_nateks_outbound_dialplan.py"' in sip_remote
+    for activation in (
+        sip_remote,
+        (ROOT / "deploy" / "activate-nateks-pstn.sh").read_text(),
+    ):
+        assert "pjsip show endpoints" in activation
+        assert "pjsip show endpoint nateks-fxo" not in activation
+        assert "Endpoint:[[:space:]]+nateks-fxo" in activation
+        assert "grep -Eq 'Aor:[[:space:]]+701([[:space:]]|$)'" in activation
+        assert "grep -Fq 'Aor: 701'" not in activation
+        assert "dialplan show phoneguy-sip" in activation
+        assert "verify_nateks_outbound_dialplan.py" in activation
+        assert "dialplan show ${pattern}@phoneguy-sip" not in activation
 
     compose = (ROOT / "deploy" / "compose.conference.yaml").read_text()
     assert "nateks-pstn.conf:/etc/asterisk/nateks-pstn.conf:ro" in compose
+
+
+def test_nateks_activation_creates_the_initial_peer_and_replaces_only_an_existing_peer():
+    activation = (ROOT / "deploy" / "activate-nateks-pstn.sh").read_text()
+
+    assert "pjsip reload" not in activation
+    assert "module reload res_pjsip.so" not in activation
+    assert "docker compose -p voice-conference" in activation
+    assert "--force-recreate asterisk" in activation
+    assert activation.count("recreate_active_asterisk") >= 3
+    assert 'configure_args=("$runtime_dir")' in activation
+    assert "grep -Eq '^[[:space:]]*\\[nateks-fxo\\][[:space:]]*$' \"$runtime_include\"" in activation
+    assert "configure_args+=(--replace)" in activation
+    assert '"${configure_args[@]}"' in activation
+
+
+def test_outbound_dialplan_verifier_accepts_each_pattern_routed_to_nateks():
+    dialplan = """[ Context 'phoneguy-sip' created by 'pbx_config' ]
+  '_7XXXXXXXXXX' => 1. Set(NATEKS_NUMBER=8${EXTEN:1})
+                    2. Dial(PJSIP/701${NATEKS_NUMBER}@nateks-fxo,60)
+  '_8XXXXXXXXXX' => 1. Set(NATEKS_NUMBER=8${EXTEN:1})
+                    2. Dial(PJSIP/701${NATEKS_NUMBER}@nateks-fxo,60)
+  '_X.' => 1. Stasis(voice-control,peer=${EXTEN})
+"""
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "deploy" / "verify_nateks_outbound_dialplan.py")],
+        input=dialplan,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "NATEKS_OUTBOUND_DIALPLAN_OK" in result.stdout
+
+
+def test_outbound_dialplan_verifier_rejects_one_pattern_routed_elsewhere():
+    dialplan = """[ Context 'phoneguy-sip' created by 'pbx_config' ]
+  '_7XXXXXXXXXX' => 1. Set(NATEKS_NUMBER=8${EXTEN:1})
+                    2. Dial(PJSIP/2015,60)
+  '_8XXXXXXXXXX' => 1. Set(NATEKS_NUMBER=8${EXTEN:1})
+                    2. Dial(PJSIP/701${NATEKS_NUMBER}@nateks-fxo,60)
+"""
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "deploy" / "verify_nateks_outbound_dialplan.py")],
+        input=dialplan,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "_7XXXXXXXXXX" in result.stderr
