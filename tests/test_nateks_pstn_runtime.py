@@ -95,7 +95,7 @@ def test_sync_requires_a_safe_pjsip_reference(tmp_path):
 
 def test_secure_configurator_writes_a_valid_peer_without_echoing_the_secret(tmp_path):
     runtime, pjsip = make_runtime(tmp_path)
-    secret = "Abcdefghijklmnopqrstuvwxyz123456"
+    secret = "Ab1Cd2Ef3Gh4Ij5Kl6Mn"
 
     result = subprocess.run(
         [sys.executable, str(ROOT / "deploy/configure_nateks_pstn_runtime.py"), str(runtime)],
@@ -137,7 +137,7 @@ def test_secure_configurator_rejects_short_secret_without_changing_disabled_incl
     )
 
     assert result.returncode != 0
-    assert "32-64" in result.stderr
+    assert "exactly 20" in result.stderr
     assert "short" not in result.stdout + result.stderr
     assert gateway.read_text() == original
 
@@ -145,9 +145,9 @@ def test_secure_configurator_rejects_short_secret_without_changing_disabled_incl
 def test_secure_configurator_requires_explicit_replace_for_existing_peer(tmp_path):
     runtime, _ = make_runtime(tmp_path)
     gateway = runtime / "nateks-pstn.conf"
-    old_secret = "OldSecretNotForAnyLiveSystem123456"
+    old_secret = "OldA1b2C3d4E5f6G7h8I"
     gateway.write_text(f"[nateks-fxo]\ntype=endpoint\npassword={old_secret}\n")
-    new_secret = "NewSecretNotForAnyLiveSystem654321"
+    new_secret = "NewA1b2C3d4E5f6G7h8I"
 
     refused = subprocess.run(
         [sys.executable, str(ROOT / "deploy/configure_nateks_pstn_runtime.py"), str(runtime)],
@@ -191,7 +191,7 @@ def test_sync_dialplan_replace_failure_preserves_live_file(tmp_path):
         "auth=nateks-fxo-auth\naors=701\nidentify_by=ip,username\ndisallow=all\nallow=alaw\n"
         "direct_media=no\nmedia_encryption=no\nrtp_symmetric=yes\nforce_rport=yes\n"
         "rewrite_contact=yes\ndtmf_mode=rfc4733\n[nateks-fxo-auth]\ntype=auth\n"
-        "auth_type=userpass\nusername=nateks-fxo\npassword=Abcdefghijklmnopqrstuvwxyz123456\n"
+        "auth_type=userpass\nusername=nateks-fxo\npassword=Ab1Cd2Ef3Gh4Ij5Kl6Mn\n"
         "[701]\ntype=aor\nmax_contacts=1\nremove_existing=yes\n"
         "[nateks-fxo-identify]\ntype=identify\nendpoint=nateks-fxo\nmatch=192.168.20.236/32\n"
     )

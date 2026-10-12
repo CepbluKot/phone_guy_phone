@@ -150,9 +150,13 @@ done
 
 docker exec voice-conference-asterisk-1 asterisk -rx 'pjsip show transport transport-tls-internet' \
   | grep -q 'Transport:  transport-tls-internet'
-for extension in 1983 1988; do
-  docker exec voice-conference-asterisk-1 asterisk -rx "pjsip show endpoint $extension" \
-    | grep -Eq "Endpoint:[[:space:]]+$extension(/|[[:space:]]|$)"
+grep -Eq '^\[2015\]\(phone-endpoint\)$' "$new_release/runtime/asterisk/pjsip.conf" \
+  || { echo "Selected inbound phone 2015 is missing from runtime PJSIP config" >&2; exit 1; }
+for extension in 1987 1988 2014 2015 2016 1234; do
+  if grep -Eq "^\[$extension\]\(phone-endpoint\)$" "$new_release/runtime/asterisk/pjsip.conf"; then
+    docker exec voice-conference-asterisk-1 asterisk -rx "pjsip show endpoint $extension" \
+      | grep -Eq "Endpoint:[[:space:]]+$extension(/|[[:space:]]|$)"
+  fi
 done
 openssl s_client -connect 192.168.20.70:5061 -servername phone.awesomeio.ru \
   -verify_hostname phone.awesomeio.ru -verify_return_error </dev/null >/dev/null 2>&1

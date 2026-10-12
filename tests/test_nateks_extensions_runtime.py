@@ -29,7 +29,7 @@ dtmf_mode=rfc4733
 type=auth
 auth_type=userpass
 username=nateks-fxo
-password=0123456789abcdef0123456789abcdef
+password=0123456789abcdef0123
 
 [701]
 type=aor
@@ -148,7 +148,7 @@ def test_sync_rejects_a_weak_nateks_digest_secret(tmp_path):
     runtime.write_text("[phoneguy-sip]\nexten => _X.,1,Hangup()\n")
     pstn = tmp_path / "nateks-pstn.conf"
     make_active_pstn_config(pstn)
-    pstn.write_text(pstn.read_text().replace("0123456789abcdef0123456789abcdef", "short"))
+    pstn.write_text(pstn.read_text().replace("0123456789abcdef0123", "short"))
 
     try:
         sync_runtime(runtime, ROOT / "conference/asterisk/extensions.conf", pstn)

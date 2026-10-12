@@ -138,7 +138,7 @@ def configured_gateway(path: Path | None) -> bool:
     if len(auth) != 1 or auth[0].get("auth_type") != "userpass" or auth[0].get("username") != GATEWAY_ENDPOINT:
         raise ValueError("Nateks runtime digest authentication is incomplete")
     secret = auth[0].get("password", "")
-    if not re.fullmatch(r"[A-Za-z0-9]{32,64}", secret) or len(set(secret)) < 10:
+    if not re.fullmatch(r"[A-Za-z0-9]{20}", secret) or len(set(secret)) < 16:
         raise ValueError("Nateks runtime digest secret is missing or too weak")
 
     aor_ids = {"701"}
