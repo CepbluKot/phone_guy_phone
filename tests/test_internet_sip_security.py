@@ -132,6 +132,7 @@ def test_vm_firewall_scopes_udp_sip_tls_and_rtp_to_trusted_private_sources():
     assert "--dport 8080 -j VOICE_INGRESS" in firewall
     assert "iptables -N VOICE_SIP_INGRESS" in firewall
     assert "--dport 5061" in firewall
+    assert "iptables -A VOICE_SIP_INGRESS -p tcp --dport 5061 -s 192.168.20.12 -j ACCEPT" in firewall
     sip_udp_allow_sources = re.findall(
         r"iptables -A VOICE_SIP_INGRESS -p udp --dport 5060 -s (\S+) -j ACCEPT",
         firewall,
@@ -144,7 +145,7 @@ def test_vm_firewall_scopes_udp_sip_tls_and_rtp_to_trusted_private_sources():
         r"iptables -A VOICE_SIP_INGRESS -p tcp --dport 5061 -s (\S+) -j ACCEPT",
         firewall,
     )
-    assert sip_tcp_allow_sources == ["10.19.87.1"]
+    assert sip_tcp_allow_sources == ["192.168.20.12", "10.19.87.1"]
     assert "--dport 10000:10019" in firewall
     assert "-s 192.168.20.0/24" in firewall
     assert "-s 10.19.87.0/24" in firewall
