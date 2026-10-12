@@ -73,7 +73,7 @@ docker exec "$container" asterisk -rx 'dialplan reload' >/dev/null
 docker exec "$container" test -r /etc/asterisk/nateks-pstn.conf
 docker exec "$container" asterisk -rx 'pjsip show endpoint nateks-fxo' \
   | grep -Eq 'Endpoint:[[:space:]]+nateks-fxo([/[:space:]]|$)'
-docker exec "$container" asterisk -rx 'pjsip show aor 701' | grep -Fq 'Aor: 701'
+docker exec "$container" asterisk -rx 'pjsip show aor 701' | grep -Eq 'Aor:[[:space:]]+701([[:space:]]|$)'
 docker exec "$container" asterisk -rx 'pjsip show identify nateks-fxo-identify' | grep -Fq nateks-fxo
 docker exec "$container" asterisk -rx 'dialplan show nateks-inbound' | grep -Fq 'PJSIP/2015'
 docker exec "$container" asterisk -rx 'dialplan show nateks-inbound-predial' \

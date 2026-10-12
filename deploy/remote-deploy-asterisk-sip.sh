@@ -150,7 +150,7 @@ done
 
 docker exec voice-conference-asterisk-1 asterisk -rx 'pjsip show transport transport-tls-internet' \
   | grep -q 'Transport:  transport-tls-internet'
-for extension in 1983 1988; do
+for extension in 1988 2015; do
   docker exec voice-conference-asterisk-1 asterisk -rx "pjsip show endpoint $extension" \
     | grep -Eq "Endpoint:[[:space:]]+$extension(/|[[:space:]]|$)"
 done
@@ -192,7 +192,7 @@ if grep -Fq 'exten => _7XXXXXXXXXX,1,' "$new_release/runtime/asterisk/extensions
   docker exec voice-conference-asterisk-1 asterisk -rx 'pjsip show endpoint nateks-fxo' \
     | grep -Eq 'Endpoint:[[:space:]]+nateks-fxo([/[:space:]]|$)'
   docker exec voice-conference-asterisk-1 asterisk -rx 'pjsip show aor 701' \
-    | grep -Fq 'Aor: 701'
+    | grep -Eq 'Aor:[[:space:]]+701([[:space:]]|$)'
   docker exec voice-conference-asterisk-1 asterisk -rx 'pjsip show identify nateks-fxo-identify' \
     | grep -Fq nateks-fxo
   for pattern in _7XXXXXXXXXX _8XXXXXXXXXX; do
