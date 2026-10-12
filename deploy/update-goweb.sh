@@ -21,7 +21,7 @@ stage="/tmp/voice-go-update-$stamp"
 ssh -o BatchMode=yes -o ConnectTimeout=8 "$target" "mkdir -m 0700 '$stage' && mkdir -m 0755 '$stage/conference' && mkdir -m 0755 '$stage/deploy'"
 rsync -a --delete Dockerfile.goweb go.mod go.sum cmd internal admin-ui web "$target:$stage/"
 rsync -a --delete conference/asterisk "$target:$stage/conference/"
-rsync -a --delete deploy/compose.goweb.yaml deploy/compose.conference.yaml deploy/Caddyfile.goweb deploy/rollback-goweb-production.sh deploy/update_pjsip_wss_transport.py deploy/sync_asterisk_pstn_runtime.py deploy/sync_asterisk_extensions_runtime.py deploy/configure-public-phone-auth.py deploy/phonebook.initial.json deploy/phonebook.example.json deploy/webphone-directory.initial.json deploy/webphone-directory.example.json "$target:$stage/deploy/"
+rsync -a --delete deploy/compose.goweb.yaml deploy/compose.conference.yaml deploy/Caddyfile.goweb deploy/rollback-goweb-production.sh deploy/update_pjsip_wss_transport.py deploy/sync_asterisk_pstn_runtime.py deploy/sync_asterisk_extensions_runtime.py deploy/configure_nateks_pstn_runtime.py deploy/activate-nateks-pstn.sh deploy/configure-public-phone-auth.py deploy/phonebook.initial.json deploy/phonebook.example.json deploy/webphone-directory.initial.json deploy/webphone-directory.example.json "$target:$stage/deploy/"
 ssh -o BatchMode=yes -o ConnectTimeout=8 "$target" sudo bash -s -- "$stamp" "$stage" <<'REMOTE'
 set -euo pipefail
 stamp=$1; stage=$2

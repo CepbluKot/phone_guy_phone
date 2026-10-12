@@ -13,7 +13,7 @@ stage="/tmp/voice-sip-stage-$stamp"
 
 required=(
   conference/asterisk deploy/compose.conference.yaml
-  deploy/update_pjsip_wss_transport.py deploy/sync_asterisk_pstn_runtime.py deploy/sync_asterisk_extensions_runtime.py deploy/firewall.sh
+  deploy/update_pjsip_wss_transport.py deploy/sync_asterisk_pstn_runtime.py deploy/sync_asterisk_extensions_runtime.py deploy/configure_nateks_pstn_runtime.py deploy/activate-nateks-pstn.sh deploy/firewall.sh
   deploy/remote-deploy-asterisk-sip.sh deploy/rollback-asterisk-sip.sh
 )
 for item in "${required[@]}"; do
@@ -43,7 +43,7 @@ fi
 ssh -o BatchMode=yes -o ConnectTimeout=8 "$target" "mkdir -m 0700 '$stage'"
 rsync -a --relative \
   conference/asterisk deploy/compose.conference.yaml \
-  deploy/update_pjsip_wss_transport.py deploy/sync_asterisk_pstn_runtime.py deploy/sync_asterisk_extensions_runtime.py deploy/firewall.sh \
+  deploy/update_pjsip_wss_transport.py deploy/sync_asterisk_pstn_runtime.py deploy/sync_asterisk_extensions_runtime.py deploy/configure_nateks_pstn_runtime.py deploy/activate-nateks-pstn.sh deploy/firewall.sh \
   deploy/remote-deploy-asterisk-sip.sh deploy/rollback-asterisk-sip.sh \
   "$target:$stage/"
 ssh -o BatchMode=yes -o ConnectTimeout=8 "$target" \

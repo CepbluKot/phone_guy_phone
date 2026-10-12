@@ -61,6 +61,8 @@ install -o root -g root -m 0644 "$stage/deploy/compose.conference.yaml" "$new_re
 install -o root -g root -m 0644 "$stage/deploy/update_pjsip_wss_transport.py" "$new_release/deploy/update_pjsip_wss_transport.py"
 install -o root -g root -m 0644 "$stage/deploy/sync_asterisk_pstn_runtime.py" "$new_release/deploy/sync_asterisk_pstn_runtime.py"
 install -o root -g root -m 0644 "$stage/deploy/sync_asterisk_extensions_runtime.py" "$new_release/deploy/sync_asterisk_extensions_runtime.py"
+install -o root -g root -m 0644 "$stage/deploy/configure_nateks_pstn_runtime.py" "$new_release/deploy/configure_nateks_pstn_runtime.py"
+install -o root -g root -m 0755 "$stage/deploy/activate-nateks-pstn.sh" "$new_release/deploy/activate-nateks-pstn.sh"
 install -o root -g root -m 0644 "$stage/deploy/firewall.sh" "$new_release/deploy/firewall.sh"
 install -o root -g root -m 0755 "$stage/deploy/rollback-asterisk-sip.sh" "$new_release/deploy/rollback-asterisk-sip.sh"
 
@@ -116,6 +118,9 @@ docker build -f "$new_release/conference/asterisk/Dockerfile" \
 live_changed=1
 install -o root -g root -m 0755 "$new_release/deploy/firewall.sh" "$firewall_source"
 /bin/sh "$firewall_source"
+iptables -C DOCKER-USER -i eth0 -p udp --dport 5060 -j VOICE_SIP_INGRESS
+iptables -C VOICE_SIP_INGRESS -p udp --dport 5060 -s 192.168.20.0/24 -j ACCEPT
+iptables -C VOICE_SIP_INGRESS -p udp --dport 5060 -j DROP
 channels=$(docker exec voice-conference-asterisk-1 asterisk -rx 'core show channels count')
 printf '%s\n' "$channels" | grep -Eq '0 active channels' || { echo "A call started before Asterisk restart" >&2; exit 1; }
 docker compose -p voice-conference -f "$new_release/deploy/compose.conference.yaml" \
@@ -161,6 +166,11 @@ if [[ "$app_ready" != 1 ]]; then
   done
 fi
 [[ "$app_ready" == 1 ]] || { echo "Go ARI app did not reconnect to Asterisk" >&2; exit 1; }
+docker exec voice-conference-asterisk-1 test -r /etc/asterisk/nateks-pstn.conf
+docker exec voice-conference-asterisk-1 asterisk -rx 'dialplan show nateks-inbound' \
+  | grep -Fq 'PJSIP/2015'
+docker exec voice-conference-asterisk-1 asterisk -rx 'dialplan show nateks-inbound-predial' \
+  | grep -Fq 'CHANNEL(callgroup)=63'
 channels=$(docker exec voice-conference-asterisk-1 asterisk -rx 'core show channels count')
 printf '%s\n' "$channels" | grep -Eq '0 active channels' || { echo "Unexpected active call after Asterisk restart" >&2; exit 1; }
 
@@ -169,6 +179,8 @@ if grep -Fq 'exten => _7XXXXXXXXXX,1,' "$new_release/runtime/asterisk/extensions
     | grep -Eq 'res_pjsip_endpoint_identifier_ip\.so.*Running'
   docker exec voice-conference-asterisk-1 asterisk -rx 'pjsip show endpoint nateks-fxo' \
     | grep -Eq 'Endpoint:[[:space:]]+nateks-fxo([/[:space:]]|$)'
+  docker exec voice-conference-asterisk-1 asterisk -rx 'pjsip show aor 701' \
+    | grep -Fq 'Aor: 701'
   docker exec voice-conference-asterisk-1 asterisk -rx 'pjsip show identify nateks-fxo-identify' \
     | grep -Fq nateks-fxo
   for pattern in _7XXXXXXXXXX _8XXXXXXXXXX; do

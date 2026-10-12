@@ -4,12 +4,16 @@
 from __future__ import annotations
 
 import ipaddress
+import os
 import re
+import stat
 import sys
+import tempfile
 from pathlib import Path
 
 
 CONTEXT = "nateks-inbound"
+PREDIAL_CONTEXT = "nateks-inbound-predial"
 PHONE_CONTEXT = "phoneguy-sip"
 OUTBOUND_BEGIN = "; BEGIN NATEKS PSTN OUTBOUND"
 OUTBOUND_END = "; END NATEKS PSTN OUTBOUND"
@@ -22,11 +26,14 @@ def context_pattern(name: str) -> re.Pattern[str]:
     return re.compile(rf"(?ms)^\[{re.escape(name)}\][^\n]*\n.*?(?=^\[|\Z)")
 
 
-def context_from_template(template: str) -> str:
-    match = context_pattern(CONTEXT).search(template)
-    if match is None:
-        raise ValueError(f"{CONTEXT} context is missing from template")
-    return match.group(0).rstrip() + "\n"
+def managed_contexts_from_template(template: str) -> list[tuple[str, str]]:
+    contexts: list[tuple[str, str]] = []
+    for name in (CONTEXT, PREDIAL_CONTEXT):
+        match = context_pattern(name).search(template)
+        if match is None:
+            raise ValueError(f"{name} context is missing from template")
+        contexts.append((name, match.group(0).rstrip() + "\n"))
+    return contexts
 
 
 def outbound_block_from_template(template: str) -> str:
@@ -131,7 +138,7 @@ def configured_gateway(path: Path | None) -> bool:
     if len(auth) != 1 or auth[0].get("auth_type") != "userpass" or auth[0].get("username") != GATEWAY_ENDPOINT:
         raise ValueError("Nateks runtime digest authentication is incomplete")
     secret = auth[0].get("password", "")
-    if len(secret) < 24 or "__" in secret or secret.lower() in {"changeme", "password"}:
+    if not re.fullmatch(r"[A-Za-z0-9]{32,64}", secret) or len(set(secret)) < 10:
         raise ValueError("Nateks runtime digest secret is missing or too weak")
 
     aor_ids = {"701"}
@@ -174,15 +181,46 @@ def sync_runtime(runtime_path: Path, template_path: Path, pstn_runtime_path: Pat
     updated = current
     if configured_gateway(pstn_runtime_path):
         updated = merge_outbound_context(updated, outbound_block_from_template(template))
-    managed = context_from_template(template)
-    pattern = context_pattern(CONTEXT)
-    match = pattern.search(updated)
-    if match is None:
-        updated = updated.rstrip() + "\n\n" + managed
-    else:
-        updated = updated[: match.start()] + managed + updated[match.end() :]
+    for name, managed in managed_contexts_from_template(template):
+        pattern = context_pattern(name)
+        match = pattern.search(updated)
+        if match is None:
+            updated = updated.rstrip() + "\n\n" + managed
+        else:
+            section = match.group(0)
+            separator = len(section) - len(section.rstrip("\n"))
+            updated = (
+                updated[: match.start()]
+                + managed.rstrip()
+                + "\n" * max(separator, 1)
+                + updated[match.end() :]
+            )
     if updated != current:
-        runtime_path.write_text(updated)
+        current_stat = runtime_path.stat()
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{runtime_path.name}.", suffix=".tmp", dir=runtime_path.parent
+        )
+        temporary = Path(temporary_name)
+        try:
+            os.fchmod(descriptor, stat.S_IMODE(current_stat.st_mode))
+            temp_stat = os.fstat(descriptor)
+            if (temp_stat.st_uid, temp_stat.st_gid) != (current_stat.st_uid, current_stat.st_gid):
+                os.fchown(descriptor, current_stat.st_uid, current_stat.st_gid)
+            with os.fdopen(descriptor, "w") as output:
+                descriptor = -1
+                output.write(updated)
+                output.flush()
+                os.fsync(output.fileno())
+            os.replace(temporary, runtime_path)
+            directory_fd = os.open(runtime_path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+            temporary.unlink(missing_ok=True)
 
 
 def main() -> int:

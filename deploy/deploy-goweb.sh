@@ -131,7 +131,7 @@ PY
   for item in ari.conf ari-password http.conf pjsip.conf extensions.conf modules.conf; do
     [ -f "$old_runtime/asterisk/$item" ] || { echo "Go preflight: Asterisk runtime file is missing: $item" >&2; return 1; }
   done
-  for item in Dockerfile.goweb go.mod go.sum cmd internal admin-ui web conference/asterisk deploy/compose.goweb.yaml deploy/compose.conference.yaml deploy/Caddyfile.goweb deploy/phonebook.initial.json deploy/phonebook.example.json deploy/webphone-directory.initial.json deploy/webphone-directory.example.json deploy/rollback-goweb-production.sh deploy/update_pjsip_wss_transport.py deploy/sync_asterisk_pstn_runtime.py deploy/sync_asterisk_extensions_runtime.py deploy/configure-public-phone-auth.py; do
+  for item in Dockerfile.goweb go.mod go.sum cmd internal admin-ui web conference/asterisk deploy/compose.goweb.yaml deploy/compose.conference.yaml deploy/Caddyfile.goweb deploy/phonebook.initial.json deploy/phonebook.example.json deploy/webphone-directory.initial.json deploy/webphone-directory.example.json deploy/rollback-goweb-production.sh deploy/update_pjsip_wss_transport.py deploy/sync_asterisk_pstn_runtime.py deploy/sync_asterisk_extensions_runtime.py deploy/configure_nateks_pstn_runtime.py deploy/activate-nateks-pstn.sh deploy/configure-public-phone-auth.py; do
     [ -e "$release/$item" ] || { echo "Go release file is missing: $item" >&2; return 2; }
   done
 
@@ -329,7 +329,7 @@ if ! rsync -a --delete conference/asterisk "$target:$remote_stage/conference/"; 
   ssh "$target" "rm -rf '$remote_stage'" || true
   exit 1
 fi
-if ! rsync -a --delete deploy/compose.goweb.yaml deploy/compose.conference.yaml deploy/Caddyfile.goweb deploy/rollback-goweb-production.sh deploy/update_pjsip_wss_transport.py deploy/sync_asterisk_pstn_runtime.py deploy/sync_asterisk_extensions_runtime.py deploy/configure-public-phone-auth.py deploy/phonebook.initial.json deploy/phonebook.example.json deploy/webphone-directory.initial.json deploy/webphone-directory.example.json \
+if ! rsync -a --delete deploy/compose.goweb.yaml deploy/compose.conference.yaml deploy/Caddyfile.goweb deploy/rollback-goweb-production.sh deploy/update_pjsip_wss_transport.py deploy/sync_asterisk_pstn_runtime.py deploy/sync_asterisk_extensions_runtime.py deploy/configure_nateks_pstn_runtime.py deploy/activate-nateks-pstn.sh deploy/configure-public-phone-auth.py deploy/phonebook.initial.json deploy/phonebook.example.json deploy/webphone-directory.initial.json deploy/webphone-directory.example.json \
     "$target:$remote_stage/deploy/"; then
   ssh "$target" "rm -rf '$remote_stage'" || true
   exit 1

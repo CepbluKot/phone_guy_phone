@@ -4,11 +4,15 @@
 from __future__ import annotations
 
 import re
+import os
+import stat
 import sys
+import tempfile
 from pathlib import Path
 
 
 PSTN_INCLUDE = "#include nateks-pstn.conf"
+PSTN_PICKUP_GROUP = 63
 
 
 def section_pattern(name: str) -> re.Pattern[str]:
@@ -98,8 +102,62 @@ def ensure_pstn_include(text: str) -> str:
     return text[: first_section.start()] + PSTN_INCLUDE + "\n\n" + text[first_section.start() :]
 
 
+def _contains_pickup_group(value: str, reserved: int) -> bool:
+    for item in value.split(","):
+        match = re.fullmatch(r"\s*(\d+)(?:\s*-\s*(\d+))?\s*", item)
+        if match is None:
+            continue
+        start = int(match.group(1))
+        end = int(match.group(2) or match.group(1))
+        if start <= reserved <= end:
+            return True
+    return False
+
+
+def validate_reserved_pickup_group(text: str) -> None:
+    for line in text.splitlines():
+        active = re.split(r"[;#]", line, maxsplit=1)[0].strip()
+        if "=" not in active:
+            continue
+        option, value = (part.strip().lower() for part in active.split("=", 1))
+        if option in {"call_group", "pickup_group"} and _contains_pickup_group(
+            value, PSTN_PICKUP_GROUP
+        ):
+            raise ValueError("group 63 is reserved for Nateks calls to extension 2015")
+
+
+def _atomic_write(path: Path, contents: str, reference_stat: os.stat_result) -> None:
+    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    temporary = Path(temporary_name)
+    try:
+        os.fchmod(descriptor, stat.S_IMODE(reference_stat.st_mode))
+        temporary_stat = os.fstat(descriptor)
+        if (temporary_stat.st_uid, temporary_stat.st_gid) != (reference_stat.st_uid, reference_stat.st_gid):
+            os.fchown(descriptor, reference_stat.st_uid, reference_stat.st_gid)
+        with os.fdopen(descriptor, "w") as output:
+            descriptor = -1
+            output.write(contents)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, path)
+        directory_fd = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        temporary.unlink(missing_ok=True)
+
+
 def update_runtime(runtime_path: Path, template_path: Path) -> None:
+    if runtime_path.is_symlink() or not runtime_path.is_file():
+        raise ValueError(f"PJSIP runtime file is missing or unsafe: {runtime_path}")
+    if not template_path.is_file():
+        raise ValueError(f"PJSIP template is missing: {template_path}")
     current = runtime_path.read_text()
+    validate_reserved_pickup_group(current)
     template = template_path.read_text()
     updated = current
     for name in ("transport-wss", "transport-tls-internet"):
@@ -115,7 +173,7 @@ def update_runtime(runtime_path: Path, template_path: Path) -> None:
         updated = set_section_option(updated, extension, "media_encryption_optimistic", None)
     updated = ensure_pstn_include(updated)
     if updated != current:
-        runtime_path.write_text(updated)
+        _atomic_write(runtime_path, updated, runtime_path.stat())
 
 
 def main() -> int:

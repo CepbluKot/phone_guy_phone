@@ -63,7 +63,8 @@ exten => _X.,1,Stasis(voice-control,peer=${EXTEN})
     assert "exten => _X.,1,Stasis(voice-control,peer=${EXTEN})" in rendered
     assert "_7XXXXXXXXXX" in rendered and "_8XXXXXXXXXX" in rendered
     assert rendered.count("[nateks-inbound]") == 1
-    assert "Dial(PJSIP/2015,30)" in rendered
+    assert "Dial(PJSIP/2015,30,b(nateks-inbound-predial^s^1))" in rendered
+    assert "Set(CHANNEL(callgroup)=63)" in rendered
     assert "peer=2016,mode=callback-1900" in rendered
 
 
@@ -142,6 +143,21 @@ def test_sync_rejects_a_partially_configured_nateks_peer(tmp_path):
         raise AssertionError("incomplete Nateks peer activated outbound routing")
 
 
+def test_sync_rejects_a_weak_nateks_digest_secret(tmp_path):
+    runtime = tmp_path / "extensions.conf"
+    runtime.write_text("[phoneguy-sip]\nexten => _X.,1,Hangup()\n")
+    pstn = tmp_path / "nateks-pstn.conf"
+    make_active_pstn_config(pstn)
+    pstn.write_text(pstn.read_text().replace("0123456789abcdef0123456789abcdef", "short"))
+
+    try:
+        sync_runtime(runtime, ROOT / "conference/asterisk/extensions.conf", pstn)
+    except ValueError as error:
+        assert "secret is missing or too weak" in str(error)
+    else:
+        raise AssertionError("weak Nateks digest secret activated outbound routing")
+
+
 def test_sync_rejects_a_public_or_non_lan_identify_match(tmp_path):
     runtime = tmp_path / "extensions.conf"
     runtime.write_text("[phoneguy-sip]\nexten => _X.,1,Hangup()\n")
@@ -214,4 +230,5 @@ def test_sync_replaces_only_the_managed_nateks_context(tmp_path):
     rendered = runtime.read_text()
     assert "exten => 1900,1,NoOp(live route)" in rendered
     assert rendered.count("[nateks-inbound]") == 1
-    assert "Dial(PJSIP/2015,30)" in rendered
+    assert "Dial(PJSIP/2015,30,b(nateks-inbound-predial^s^1))" in rendered
+    assert "Set(CHANNEL(callgroup)=63)" in rendered

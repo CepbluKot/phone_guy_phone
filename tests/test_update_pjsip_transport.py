@@ -88,6 +88,22 @@ password=do-not-change-2014-secret
 [2014]
 type=aor
 max_contacts=1
+
+[2015](phone-endpoint)
+auth=2015-auth
+aors=2015
+call_group=4
+pickup_group=4
+
+[2015-auth]
+type=auth
+auth_type=userpass
+username=2015
+password=do-not-change-2015-secret
+
+[2015]
+type=aor
+max_contacts=1
 """
     )
     template = ROOT / "conference/asterisk/pjsip.conf.template"
@@ -113,5 +129,28 @@ max_contacts=1
     assert "password=do-not-change-1983-secret" in rendered
     assert "password=do-not-change-1988-secret" in rendered
     assert "contact=sip:1983@192.168.20.134:5062" in rendered
+    selected = rendered.split("[2015](phone-endpoint)", 1)[1].split("\n[", 1)[0]
+    assert "call_group=4" in selected
+    assert "pickup_group=4" in selected
     assert rendered.count("#include nateks-pstn.conf") == 1
     assert rendered.startswith("#include nateks-pstn.conf\n\n[transport-udp]")
+
+
+def test_runtime_rejects_reusing_reserved_pstn_pickup_group(tmp_path):
+    runtime = tmp_path / "pjsip.conf"
+    runtime.write_text(
+        "[global]\ntype=global\n"
+        "[phone-endpoint](!)\ntype=endpoint\n"
+        "[1983](phone-endpoint)\n"
+        "[1987](phone-endpoint)\n"
+        "[1988](phone-endpoint)\n"
+        "[2014](phone-endpoint)\n"
+        "[2015](phone-endpoint)\ncall_group=63 ; statically reserving 63 is unsafe\n"
+    )
+
+    try:
+        update_runtime(runtime, ROOT / "conference/asterisk/pjsip.conf.template")
+    except ValueError as error:
+        assert "group 63 is reserved for Nateks calls" in str(error)
+    else:
+        raise AssertionError("shared Nateks PSTN pickup group was accepted")
