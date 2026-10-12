@@ -154,3 +154,59 @@ def test_runtime_rejects_reusing_reserved_pstn_pickup_group(tmp_path):
         assert "group 63 is reserved for Nateks calls" in str(error)
     else:
         raise AssertionError("shared Nateks PSTN pickup group was accepted")
+
+
+def test_runtime_preserves_live_only_phones_when_template_endpoints_are_absent(tmp_path):
+    runtime = tmp_path / "pjsip.conf"
+    runtime.write_text(
+        """[global]
+type=global
+user_agent=preserve-me
+
+[phone-endpoint](!)
+type=endpoint
+context=phoneguy-sip
+media_encryption=sdes
+
+[2016](phone-endpoint)
+auth=2016-auth
+aors=2016
+media_encryption=dtls
+
+[2016-auth]
+type=auth
+username=2016
+password=preserve-secret
+
+[2015](phone-endpoint)
+auth=2015-auth
+aors=2015
+call_group=4
+pickup_group=4
+
+[2015-auth]
+type=auth
+username=2015
+password=preserve-secret
+
+[1234](phone-endpoint)
+auth=1234-auth
+aors=1234
+
+[1234-auth]
+type=auth
+username=1234
+password=preserve-secret
+"""
+    )
+
+    update_runtime(runtime, ROOT / "conference/asterisk/pjsip.conf.template")
+
+    rendered = runtime.read_text()
+    assert "user_agent=preserve-me" in rendered
+    assert "[2016](phone-endpoint)" in rendered
+    assert "media_encryption=dtls" in rendered
+    assert "[2015](phone-endpoint)" in rendered
+    assert "call_group=4" in rendered and "pickup_group=4" in rendered
+    assert "[1234](phone-endpoint)" in rendered
+    assert "[1983](phone-endpoint)" not in rendered

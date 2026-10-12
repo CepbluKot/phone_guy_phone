@@ -169,6 +169,8 @@ def update_runtime(runtime_path: Path, template_path: Path) -> None:
     updated = set_section_option(updated, "phone-endpoint", "media_encryption", "sdes")
     updated = set_section_option(updated, "phone-endpoint", "media_encryption_optimistic", None)
     for extension in ("1983", "1987", "1988", "2014"):
+        if section_pattern(extension).search(updated) is None:
+            continue
         updated = set_section_option(updated, extension, "media_encryption", None)
         updated = set_section_option(updated, extension, "media_encryption_optimistic", None)
     updated = ensure_pstn_include(updated)

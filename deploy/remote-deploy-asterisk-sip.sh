@@ -44,12 +44,24 @@ live_changed=0
 rollback_on_error() {
   status=$?
   trap - EXIT
-  if [[ "$status" != 0 && "$live_changed" == 1 ]]; then
-    echo "Asterisk SIP rollout failed; restoring previous release" >&2
-    bash "$stage/deploy/rollback-asterisk-sip.sh" "$stamp" || {
-      echo "ROLLBACK_FAILED stamp=$stamp" >&2
-      exit 70
-    }
+  if [[ "$status" != 0 ]]; then
+    if [[ "$live_changed" == 1 ]]; then
+      echo "Asterisk SIP rollout failed; restoring previous release" >&2
+      bash "$stage/deploy/rollback-asterisk-sip.sh" "$stamp" || {
+        echo "ROLLBACK_FAILED stamp=$stamp" >&2
+        exit 70
+      }
+    else
+      current_compose=$(docker inspect voice-conference-asterisk-1 \
+        --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' 2>/dev/null || true)
+      if [[ "$current_compose" != "$new_release/deploy/compose.conference.yaml" ]]; then
+        rm -rf -- "$new_release"
+        echo "PRELIVE_CANDIDATE_REMOVED stamp=$stamp" >&2
+      else
+        echo "PRELIVE_CANDIDATE_PRESERVED_ACTIVE stamp=$stamp" >&2
+      fi
+    fi
+    rm -rf -- "$stage"
   fi
   exit "$status"
 }
@@ -191,5 +203,6 @@ fi
 
 live_changed=0
 trap - EXIT
+rm -rf -- "$stage"
 printf 'ASTERISK_SIP_DEPLOY_COMPLETE stamp=%s previous=%s backup=%s edge=not-enabled\n' \
   "$stamp" "${old_release##*/}" "$backup"

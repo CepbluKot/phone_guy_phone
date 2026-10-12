@@ -252,6 +252,7 @@ def test_every_sip_runtime_release_creates_and_mounts_the_preserved_include():
     assert "pjsip show identify nateks-fxo-identify" in sip_remote
     assert "test -r /etc/asterisk/nateks-pstn.conf" in sip_remote
     assert "dialplan show nateks-inbound" in sip_remote
+    assert "PRELIVE_CANDIDATE_REMOVED" in sip_remote
     assert "iptables -C DOCKER-USER -i eth0 -p udp --dport 5060 -j VOICE_SIP_INGRESS" in sip_remote
     assert "for pattern in _7XXXXXXXXXX _8XXXXXXXXXX" in sip_remote
     assert 'dialplan show ${pattern}@phoneguy-sip' in sip_remote
