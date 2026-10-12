@@ -37,11 +37,11 @@ def test_public_transport_is_tls_with_expected_certificate_and_nat_addresses():
         "external_signaling_address=94.102.89.13",
         "external_signaling_port=5061",
         "external_media_address=94.102.89.13",
-        "local_net=192.168.20.0/24",
         "local_net=172.19.0.0/16",
     ):
         assert setting in tls
     assert "local_net=10.19.87.0/24" not in tls
+    assert "local_net=192.168.20.0/24" not in tls
 
 
 def test_static_endpoints_require_sdes_without_optimistic_fallback():

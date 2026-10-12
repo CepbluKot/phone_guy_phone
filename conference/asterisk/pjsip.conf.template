@@ -19,9 +19,9 @@ bind=0.0.0.0
 external_media_address=192.168.20.70
 local_net=172.19.0.0/16
 
-; Public physical phones use end-to-end SIP TLS through the VPS. The WireGuard
-; peer address is intentionally not local_net: external SDP must advertise the
-; public VPS address and return RTP must follow the existing NAT state.
+; Public physical phones use end-to-end SIP TLS through the VPS. The SIP
+; edge may arrive from a private LAN address after router SNAT. Keep only the
+; container subnet local so SDP advertises the public VPS RTP address.
 [transport-tls-internet]
 type=transport
 protocol=tls
@@ -34,7 +34,6 @@ external_signaling_address=94.102.89.13
 external_signaling_port=5061
 external_media_address=94.102.89.13
 symmetric_transport=yes
-local_net=192.168.20.0/24
 local_net=172.19.0.0/16
 
 [phone-endpoint](!)
