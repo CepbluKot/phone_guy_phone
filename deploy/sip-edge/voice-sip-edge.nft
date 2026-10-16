@@ -31,6 +31,7 @@ add chain inet voice_sip_edge input {
 # Block SIP/5060 on the public interface for both local and forwarded traffic.
 add rule inet voice_sip_edge input iifname "eth0" tcp dport 5060 counter drop
 add rule inet voice_sip_edge input iifname "eth0" udp dport 5060 counter drop
+add rule inet voice_sip_edge input iifname "eth0" tcp dport 5062 counter drop
 add rule inet voice_sip_edge forward iifname "eth0" tcp dport 5060 counter drop
 add rule inet voice_sip_edge forward iifname "eth0" udp dport 5060 counter drop
 
@@ -38,6 +39,12 @@ add rule inet voice_sip_edge forward iifname "eth0" udp dport 5060 counter drop
 add rule inet voice_sip_edge forward iifname "eth0" ip daddr 192.168.20.70 tcp dport 5061 ct state new tcp flags & (syn | ack) == syn update @sip_tls_rate { ip saddr limit rate over 20/minute burst 30 packets } counter drop
 add rule inet voice_sip_edge forward iifname "eth0" ip daddr 192.168.20.70 tcp dport 5061 ct state new tcp flags & (syn | ack) == syn add @sip_tls_connections { ip saddr ct count over 8 } counter drop
 add rule inet voice_sip_edge forward iifname "eth0" ip daddr 192.168.20.70 tcp dport 5061 counter accept
+
+# Legacy TLS 1.0 is isolated to Yealink extension 1234. Limit the public
+# compatibility listener separately; it is forwarded to VM TCP/5063.
+add rule inet voice_sip_edge forward iifname "eth0" ip daddr 192.168.20.70 tcp dport 5063 ct state new tcp flags & (syn | ack) == syn update @sip_tls_rate { ip saddr limit rate over 20/minute burst 30 packets } counter drop
+add rule inet voice_sip_edge forward iifname "eth0" ip daddr 192.168.20.70 tcp dport 5063 ct state new tcp flags & (syn | ack) == syn add @sip_tls_connections { ip saddr ct count over 8 } counter drop
+add rule inet voice_sip_edge forward iifname "eth0" ip daddr 192.168.20.70 tcp dport 5063 counter accept
 
 # Keep the existing 20-port media range useful while limiting one source and
 # the total public ingress volume. Media is SRTP; SIP/5060 is never forwarded.
@@ -56,6 +63,8 @@ add chain ip voice_sip_edge_nat postrouting {
 }
 
 add rule ip voice_sip_edge_nat prerouting iifname "eth0" ip daddr 94.102.89.13 tcp dport 5061 dnat to 192.168.20.70:5061
+add rule ip voice_sip_edge_nat prerouting iifname "eth0" ip daddr 94.102.89.13 tcp dport 5062 dnat to 192.168.20.70:5063
 add rule ip voice_sip_edge_nat prerouting iifname "eth0" ip daddr 94.102.89.13 udp dport 10000-10019 dnat to 192.168.20.70
 add rule ip voice_sip_edge_nat postrouting oifname "wg-vpn87" ip daddr 192.168.20.70 tcp dport 5061 snat to 10.19.87.1
+add rule ip voice_sip_edge_nat postrouting oifname "wg-vpn87" ip daddr 192.168.20.70 tcp dport 5063 snat to 10.19.87.1
 add rule ip voice_sip_edge_nat postrouting oifname "wg-vpn87" ip daddr 192.168.20.70 udp dport 10000-10019 snat to 10.19.87.1

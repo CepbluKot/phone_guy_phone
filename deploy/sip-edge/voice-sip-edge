@@ -11,18 +11,28 @@ remove_tables() {
   /usr/sbin/nft delete table ip voice_sip_edge_nat 2>/dev/null || true
 }
 
-preflight() {
+local_preflight() {
   test -s "$rules"
   /usr/bin/wg show wg-vpn87 >/dev/null
   /usr/sbin/ip route get "$vm_ip" | /usr/bin/grep -q 'dev wg-vpn87'
   /usr/sbin/nft --check --file "$rules"
+}
+
+remote_preflight() {
+  local_preflight
   /usr/bin/openssl s_client -connect "$vm_ip:5061" \
     -servername "$phone_domain" -verify_hostname "$phone_domain" \
     -verify_return_error </dev/null >/dev/null 2>&1
+  /usr/bin/openssl s_client -connect "$vm_ip:5063" \
+    -servername "$phone_domain" -verify_hostname "$phone_domain" \
+    -verify_return_error -tls1 -cipher 'AES128-SHA:@SECLEVEL=0' \
+    </dev/null >/dev/null 2>&1
 }
 
 apply() {
-  preflight
+  # Boot-time firewall restoration must not depend on Asterisk already having
+  # completed startup on a separate VM. The listener probes run at install time.
+  local_preflight
   remove_tables
   /usr/sbin/nft --file "$rules"
 }
@@ -38,8 +48,13 @@ case "${1:-}" in
     ;;
   enable)
     test "$#" -eq 1
-    preflight
-    /usr/bin/systemctl enable --now voice-sip-edge.service
+    remote_preflight
+    /usr/bin/systemctl enable voice-sip-edge.service
+    /usr/bin/systemctl restart voice-sip-edge.service
+    ;;
+  validate)
+    test "$#" -eq 1
+    remote_preflight
     ;;
   disable)
     test "$#" -eq 1
@@ -54,7 +69,7 @@ case "${1:-}" in
     /usr/sbin/nft list table ip voice_sip_edge_nat 2>/dev/null || true
     ;;
   *)
-    echo "usage: voice-sip-edge {apply|remove|enable|disable|status}" >&2
+    echo "usage: voice-sip-edge {apply|remove|enable|disable|status|validate}" >&2
     exit 2
     ;;
 esac
