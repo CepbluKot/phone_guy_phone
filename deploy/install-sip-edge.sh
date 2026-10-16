@@ -28,5 +28,8 @@ install -o root -g root -m 0644 "$repo/deploy/sip-edge/voice-sip-edge.nft" /etc/
 install -o root -g root -m 0755 "$repo/deploy/sip-edge/voice-sip-edge" /usr/local/sbin/voice-sip-edge
 install -o root -g root -m 0644 "$repo/deploy/voice-sip-edge.service" /etc/systemd/system/voice-sip-edge.service
 systemctl daemon-reload
+/usr/local/sbin/voice-sip-edge validate
+systemctl enable voice-sip-edge.service >/dev/null
+systemctl restart voice-sip-edge.service
 
-printf 'SIP_EDGE_INSTALLED backup=%s enabled=%s\n' "$backup" "$(systemctl is-enabled voice-sip-edge.service 2>/dev/null || printf disabled)"
+printf 'SIP_EDGE_INSTALLED backup=%s enabled=%s active=%s\n' "$backup" "$(systemctl is-enabled voice-sip-edge.service 2>/dev/null || printf disabled)" "$(systemctl is-active voice-sip-edge.service 2>/dev/null || printf inactive)"

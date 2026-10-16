@@ -13,6 +13,7 @@ from pathlib import Path
 
 PSTN_INCLUDE = "#include nateks-pstn.conf"
 PSTN_PICKUP_GROUP = 63
+EXTENSION_1234_LEGACY_TRANSPORT = "transport-tls-1234-internet-legacy"
 
 
 def section_pattern(name: str) -> re.Pattern[str]:
@@ -51,6 +52,22 @@ def transport_section(text: str, name: str = "transport-wss") -> str:
         )
         if "local_net=10.19.87.0/24" in block.splitlines():
             raise ValueError("Internet TLS transport must not treat WireGuard as local")
+    elif name == EXTENSION_1234_LEGACY_TRANSPORT:
+        required = (
+            "type=transport",
+            "protocol=tls",
+            "bind=0.0.0.0:5063",
+            "method=tlsv1",
+            "cipher=0x002f",
+            "cert_file=/run/voice-tls/current/fullchain.pem",
+            "priv_key_file=/run/voice-tls/current/key.pem",
+            "allow_reload=yes",
+            "external_signaling_address=94.102.89.13",
+            "external_signaling_port=5062",
+            "external_media_address=94.102.89.13",
+            "symmetric_transport=yes",
+            "local_net=172.19.0.0/16",
+        )
     else:
         raise ValueError(f"unsupported PJSIP transport section: {name}")
     for setting in required:
@@ -87,6 +104,121 @@ def set_section_option(text: str, name: str, option: str, value: str | None) -> 
         lines.append(f"{option}={value}")
     updated = "\n".join(lines) + "\n"
     return text[: match.start()] + updated + text[match.end() :]
+
+
+def iter_sections(text: str):
+    """Yield section matches with their base name and inherited template."""
+    pattern = re.compile(
+        r"(?ms)^\[(?P<name>[^\]\r\n]+)\](?P<suffix>[^\r\n]*)\r?\n.*?(?=^\[|\Z)"
+    )
+    for match in pattern.finditer(text):
+        raw_name = match.group("name").strip()
+        name = raw_name.split("(", 1)[0].strip()
+        inherited = re.search(r"\(([^)]*)\)", raw_name + match.group("suffix"))
+        yield match, name, inherited.group(1).strip() if inherited else None
+
+
+def active_option_values(block: str, option: str) -> list[str]:
+    values = []
+    for line in block.splitlines():
+        active = re.split(r"[;#]", line, maxsplit=1)[0].strip()
+        match = re.fullmatch(rf"{re.escape(option)}\s*=\s*(.*?)\s*", active, re.IGNORECASE)
+        if match:
+            values.append(match.group(1))
+    return values
+
+
+def replace_section_match(text: str, match: re.Match[str], replacement: str) -> str:
+    before = text[: match.start()].rstrip("\n")
+    after = text[match.end() :].lstrip("\n")
+    body = replacement.strip("\n")
+    if not body:
+        if before and after:
+            return f"{before}\n\n{after}"
+        return before or after
+    if before and after:
+        return f"{before}\n\n{body}\n\n{after}"
+    if before:
+        return f"{before}\n\n{body}\n"
+    if after:
+        return f"{body}\n\n{after}"
+    return f"{body}\n"
+
+
+def set_section_match_option(
+    text: str, match: re.Match[str], option: str, value: str
+) -> str:
+    block = match.group(0).rstrip("\n")
+    lines = [
+        line
+        for line in block.splitlines()
+        if not re.match(rf"^\s*{re.escape(option)}\s*=", line)
+    ]
+    lines.append(f"{option}={value}")
+    return replace_section_match(text, match, "\n".join(lines) + "\n")
+
+
+def migrate_extension_1234_transport(text: str, template: str) -> str:
+    """Keep extension 1234 on its isolated TLS/5063 compatibility transport."""
+    sections = list(iter_sections(text))
+    endpoints = [
+        (match, name, inherited)
+        for match, name, inherited in sections
+        if name == "1234"
+        and (
+            inherited == "phone-endpoint"
+            or "endpoint" in active_option_values(match.group(0), "type")
+        )
+    ]
+    if len(endpoints) > 1:
+        raise ValueError("runtime PJSIP config has duplicate endpoint 1234 sections")
+
+    if any(
+        name != "1234"
+        or (inherited != "phone-endpoint" and "endpoint" not in active_option_values(
+            match.group(0), "type"
+        ))
+        for match, name, inherited in sections
+        if EXTENSION_1234_LEGACY_TRANSPORT
+        in active_option_values(match.group(0), "transport")
+    ):
+        raise ValueError("legacy TLS/5063 transport is referenced by an unexpected PJSIP object")
+
+    if not endpoints:
+        return text
+
+    updated = set_section_match_option(
+        text, endpoints[0][0], "transport", EXTENSION_1234_LEGACY_TRANSPORT
+    )
+    legacy_sections = [
+        match
+        for match, name, _ in iter_sections(updated)
+        if name == EXTENSION_1234_LEGACY_TRANSPORT
+    ]
+    if len(legacy_sections) > 1:
+        raise ValueError("runtime PJSIP config has duplicate legacy TLS/5063 transports")
+    legacy_transport = transport_section(template, EXTENSION_1234_LEGACY_TRANSPORT)
+    if legacy_sections:
+        updated = replace_section_match(updated, legacy_sections[0], legacy_transport)
+    else:
+        updated = updated.rstrip() + "\n\n" + legacy_transport.rstrip() + "\n"
+
+    unexpected_references = [
+        name
+        for match, name, inherited in iter_sections(updated)
+        if EXTENSION_1234_LEGACY_TRANSPORT
+        in active_option_values(match.group(0), "transport")
+        and not (
+            name == "1234"
+            and (
+                inherited == "phone-endpoint"
+                or "endpoint" in active_option_values(match.group(0), "type")
+            )
+        )
+    ]
+    if unexpected_references:
+        raise ValueError("legacy TLS/5063 transport is referenced by an unexpected PJSIP object")
+    return updated
 
 
 def ensure_pstn_include(text: str) -> str:
@@ -162,6 +294,7 @@ def update_runtime(runtime_path: Path, template_path: Path) -> None:
     updated = current
     for name in ("transport-wss", "transport-tls-internet"):
         updated = replace_section(updated, name, transport_section(template, name))
+    updated = migrate_extension_1234_transport(updated, template)
     if section_pattern("global").search(updated) is None:
         updated = updated.rstrip() + "\n\n[global]\ntype=global\n"
     updated = set_section_option(updated, "global", "endpoint_identifier_order", "ip,username")

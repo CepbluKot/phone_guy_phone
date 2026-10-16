@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+trap 'status=$?; printf "SIP_ROLLOUT_FAILURE line=%s status=%s\n" "$LINENO" "$status" >&2' ERR
 [[ "$(id -u)" == 0 ]] || { echo "Run as root" >&2; exit 1; }
 [[ "$#" == 2 ]] || { echo "Usage: remote-deploy-asterisk-sip.sh STAMP STAGE" >&2; exit 2; }
 stamp=$1
@@ -134,6 +135,10 @@ install -o root -g root -m 0755 "$new_release/deploy/firewall.sh" "$firewall_sou
 iptables -C DOCKER-USER -i eth0 -p udp --dport 5060 -j VOICE_SIP_INGRESS
 iptables -C VOICE_SIP_INGRESS -p udp --dport 5060 -s 192.168.20.0/24 -j ACCEPT
 iptables -C VOICE_SIP_INGRESS -p udp --dport 5060 -j DROP
+iptables -C VOICE_SIP_INGRESS -p tcp --dport 5063 -s 192.168.20.12 -j ACCEPT
+iptables -C VOICE_SIP_INGRESS -p tcp --dport 5063 -s 10.19.87.1 -j ACCEPT
+iptables -C VOICE_SIP_INGRESS -p tcp --dport 5063 -j DROP
+iptables -C DOCKER-USER -i eth0 -p tcp --dport 5063 -j VOICE_SIP_INGRESS
 channels=$(docker exec voice-conference-asterisk-1 asterisk -rx 'core show channels count')
 printf '%s\n' "$channels" | grep -Eq '0 active channels' || { echo "A call started before Asterisk restart" >&2; exit 1; }
 docker compose -p voice-conference -f "$new_release/deploy/compose.conference.yaml" \
@@ -159,8 +164,18 @@ for extension in 1987 1988 2014 2015 2016 1234; do
     printf '%s\n' "$endpoints" | grep -Eq "Endpoint:[[:space:]]+$extension(/|[[:space:]]|$)"
   fi
 done
+docker exec voice-conference-asterisk-1 asterisk -rx 'pjsip show endpoint 1234' \
+  | grep -Eq 'transport[[:space:]]+:[[:space:]]+transport-tls-1234-internet-legacy([[:space:]]|$)'
+docker exec voice-conference-asterisk-1 asterisk -rx \
+  'pjsip show transport transport-tls-1234-internet-legacy' \
+  | grep -q 'Transport:  transport-tls-1234-internet-legacy'
+docker port voice-conference-asterisk-1 5063/tcp \
+  | grep -Fxq '192.168.20.70:5063'
 openssl s_client -connect 192.168.20.70:5061 -servername phone.awesomeio.ru \
   -verify_hostname phone.awesomeio.ru -verify_return_error </dev/null >/dev/null 2>&1
+openssl s_client -connect 192.168.20.70:5063 -servername phone.awesomeio.ru \
+  -verify_hostname phone.awesomeio.ru -verify_return_error \
+  -tls1 -cipher 'AES128-SHA:@SECLEVEL=0' </dev/null >/dev/null 2>&1
 curl --max-time 5 -fsS http://192.168.20.70:8080/healthz >/dev/null
 
 app_ready=0

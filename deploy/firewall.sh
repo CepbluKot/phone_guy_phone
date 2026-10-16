@@ -17,6 +17,10 @@ iptables -N VOICE_SIP_INGRESS 2>/dev/null || true
 iptables -F VOICE_SIP_INGRESS
 iptables -A VOICE_SIP_INGRESS -p udp --dport 5060 -s 192.168.20.0/24 -j ACCEPT
 iptables -A VOICE_SIP_INGRESS -p udp --dport 5060 -j DROP
+iptables -A VOICE_SIP_INGRESS -p tcp --dport 5063 -s 192.168.20.12 -j ACCEPT
+iptables -A VOICE_SIP_INGRESS -p tcp --dport 5063 -s 10.19.87.1 -j ACCEPT
+iptables -A VOICE_SIP_INGRESS -p tcp --dport 5063 -j DROP
+iptables -A VOICE_SIP_INGRESS -p tcp --dport 5061 -s 192.168.20.12 -j ACCEPT
 iptables -A VOICE_SIP_INGRESS -p tcp --dport 5061 -s 10.19.87.1 -j ACCEPT
 iptables -A VOICE_SIP_INGRESS -p tcp --dport 5061 -s 192.168.20.12/32 -j ACCEPT
 iptables -A VOICE_SIP_INGRESS -p tcp --dport 5061 -j DROP
@@ -26,6 +30,8 @@ iptables -A VOICE_SIP_INGRESS -p udp --dport 10000:10019 -j DROP
 iptables -A VOICE_SIP_INGRESS -j RETURN
 iptables -C DOCKER-USER -i eth0 -p tcp --dport 5061 -j VOICE_SIP_INGRESS 2>/dev/null || \
   iptables -I DOCKER-USER 1 -i eth0 -p tcp --dport 5061 -j VOICE_SIP_INGRESS
+iptables -C DOCKER-USER -i eth0 -p tcp --dport 5063 -j VOICE_SIP_INGRESS 2>/dev/null || \
+  iptables -I DOCKER-USER 1 -i eth0 -p tcp --dport 5063 -j VOICE_SIP_INGRESS
 iptables -C DOCKER-USER -i eth0 -p udp --dport 5060 -j VOICE_SIP_INGRESS 2>/dev/null || \
   iptables -I DOCKER-USER 1 -i eth0 -p udp --dport 5060 -j VOICE_SIP_INGRESS
 iptables -C DOCKER-USER -i eth0 -p udp --dport 10000:10019 -j VOICE_SIP_INGRESS 2>/dev/null || \

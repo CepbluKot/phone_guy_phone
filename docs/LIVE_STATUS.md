@@ -21,6 +21,26 @@ Asterisk имел 0 активных каналов и вызовов. Двус�
 не выполнен: в среде доступен только один профиль In-App Browser, отдельный
 Chrome отсутствует. Проверку вызовов оставить незавершённой.
 
+## Публичный Yealink 1234 через TLS 1.0/5062 — 2026-10-16
+
+На VPS `evita` включено перенаправление TCP `5062` → Asterisk VM209 TCP
+`5063` для старого Yealink 1234; основные телефоны остаются на TLS 1.2/TCP
+`5061`. Публичный TLS 1.0/AES128-SHA handshake прошёл, а `voice-sip-edge`
+остался enabled/active после реальной перезагрузки VPS (`10:49:51 UTC`).
+Первая reboot-проверка выявила гонку: unit требовал готового TLS listener на
+отдельной VM. Boot-time apply теперь восстанавливает nftables без проверки
+удалённого Asterisk; handshake проверяется установщиком.
+
+**Регистрация ещё не восстановлена:** Asterisk AOR `1234` без контакта, а
+Yealink `.133` показывает `Register Failed`. В его странице видны registrar
+`phone.awesomeio.ru:5061`, Outbound Proxy `phone.awesomeio.ru:5062`, TLS и
+Auth Name `1234`; browser accessibility snapshot не показывает значения User
+Name/Password. Пароль не менялся. Нужно повторно сохранить учётные данные на
+телефоне и проверить регистрацию, затем выполнить вызов и двусторонний звук.
+Сквозная приёмка по [BROWSER_CALL_ACCEPTANCE.md](BROWSER_CALL_ACCEPTANCE.md)
+остаётся незавершённой. Подробности — в
+[`YEALINK_1234_REGISTRATION_FIX.md`](YEALINK_1234_REGISTRATION_FIX.md).
+
 ## Отказ при ответе на вызов — восстановление RVC, 2026-10-10
 
 После исправления RTP на `1234` вызов доходил до звонка, но завершался при

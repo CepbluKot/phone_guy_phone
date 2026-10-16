@@ -192,11 +192,19 @@ password=preserve-secret
 [1234](phone-endpoint)
 auth=1234-auth
 aors=1234
+transport=transport-tls-1234-internet-legacy
+media_encryption=no
 
 [1234-auth]
 type=auth
 username=1234
 password=preserve-secret
+
+[transport-tls-1234-internet-legacy]
+type=transport
+protocol=tls
+bind=0.0.0.0:5063
+method=tlsv1
 """
     )
 
@@ -209,4 +217,10 @@ password=preserve-secret
     assert "[2015](phone-endpoint)" in rendered
     assert "call_group=4" in rendered and "pickup_group=4" in rendered
     assert "[1234](phone-endpoint)" in rendered
+    extension_1234 = rendered.split("[1234](phone-endpoint)", 1)[1].split("\n[", 1)[0]
+    assert "transport=transport-tls-1234-internet-legacy" in extension_1234
+    assert "media_encryption=no" in extension_1234
+    assert rendered.count("[transport-tls-1234-internet-legacy]") == 1
+    assert "bind=0.0.0.0:5063" in rendered
+    assert "method=tlsv1\n" in rendered
     assert "[1983](phone-endpoint)" not in rendered
