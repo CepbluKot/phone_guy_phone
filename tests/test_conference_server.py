@@ -4,7 +4,7 @@ import json
 import httpx
 import pytest
 
-from test_conference_session import setup_session, until
+from test_conference_session import setup_session
 
 
 class Browser:

@@ -129,7 +129,6 @@ def test_production_rollback_restores_snapshot_and_never_starts_legacy_http(tmp_
 
 
 def test_production_rollback_rejects_missing_or_invalid_snapshot_before_docker(tmp_path):
-    root = tmp_path / "remote"
     result, log = run_rollback(tmp_path)
 
     assert result.returncode != 0

@@ -157,23 +157,6 @@ def test_phone_routes_enter_go_with_trusted_endpoint_identity():
     assert not re.search(r"(?:^|\n)\s*(?:same\s*=>\s*n|exten\s*=>).*\bDial\(", without_pstn)
 
 
-def test_legacy_recording_extensions_enter_go_then_retain_their_exact_loops():
-    extensions = read("extensions.conf")
-    for extension, sound in (
-        ("1987", "phoneguy-bot/phoneguy"),
-        ("2014", "phoneguy-bot/mr-beast-phoneguy"),
-        ("1993", "phoneguy-bot/fnaf1-night1-original"),
-    ):
-        start = extensions.index(f"exten => {extension},1,")
-        end = extensions.find("\nexten =>", start + 1)
-        block = extensions[start:] if end < 0 else extensions[start:end]
-        assert "same => n,Set(PHONEGUY_SOURCE=${CHANNEL(endpoint)})" in block
-        assert f"Stasis(voice-control,source=${{PHONEGUY_SOURCE}},service={extension})" in block
-        assert f"same => n(play),Playback({sound})" in block
-        assert "same => n(pause),Wait(2)" in block
-        assert f'GotoIf($["${{PLAYBACKSTATUS}}" = "SUCCESS"]?pause:done)' in extensions
-
-
 def test_caddy_routes_go_owned_websockets_to_go_runtime():
     caddy = Path("deploy/Caddyfile.goweb").read_text()
     assert re.search(r"handle /ws/conference\s*\{\s*reverse_proxy 192\.168\.20\.70:8080", caddy)

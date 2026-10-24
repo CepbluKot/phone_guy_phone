@@ -23,7 +23,7 @@ from conference.media import FRAME_BYTES
 from conference.rvc import RvcStream
 
 from .ari import SelfMonitorAri
-from .service import EchoService, EchoSession
+from .service import EchoService
 
 
 def synthetic_speech(frames: int, seed: int = 7) -> list[bytes]:

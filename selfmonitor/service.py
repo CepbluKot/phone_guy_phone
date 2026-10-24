@@ -72,7 +72,7 @@ class EchoSession:
             await asyncio.gather(*self.tasks)
         except asyncio.CancelledError:
             raise
-        except Exception as error:
+        except Exception:
             import traceback
 
             traceback.print_exc()

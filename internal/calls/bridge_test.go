@@ -123,7 +123,6 @@ type fakeARI struct {
 	private      *fakeBridge
 	returnBridge *fakeBridge
 	media        []*fakeMedia
-	openError    error
 	playCalls    chan playbackRequest
 }
 

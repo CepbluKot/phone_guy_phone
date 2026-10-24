@@ -144,7 +144,7 @@ def test_vm_firewall_scopes_udp_sip_tls_and_rtp_to_trusted_private_sources():
         r"iptables -A VOICE_SIP_INGRESS -p tcp --dport 5061 -s (\S+) -j ACCEPT",
         firewall,
     )
-    assert sip_tcp_allow_sources == ["10.19.87.1"]
+    assert sip_tcp_allow_sources == ["192.168.20.12", "10.19.87.1"]
     assert "--dport 10000:10019" in firewall
     assert "-s 192.168.20.0/24" in firewall
     assert "-s 10.19.87.0/24" in firewall
@@ -185,10 +185,10 @@ def test_public_edge_install_has_a_backup_and_explicit_enable_gate():
     unit = (ROOT / "deploy/voice-sip-edge.service").read_text()
 
     assert installer.index("nft list ruleset") < installer.index("install -o root -g root -m 0755")
-    assert "systemctl enable" not in installer
+    assert installer.index("voice-sip-edge validate") < installer.index("systemctl enable voice-sip-edge.service")
     assert "case \"${1:-}\" in" in manager
     assert "enable)" in manager and "disable)" in manager
-    assert manager.index("preflight") < manager.index("systemctl enable --now")
+    assert manager.index("remote_preflight") < manager.index("systemctl enable voice-sip-edge.service")
     assert "voice_sip_edge_nat" in manager and "voice_sip_edge" in manager
     assert "ExecStart=/usr/local/sbin/voice-sip-edge apply" in unit
     assert "ExecStop=/usr/local/sbin/voice-sip-edge remove" in unit

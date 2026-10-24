@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -636,19 +635,5 @@ func (run *sessionRun) convertedFrame(ctx context.Context) ([]byte, error) {
 		return frame, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	}
-}
-
-func (run *sessionRun) checkReady() error {
-	select {
-	case <-run.ready:
-		run.mu.Lock()
-		defer run.mu.Unlock()
-		if run.errCode != "" {
-			return fmt.Errorf("%s", run.errCode)
-		}
-		return nil
-	case <-run.ctx.Done():
-		return ErrStopped
 	}
 }

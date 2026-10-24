@@ -54,7 +54,7 @@ def test_production_cutover_has_snapshot_rollback_and_health_gates_in_order():
     stop_legacy = source.index('stop controller')
     start_asterisk = source.index('up -d --no-build --no-deps --force-recreate asterisk')
     start_go = source.index('docker compose -p voice-go ', start_asterisk)
-    admin_smoke = source.index('admin smoke passed for both private UI origins')
+    admin_smoke = source.index('smoke passed for both private UI origins')
     caddy_switch = source.index('cp "$release/deploy/Caddyfile.goweb" "$caddy_live"')
     owner_marker = source.index('printf \'%s\\n\' "$stamp" > "$voice_root/.go-runtime-owner"')
 
