@@ -17,7 +17,7 @@
 - [x] B7. 2026-10-24: `app/`, корневые `Dockerfile`/`compose.yaml`/`requirements*`/`deploy.sh`/`deploy-conference.sh` — legacy, нужны ещё legacy-деплою; удалять нельзя, выносим в `legacy-voice-app`. `tests/` разносятся по компонентам при D-пунктах
 
 ## C. GitLab
-- [~] C1. Группа `phone-guy` не создана (API `403 Forbidden`). Нужно создать вручную в веб-интерфейсе и перенести 9 проектов (Transfer project); после переноса обновить `ci_config_path` (путь `…@CepbluKot/deploy:<SHA>` → `…@phone-guy/deploy:<SHA>`) и regex в `ci/gitlab/pipeline.yml`
+- [x] C1. 2026-10-24: группа `phone-guy` создана через веб-интерфейс (id 145661173, private); все 9 проектов перенесены в неё API-вызовом transfer (для `voice-web` и `asterisk-pbx` предварительно удалены репозитории образов в Container Registry — перенос с образами блокируется; образы пересоздаются CI). `ci_config_path` и шаблоны переведены на `phone-guy/deploy`
 - [x] C2. 2026-10-24: созданы 9 приватных проектов `CepbluKot/{voice-web,rvc-service,selfmonitor,frontend,asterisk-pbx,deploy,docs,experiments,legacy-voice-app}` (набор изменён по B6/B7: вместо `conference-service` — `asterisk-pbx` и `legacy-voice-app`)
 - [~] C3. `main` защищён по умолчанию в `deploy` (push: Maintainers); правило «merge только через MR» и обязательный зелёный пайплайн не включены
 
@@ -53,4 +53,4 @@
 - 2026-10-24 GitLab: группа `phone-guy` не создана (API 403) → 9 проектов в `CepbluKot/`.
 - 2026-10-24 раннеры: общих нет (`ci_quota_exceeded`). Воркстанция: `phone-guy-ci` (тесты, без привилегий) и `phone-guy-docker` (сборки, privileged — разрешено пользователем), systemd user unit `gitlab-runner-phone-guy.service`, свой `DOCKER_CONFIG` (в `~/.docker` протухшие креды). VM209: `phone-guy-deploy` (shell, пользователь `gitlab-runner`, без sudo, только protected refs, systemd `gitlab-runner-phone-guy.service`, MemoryMax 512M, CPUQuota 100%). После установки `voice-rvc.service` active, `/healthz` ready.
 - 2026-10-24 сеть воркстанции периодически сбрасывает TLS к gitlab.com, `registry.gitlab.com` и Go proxy: в шаблоны добавлены повторы; публикация образов в Container Registry по умолчанию выключена (`PG_PUSH_IMAGE=0`), т.к. `docker push` стабильно получает `EOF`. Сборка образа остаётся проверкой.
-- Открыто: создать группу `phone-guy` в веб-интерфейсе и перенести проекты; выбрать место для реестра образов (в рамках VM209?); правило merge только через MR; удаление «недостижимого» Go-кода (п.4 аудита); решение по автозапуску SIP edge (п.2); живая приёмка звонка; переписать `deploy-*.sh` и ссылки в `docs/*.md` под раздельные репозитории.
+- Открыто: выбрать место для реестра образов (в рамках VM209?); правило merge только через MR; удаление «недостижимого» Go-кода (п.4 аудита); решение по автозапуску SIP edge (п.2); живая приёмка звонка; переписать `deploy-*.sh` и ссылки в `docs/*.md` под раздельные репозитории.
