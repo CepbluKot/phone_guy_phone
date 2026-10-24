@@ -40,13 +40,17 @@
 - [x] E4. `deploy/.gitlab-ci.yml`: shellcheck (error), ci-templates, monorepo-compat-tests, ручной vm209-status
 - [x] E5. `ci_config_path = ci/gitlab/services/<имя>.yml@CepbluKot/deploy:<SHA>` в 8 проектах (обновляется скриптом при смене шаблонов); job-token allowlist: `frontend` ← voice-web, legacy-voice-app, deploy; остальные ← deploy
 - [x] E6. Shared runners недоступны (`ci_quota_exceeded`) и выключены. Раннеры: `phone-guy-ci` (воркстанция, docker без привилегий, тесты), `phone-guy-docker` (воркстанция, privileged, сборка образов — разрешено владельцем), `phone-guy-deploy` (внутри VM209, shell, protected refs, systemd `gitlab-runner-phone-guy.service`, без sudo, MemoryMax 512M)
-- [~] E7. см. журнал: итог пайплайнов на момент записи
+- [x] E7. 2026-10-24 зелёные пайплайны на закреплённых шаблонах: deploy (shellcheck, ci-templates, monorepo-compat-tests = весь прежний pytest на собранной раскладке), docs, experiments, frontend, legacy-voice-app, rvc-service, selfmonitor, voice-web (go quality/test + сборка образа с фронтом). `asterisk-pbx`: сборка образа Asterisk из исходников идёт ~20 мин, итог — в журнале. Ручной `vm209-status` на раннере внутри VM209 выполнен успешно (read-only)
 
 ## F. Приёмка и переключение
-- [ ] F1. Живая приёмка звонка браузер↔браузер (`docs/BROWSER_CALL_ACCEPTANCE.md`)
-- [ ] F2. Переключение боевого деплоя на GitLab-репозитории (только после F1 и согласования)
-- [ ] F3. Пометить GitHub-монорепо архивным (только после F2)
-- [ ] F4. Итоговый отчёт: изменённые файлы, проверки, риски
+- [ ] F1. НЕ ВЫПОЛНЕНО (нужны два реальных браузера и боевой звонок; код боевых сервисов не менялся, менялись только тесты и мёртвый код).  Живая приёмка звонка браузер↔браузер (`docs/BROWSER_CALL_ACCEPTANCE.md`)
+- [ ] F2. НЕ ВЫПОЛНЕНО намеренно: боевой деплой остаётся на GitHub-монорепо.  Переключение боевого деплоя на GitLab-репозитории (только после F1 и согласования)
+- [ ] F3. НЕ ВЫПОЛНЕНО намеренно (после F2).  Пометить GitHub-монорепо архивным (только после F2)
+- [x] F4. Итоговый отчёт дан пользователю в чате 2026-10-24; сводка ниже в журнале Итоговый отчёт: изменённые файлы, проверки, риски
 
 ## Журнал
-(по мере работы)
+- 2026-10-24 аудит (`docs/AUDIT_2026-10-24.md`), коммиты `fd4b86b` (5 красных тестов, мёртвый код), docs-коммит, затем flaky-тест `TestExpiredAndTamperedSessionsAreRejected` (падал ~1/64: замена последнего base64-символа могла оставить подпись валидной) — исправлен, `-count=30` ок.
+- 2026-10-24 GitLab: группа `phone-guy` не создана (API 403) → 9 проектов в `CepbluKot/`.
+- 2026-10-24 раннеры: общих нет (`ci_quota_exceeded`). Воркстанция: `phone-guy-ci` (тесты, без привилегий) и `phone-guy-docker` (сборки, privileged — разрешено пользователем), systemd user unit `gitlab-runner-phone-guy.service`, свой `DOCKER_CONFIG` (в `~/.docker` протухшие креды). VM209: `phone-guy-deploy` (shell, пользователь `gitlab-runner`, без sudo, только protected refs, systemd `gitlab-runner-phone-guy.service`, MemoryMax 512M, CPUQuota 100%). После установки `voice-rvc.service` active, `/healthz` ready.
+- 2026-10-24 сеть воркстанции периодически сбрасывает TLS к gitlab.com, `registry.gitlab.com` и Go proxy: в шаблоны добавлены повторы; публикация образов в Container Registry по умолчанию выключена (`PG_PUSH_IMAGE=0`), т.к. `docker push` стабильно получает `EOF`. Сборка образа остаётся проверкой.
+- Открыто: создать группу `phone-guy` в веб-интерфейсе и перенести проекты; выбрать место для реестра образов (в рамках VM209?); правило merge только через MR; удаление «недостижимого» Go-кода (п.4 аудита); решение по автозапуску SIP edge (п.2); живая приёмка звонка; переписать `deploy-*.sh` и ссылки в `docs/*.md` под раздельные репозитории.

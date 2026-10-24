@@ -137,13 +137,12 @@
 ## Execution State
 
 ```text
-Goal: аудит и оптимизация проекта (быстрее, меньше лишнего кода, меньше багов)
-Phase: not started
-Accepted decisions: аудит в отдельном ворктри от main; VM209 read-only до согласования; уйти от монорепо на 8 репозиториев (web/web-rt/admin-ui -> один frontend); GitLab-группа и CI по образцу benchmark-studio (include шаблонов из deploy по SHA); боевой деплой остаётся на GitHub до приёмки
-Open: имя группы GitLab, раннер для CI, перенос с историей (рекомендация: да), судьба conference-service/app/tests
-Completed, with evidence: —
-Next concrete action: создать ворктри, выполнить Фазу 0
-Affected paths: —
-Verification: —
-Blocker or decision needed: —
+Goal: аудит и оптимизация проекта (быстрее, меньше лишнего кода, меньше багов); уход от монорепо на GitLab с CI/CD
+Phase: implementation (аудит и разбиение выполнены; приёмка и переключение деплоя не выполнены)
+Accepted decisions: аудит в ворктри от 7114bc1; web/web-rt/admin-ui -> один frontend; 9 репозиториев (вместо conference-service — asterisk-pbx и legacy-voice-app); CI по образцу proactive-monitoring (шаблоны в deploy, ci_config_path с pin по SHA); тесты и сборки на воркстанции, деплой-раннер внутри VM209; боевой деплой остаётся на GitHub-монорепо до приёмки
+Completed, with evidence: см. 2026-10-24-CHECKLIST.md (пункты со статусом [x]) и AUDIT_2026-10-24.md
+Next concrete action: создать группу phone-guy в веб-интерфейсе GitLab и перенести проекты; затем живая приёмка звонка
+Affected paths: tests/, internal/conference, internal/calls (тест), selfmonitor/, docs/
+Verification: pytest 299 passed; go test -race ok; staticcheck чисто; пайплайны GitLab зелёные, кроме сборки asterisk-pbx (см. журнал)
+Blocker or decision needed: группа верхнего уровня (API 403); реестр образов (TLS к registry.gitlab.com); автозапуск SIP edge (п.2 аудита)
 ```
