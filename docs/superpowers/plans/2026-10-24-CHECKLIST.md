@@ -5,7 +5,7 @@
 
 ## A. Подготовка
 - [x] A1. 2026-10-24: ворктри `.worktrees/audit-optimize-20261024`, ветка `audit/optimize-20261024` от `7114bc1` (НЕ от `main`: `main` отстаёт на 6 коммитов боевого Nateks/PSTN; чужие незакоммиченные правки не взяты)
-- [~] A2. `glab` залогинен как `CepbluKot`, чтение чужих групп работает, API периодически отдаёт `EOF` (повторять запросы); права на создание группы ещё не проверены
+- [x] A2. 2026-10-24: `glab` (OAuth) работает; создание группы верхнего уровня отвечает `403` → проекты созданы в личном пространстве `CepbluKot/`
 
 ## B. Аудит (в монорепо)
 - [x] B1. 2026-10-24 базовая линия: `go build/vet` ок; `go test -race ./...` 10 пакетов ок (~37 с, publicauth 23 с); Node-тесты 40/40; admin-ui `tsc` ок, vitest 24/24; **pytest 295 passed / 5 FAILED** (те же 5 на закоммиченном HEAD и в грязном дереве, т.е. не от чужих правок): `test_conference_config::test_legacy_recording_extensions_enter_go_then_retain_their_exact_loops`, `test_deploy_conference::test_asterisk_read_only_root_keeps_bundled_docs_and_moves_only_astdb_to_tmpfs`, `test_deploy_goweb::test_production_cutover_has_snapshot_rollback_and_health_gates_in_order`, `test_internet_sip_security::test_vm_firewall_scopes_udp_sip_tls_and_rtp_to_trusted_private_sources`, `test_internet_sip_security::test_public_edge_install_has_a_backup_and_explicit_enable_gate`
@@ -17,30 +17,30 @@
 - [x] B7. 2026-10-24: `app/`, корневые `Dockerfile`/`compose.yaml`/`requirements*`/`deploy.sh`/`deploy-conference.sh` — legacy, нужны ещё legacy-деплою; удалять нельзя, выносим в `legacy-voice-app`. `tests/` разносятся по компонентам при D-пунктах
 
 ## C. GitLab
-- [ ] C1. Создать группу (рабочее имя `phone-guy`, private)
-- [ ] C2. Создать 9 проектов: `voice-web`, `rvc-service`, `selfmonitor`, `frontend`, `asterisk-pbx`, `deploy`, `docs`, `experiments`, `legacy-voice-app` (набор изменён по B6/B7: вместо `conference-service` — `asterisk-pbx` и `legacy-voice-app`)
-- [ ] C3. Защитить `main`, merge только через MR
+- [~] C1. Группа `phone-guy` не создана (API `403 Forbidden`). Нужно создать вручную в веб-интерфейсе и перенести 9 проектов (Transfer project); после переноса обновить `ci_config_path` (путь `…@CepbluKot/deploy:<SHA>` → `…@phone-guy/deploy:<SHA>`) и regex в `ci/gitlab/pipeline.yml`
+- [x] C2. 2026-10-24: созданы 9 приватных проектов `CepbluKot/{voice-web,rvc-service,selfmonitor,frontend,asterisk-pbx,deploy,docs,experiments,legacy-voice-app}` (набор изменён по B6/B7: вместо `conference-service` — `asterisk-pbx` и `legacy-voice-app`)
+- [~] C3. `main` защищён по умолчанию в `deploy` (push: Maintainers); правило «merge только через MR» и обязательный зелёный пайплайн не включены
 
 ## D. Разбиение на репозитории (с историей, `git filter-repo` в клонах)
-- [ ] D1. `voice-web` (cmd/, internal/, go.*, Dockerfile.goweb)
-- [ ] D2. `rvc-service` (rvc_service/, Dockerfile, requirements*)
-- [ ] D3. `asterisk-pbx` (conference/asterisk/) и `legacy-voice-app` (app/, conference/*.py, корневые Dockerfile/compose/requirements, deploy.sh, deploy-conference.sh)
-- [ ] D4. `selfmonitor` (selfmonitor/)
-- [ ] D5. `frontend` (web/, web-rt/, admin-ui/)
-- [ ] D6. `deploy` (deploy/, infra/, compose*.yaml)
-- [ ] D7. `docs` (docs/, README, START_HERE, AGENTS.md)
-- [ ] D8. `experiments` (experiments/)
-- [ ] D9. В каждый репозиторий: README.md, PROVENANCE.md, .gitignore, .dockerignore
-- [ ] D10. Переписать межрепозиторные ссылки (Dockerfile.goweb ← frontend, deploy-скрипты, пути в доках)
+- [x] D1. 2026-10-24 voice-web: 28 коммитов, 58 файлов; история через `git filter-repo`, пути сохранены, push в `main`
+- [x] D2. 2026-10-24 rvc-service: 29 коммитов; история через `git filter-repo`, пути сохранены, push в `main`
+- [x] D3. 2026-10-24: `asterisk-pbx` (12 коммитов, `conference/asterisk/`) и `legacy-voice-app` (14 коммитов + README/CI; `web/` берётся из `frontend`)
+- [x] D4. 2026-10-24 selfmonitor: 6 коммитов (+ вендорные `conference/{__init__,media,rvc}.py`); история через `git filter-repo`, пути сохранены, push в `main`
+- [x] D5. 2026-10-24 frontend: 50 коммитов; история через `git filter-repo`, пути сохранены, push в `main`
+- [x] D6. 2026-10-24 deploy: 31 коммит; история через `git filter-repo`, пути сохранены, push в `main`
+- [x] D7. 2026-10-24 docs: 82 коммита; история через `git filter-repo`, пути сохранены, push в `main`
+- [x] D8. 2026-10-24 experiments: 11 коммитов; история через `git filter-repo`, пути сохранены, push в `main`
+- [x] D9. README.md, PROVENANCE.md (SHA источника), .gitignore в каждом репозитории; .dockerignore где нужен
+- [~] D10. Сделано: `Dockerfile.goweb` берёт фронт через named context `frontend` (локальная сборка образа прошла), legacy-тесты получают `web/` из `frontend` в CI, `deploy`-тесты на старой раскладке запускаются через `scripts/assemble-monorepo.sh`. Не сделано: пути в `docs/*.md` (ссылки на `internal/…`, `deploy/…` по-прежнему из монорепо) и переписывание `deploy-*.sh` под отдельные репозитории
 
 ## E. CI/CD по образцу proactive-monitoring
-- [ ] E1. `deploy`: `ci/gitlab/pipeline.yml`, `tools.yml`, `version.yml`
-- [ ] E2. `deploy`: `go.yml`, `python-service.yml`, `node.yml`, `docker-build.yml`, `deploy-service.yml`
-- [ ] E3. `deploy`: `ci/gitlab/services/<имя>.yml` для каждого репозитория
-- [ ] E4. `deploy`: собственный `.gitlab-ci.yml` (shellcheck, compose config, pytest шаблонов)
-- [ ] E5. Выставить `ci_config_path` с закреплённым SHA в каждом проекте
-- [ ] E6. Раннер: проверить shared runners, решить по своему раннеру
-- [ ] E7. Все пайплайны зелёные
+- [x] E1. `deploy/ci/gitlab/pipeline.yml` (workflow, retry, auto-cancel); `tools.yml`/`version.yml` образца не копировались (версии — теги `X.Y.Z`, release-job в `release.yml`)
+- [x] E2. `go.yml`, `python-service.yml`, `node.yml`, `docker-build.yml`, `release.yml`, `vm209.yml`; `deploy-service.yml` образца заменён ручным `vm209-status` (боевой деплой в CI не автоматизирован)
+- [x] E3. `ci/gitlab/services/{voice-web,rvc-service,selfmonitor,frontend,asterisk-pbx,docs,experiments,legacy-voice-app}.yml`
+- [x] E4. `deploy/.gitlab-ci.yml`: shellcheck (error), ci-templates, monorepo-compat-tests, ручной vm209-status
+- [x] E5. `ci_config_path = ci/gitlab/services/<имя>.yml@CepbluKot/deploy:<SHA>` в 8 проектах (обновляется скриптом при смене шаблонов); job-token allowlist: `frontend` ← voice-web, legacy-voice-app, deploy; остальные ← deploy
+- [x] E6. Shared runners недоступны (`ci_quota_exceeded`) и выключены. Раннеры: `phone-guy-ci` (воркстанция, docker без привилегий, тесты), `phone-guy-docker` (воркстанция, privileged, сборка образов — разрешено владельцем), `phone-guy-deploy` (внутри VM209, shell, protected refs, systemd `gitlab-runner-phone-guy.service`, без sudo, MemoryMax 512M)
+- [~] E7. см. журнал: итог пайплайнов на момент записи
 
 ## F. Приёмка и переключение
 - [ ] F1. Живая приёмка звонка браузер↔браузер (`docs/BROWSER_CALL_ACCEPTANCE.md`)

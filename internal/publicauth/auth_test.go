@@ -169,7 +169,7 @@ func TestExpiredAndTamperedSessionsAreRejected(t *testing.T) {
 		value string
 	}{
 		"expired":  {now: expires, value: token},
-		"tampered": {now: auth.now(), value: token[:len(token)-1] + "x"},
+		"tampered": {now: auth.now(), value: tamper(token)},
 	} {
 		t.Run(name, func(t *testing.T) {
 			auth.now = func() time.Time { return testCase.now }
@@ -182,4 +182,14 @@ func TestExpiredAndTamperedSessionsAreRejected(t *testing.T) {
 			}
 		})
 	}
+}
+
+// tamper changes the first character of the token. The last character is not safe to alter: it carries padding bits in base64,
+// so replacing it (or "replacing" it with the same letter) can leave the signature valid and make the test flaky.
+func tamper(token string) string {
+	replacement := "A"
+	if token[:1] == replacement {
+		replacement = "B"
+	}
+	return replacement + token[1:]
 }
