@@ -97,6 +97,13 @@ rollback() {
   rc=$?; trap - EXIT
   if (( rc != 0 )); then
     echo "Update failed; restoring previous Go and Asterisk containers" >&2
+    # Diagnostics before rollback: the failed containers are recreated (and their logs lost) by the restore below.
+    { echo "--- Diagnostics before rollback"; docker ps -a --format '{{.Names}} {{.Image}} {{.Status}}' | grep -E 'voice-go|asterisk' || true
+      echo "--- voice-go log"; docker logs --tail 40 voice-go 2>&1 | cut -c1-300 || true
+      echo "--- asterisk log"; docker logs --tail 30 voice-conference-asterisk-1 2>&1 | cut -c1-300 || true
+      echo "--- ARI"; docker exec voice-conference-asterisk-1 asterisk -rx 'ari show status' 2>&1 | head -5 || true
+      curl --max-time 4 -s -o /dev/null -w 'ari http=%{http_code}\n' http://127.0.0.1:8092/ari/api-docs/resources.json 2>&1 || true
+      echo "--- end diagnostics"; } >&2
     if [[ -f /etc/voice-phone-auth/public-cookie-route.enabled ]] \
         && ! grep -q '^VOICE_PHONE_PUBLIC_AUTH_HOST_FILE=' "$go_env" \
         && [[ ! -f /etc/voice-phone-auth/public-basic-restored.enabled ]]; then
