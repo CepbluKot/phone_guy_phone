@@ -216,8 +216,10 @@ def test_asterisk_only_deployer_preserves_the_live_go_release_and_has_rollback()
     assert "deploy-conference.sh" not in deployer
     assert "iptables-save" in remote and "firewall.sh" in remote
     assert "--force-recreate asterisk" in remote
-    assert 'pjsip show endpoint $extension' in remote
+    assert "'pjsip show endpoints'" in remote  # one listing, checked per extension that the runtime config defines
     assert 'Endpoint:[[:space:]]+$extension' in remote
+    assert 'for extension in 1987 1988 2014 2015 2016 1234; do' in remote
+    assert 'grep -Eq "^\\[$extension\\]\\(phone-endpoint\\)$" "$new_release/runtime/asterisk/pjsip.conf"' in remote
     assert "media_encryption.*sdes" not in remote
     assert "iptables -X VOICE_SIP_INGRESS" in rollback
     assert "iptables -D DOCKER-USER -i eth0 -p udp --dport 5060 -j VOICE_SIP_INGRESS" in rollback

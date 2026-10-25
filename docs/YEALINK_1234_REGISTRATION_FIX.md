@@ -1,14 +1,18 @@
-# Yealink T21 registration as extension 1234 — 2026-10-10
+# Yealink T21 registration as extension 1234 — updated 2026-10-16
 
-> **Порядок совместимости на 2026-10-16:** обычные публичные Yealink остаются
-> на `phone.awesomeio.ru:5061` по TLS 1.2+. Для старого Yealink на номере
-> `1234` настроен на отдельный маршрут Outbound Proxy TCP/5062 → VM TCP/5063
-> с TLS 1.0. Это назначение в конфигурации endpoint, а не серверная
-> изоляция: Asterisk может принять на этом listener другую корректную SIP-
-> учётку. TLS 1.0 слабее основного TLS 1.2+ listener.
-> Edge-правило установлено на VPS 2026-10-16 и пережило реальную перезагрузку;
-> внешний TLS 1.0 handshake на 5062 прошёл. Asterisk пока не видит контакт
-> 1234, поэтому регистрация и звонки всё ещё требуют приёмки.
+> **Текущее состояние, 2026-10-16:** Yealink T21 `1234` зарегистрировался
+> после того, как в обоих телефонных полях — SIP-сервер и Outbound-сервер —
+> внешний порт исправили с `5063` на `5062`. Публичный TCP/5062 на VPS
+> перенаправляется на Asterisk VM `192.168.20.70:5063`; внутренний `5063` не
+> нужно вводить в телефон. Asterisk увидел контакт AOR `1234` по TLS, а владелец
+> подтвердил, что телефон работает. SIP-пароль не менялся и не записывается
+> в этот документ.
+>
+> Остальные публичные телефоны по-прежнему используют TLS 1.2+ на TCP/5061.
+> Совместимый listener для `1234` использует TLS 1.0 и не обеспечивает
+> изоляцию входящих учётных записей только по extension. Подробности, проверка
+> и оставшиеся ограничения описаны в последнем разделе. Более ранние записи
+> ниже являются историческими снимками состояния до окончательного исправления.
 
 ## Symptom
 
@@ -16,21 +20,23 @@ The Yealink T21 at `192.168.20.36` showed a registration error for account
 `1234`. Asterisk had no PJSIP contact while the handset was attempting to
 register; the targeted SIP trace did not see a `REGISTER` arrive.
 
-## Previously working compatibility route
+## Historical compatibility route before the final handset correction
 
 At that time, the older T21 at `192.168.20.36` negotiated TLS 1.0 while the
 public registrar `phone.awesomeio.ru:5061` required TLS 1.2 or newer. A
 temporary compatibility route used public TCP/5062 and VM container TCP/5063.
-That route previously allowed this phone to register as `1234`. It is prepared
-in the VM release source and edge ruleset source. For the phone, keep the
-registrar on `phone.awesomeio.ru:5061` and set Outbound-server to
-`phone.awesomeio.ru:5062` with TLS. This applies only once the edge ruleset is
-installed and active; the live public route is not yet confirmed.
+That route previously allowed this phone to register as `1234`. At an
+intermediate stage the phone form used registrar TCP/5061 and Outbound-server
+TCP/5062, but registration still failed. The live, owner-confirmed working
+settings are recorded in the final correction section below: both the SIP
+server and Outbound-server use the public port `5062` with TLS. The older
+intermediate settings are retained here only as history.
 
-The final handset-side fix was to add the official ISRG Root X1 certificate to
-the Yealink trusted-certificate store, then save the account settings again.
-Certificate and server-name verification remain enabled. After that change the
-handset registered as `1234`.
+An earlier troubleshooting entry recorded adding the official ISRG Root X1
+certificate to the Yealink trusted-certificate store for a separate TLS
+failure. That was not the root cause of the registration failure fixed below:
+the final correction was to use public port `5062` in both SIP Server 1 and
+Outbound Server. Certificate and server-name verification remain enabled.
 
 ## Why calls still failed after registration
 
@@ -112,24 +118,26 @@ current template. Deployment and rollback checks require this endpoint on VM
 TCP/5063. Compose and VM firewall settings are release-owned and survive a VM
 reboot. Other public endpoints stay on TLS 1.2 TCP/5061.
 
-The live Yealink Account page check on 2026-10-16 shows the account enabled
-with `Register Failed`, registrar `phone.awesomeio.ru:5061`, Outbound Proxy
-`phone.awesomeio.ru:5062`, and TLS selected. The registration name is `1234`.
+The **pre-final-save** Yealink Account page check on 2026-10-16 showed the
+account enabled with `Register Failed`, registrar `phone.awesomeio.ru:5061`,
+Outbound Proxy `phone.awesomeio.ru:5062`, and TLS selected. The registration
+name was `1234`.
 The browser accessibility snapshot did not expose the `User Name` value; an
 earlier screenshot showed `1234`, so do not overwrite the account or password
 based on that snapshot alone. No handset settings were changed during this
 check.
 
-Asterisk logged a TLS `unsupported protocol` handshake through the edge before
-the 5062 route was installed and no contact for AOR `1234`. That handshake did
-not identify `.133` uniquely. After deployment, the public TLS 1.0/AES128-SHA
-handshake succeeds, but the AOR still has no contact. The default listener
-stays on TLS 1.2; only endpoint 1234 is configured to use the weaker TLS 1.0
-listener, though inbound registration is not restricted by endpoint. Do not
-keep changing phone ports or power-cycling the handset. Verify `User Name` is
-`1234` and preserve the existing SIP password.
+Before the final handset port save, Asterisk logged a TLS `unsupported
+protocol` handshake through the edge and had no contact for AOR `1234`. That
+handshake did not identify `.133` uniquely. After server deployment, the public
+TLS 1.0/AES128-SHA handshake succeeded, but the AOR still had no contact. The
+default listener stays on TLS 1.2; only endpoint 1234 is configured to use the
+weaker TLS 1.0 listener, though inbound registration is not restricted by
+endpoint. At that pre-final stage, the next check was to verify `User Name`
+`1234` and preserve the existing SIP password; the final correction below
+identified and fixed the phone's public port values.
 
-## Reboot persistence and acceptance
+## Reboot persistence and pre-final-handset snapshot — 2026-10-16
 
 On VM209, `docker.service` and `voice-firewall.service` are enabled. The
 firewall unit starts with Docker, and the Asterisk container uses the
@@ -167,7 +175,142 @@ Outbound Proxy `phone.awesomeio.ru:5062`, TLS, and Register Name `1234`; the
 browser accessibility snapshot did not expose User Name or Password values, and
 the handset settings were not changed.
 
-The phone's current Asterisk contact is still absent. Registration after the
-server migration, a handset reboot, two-way audio, both hangup directions, and
-the required browser-to-browser call acceptance remain unverified. Do not call
-this integration complete until the call-acceptance record is updated.
+At this pre-final-handset snapshot, Asterisk still had no contact for `1234`.
+The next section records the subsequent handset-side correction and successful
+registration. Two-way audio, PSTN calls, and the separate browser-to-browser
+acceptance were not tested as part of that registration correction.
+
+## Final handset correction and registration acceptance — 2026-10-16
+
+### Root cause
+
+The public edge exposes TCP/5062 and forwards it to the Asterisk VM's legacy
+TLS listener on TCP/5063. An earlier failed page snapshot had registrar
+`5061` and Outbound-server `5062`; the later screenshot immediately before the
+successful save showed `5063` in both fields. The saved working values are now
+`5062` in both fields. `5063` is the **internal destination port**; there is
+no public TCP/5063 forwarding rule for the handset. The phone therefore had
+an incorrect public destination even though the VPS-to-VM forwarding route
+and Asterisk listener were ready.
+
+The final successful route is:
+
+```text
+Yealink T21
+  -> phone.awesomeio.ru:5062/TLS (public edge)
+  -> VPS nftables DNAT/SNAT
+  -> 192.168.20.70:5063/TLS (Asterisk legacy listener)
+```
+
+Port `5062` is the phone-facing public port. Port `5063` is only the private
+backend destination. Do not put `5063` in the Internet-facing Yealink form.
+
+### Working Yealink Account 1 values
+
+| Field | Value |
+| --- | --- |
+| Account / Line Active | Enabled |
+| Label / Display Name | `1234` |
+| Register Name | `1234` |
+| User Name | `1234` |
+| Password | Existing SIP password; preserved, not documented or rotated |
+| Use Outbound Server | Enabled |
+| Outbound Server | `phone.awesomeio.ru` |
+| Outbound Server Port | `5062` |
+| Transport | TLS |
+| SIP Server 1 | `phone.awesomeio.ru` |
+| SIP Server 1 Port | `5062` |
+| Registration Period | `3600` seconds |
+| NAT / STUN | NAT disabled; STUN host blank (as shown in the working form) |
+| SIP Server 2 | Blank |
+
+The registrar and proxy both use public TCP/5062 so REGISTER traffic from this
+legacy handset is delivered to the TLS 1.0 compatibility listener. The server
+port on the handset is not the same value as Asterisk's internal listening
+port. No SIP credentials were changed during this correction.
+
+### Verification evidence
+
+- Before saving the corrected ports, `pjsip show contacts` had no contact for
+  AOR `1234` and the Yealink page showed a registration error.
+- After changing both handset ports to `5062` and saving, the VPS edge's
+  accepted TCP/5063 counter increased from 282 to 305 packets during the
+  verification window. This is consistent with traffic reaching the forwarded
+  Asterisk listener; the counter is runtime telemetry and will reset when its
+  ruleset is reloaded.
+- Asterisk then listed a dynamic TLS contact for AOR `1234`, observed as
+  `sip:1234@192.168.20.12:<dynamic-port>;transport=TLS`. The first post-save
+  read showed source port `3515`; a later read showed `1084`, so this port is
+  ephemeral and can change on re-registration. The observed `.12` address is
+  the contact address stored by Asterisk on the private network; it is not a
+  reason to replace the handset's public server name or port.
+- Asterisk reported zero active calls at the time of the check. The owner then
+  confirmed: “ура работает”.
+- Immediately after the handset save, its web account page remained on the
+  “Пожалуйста, подождите…” overlay. After the later VM reboot, the page showed
+  `Зарегистрирован` (see the reboot recovery record below).
+
+### Persistence and safe recovery
+
+The handset account values are saved on the phone by the Yealink Account page.
+The edge route is owned by the enabled `voice-sip-edge.service`; it survived a
+real VPS reboot on 2026-10-16. On VM209, the Asterisk runtime is release-owned,
+the Compose file publishes TCP/5063, and the VM firewall restricts that port to
+the SIP edge/WireGuard source. Other phones remain on TCP/5061 with TLS 1.2+.
+
+VM reboot recovery was also exercised on 2026-10-16 while Asterisk reported
+zero active calls. VM209 rebooted at `2026-10-16 12:38:36 UTC`; Docker and
+`voice-firewall.service` became active at `12:38:53 UTC`. The
+`voice-conference-asterisk-1` container started at `12:38:53 UTC` with restart
+policy `unless-stopped` and became healthy. Asterisk again showed a dynamic
+contact for AOR `1234`, and the Yealink Account page at `192.168.20.133` showed
+`Зарегистрирован`; Asterisk showed zero active calls. The edge VPS was still
+`enabled/active` with public TCP/5062 DNAT to VM TCP/5063. This verifies service
+and registration recovery after an Asterisk VM reboot. The handset itself was
+not power-cycled in this check, and call audio/hangup behavior was not tested.
+
+For a future registration failure, check in this order:
+
+1. On the phone, verify both `SIP Server 1 Port` and `Outbound Server Port`
+   are `5062`, the transport is TLS, and the username/register name are
+   `1234`. Do not share or replace the password just to inspect it.
+2. On VPS `evita`, verify that the edge unit is active and the public to
+   private port map remains installed:
+
+   ```sh
+   sudo systemctl is-active voice-sip-edge.service
+   sudo nft list ruleset | grep -E 'dport 5062|dport 5063'
+   ```
+
+   The DNAT rule should map public TCP/5062 to `192.168.20.70:5063`.
+3. On VM209, verify Asterisk is healthy, endpoint `1234` still selects
+   `transport-tls-1234-internet-legacy`, and `pjsip show contacts` contains an
+   AOR `1234` contact. Run these on the VM host:
+
+   ```sh
+   sudo docker exec voice-conference-asterisk-1 asterisk -rx 'pjsip show endpoint 1234'
+   sudo docker exec voice-conference-asterisk-1 asterisk -rx 'pjsip show contacts'
+   sudo docker exec voice-conference-asterisk-1 asterisk -rx 'core show channels count'
+   ```
+
+   A present contact is the registration signal; the endpoint's `NonQual`
+   display is expected because `qualify_frequency` is disabled and does not
+   mean authentication failed.
+4. If no contact appears, inspect only sanitized registration/error events.
+   Never paste SIP Authorization headers, passwords, or unredacted packet
+   captures into the repository or chat.
+
+### Scope and limitations
+
+The listener on TCP/5063 is configured with TLS 1.0 for this legacy phone; the
+default public TCP/5061 listener remains TLS 1.2+. TLS 1.0 is weaker and should
+remain limited to this compatibility path. The VM firewall restricts backend
+access to the edge/WireGuard source, but PJSIP's endpoint `transport=` setting
+does not make inbound registration exclusive to extension `1234`; any valid
+SIP credential that reaches the listener may authenticate there.
+
+This correction verifies SIP registration only. It did not run the separate
+two-browser call acceptance, place a PSTN call, or verify two-way audio and
+hangup behavior. Also, SIP TLS protects signaling, not RTP media; extension
+`1234` retains its previously approved `media_encryption=no` compatibility
+setting, so call audio is not encrypted in transit.

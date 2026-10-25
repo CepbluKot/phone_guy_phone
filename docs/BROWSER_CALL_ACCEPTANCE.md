@@ -15,6 +15,15 @@
 | Caveats | Both sessions were two tabs of the same Chrome profile (not two independent profiles). Audible speech quality was not judged by a person. RVC logged `ValueError: array of sample points is empty` in `upstream/infer/vc/pipeline.py: get_f0` on windows without voiced pitch (silence); the service kept running. `voice-control: ari_resource_not_owned` appears around teardown, as in earlier runs. The first failed attempt's ring timed out because the callee tab was in the background (hidden tabs do not repaint), not because of the application. |
 | Final result | Update from Zot deployed and **browser-to-browser call gate passed in both directions** after the g722 fix. Persistent fix is in git (`6829a95`) and the VM runtime; the next release also rebuilds the image with the g722 module enabled and the stricter healthcheck. |
 
+## 2026-10-12 Yealink 2015 ingress firewall repair — browser gate pending
+
+| Field | Result |
+| --- | --- |
+| Change | The Asterisk VM now accepts TCP/5061 from the trusted home VPN gateway `192.168.20.12/32`, which SNATs forwarded traffic from the public SIP edge. TLS and public edge rules were unchanged. |
+| Physical handset registration | **Passed** — Yealink 2015 showed **Registered** and Asterisk listed its dynamic TLS contact. |
+| Two-browser call acceptance | **Not run** — only the In-App Browser profile was available; Chrome was unavailable, so independent profiles could not be created. |
+| Final result | Registration is restored. Browser-to-browser call acceptance remains incomplete until two independent browser profiles are available and both call directions pass. |
+
 ## 2026-10-11 external-media recovery — deployed, phone call confirmed, browser gate pending
 
 | Field | Result |

@@ -18,8 +18,40 @@ TCP `5062` → VM TCP `5063` и UDP `10000-10019` на Asterisk VM209
 2026-10-16; публичный TLS 1.0 handshake подтверждён. SIP/UDP `5060` не
 публикуется; публичные входящие TCP/UDP `5060` отбрасываются.
 Публичные HTTP-админка, Go API, ARI и RVC через этот edge не доступны. Порт
-`5061` ограничен rate-limit-ами, RTP ограничен по источнику и частоте, а VM
-разрешает SIP только через VPS.
+`5061` ограничен rate-limit-ами на edge. VM разрешает TCP/5061 от WireGuard
+адреса VPS `10.19.87.1` и доверенного домашнего VPN-шлюза `192.168.20.12`:
+шлюз маскирует пересылаемый трафик VPS в свой LAN-адрес. Публичный маршрут
+по-прежнему проходит через edge; другие источники на VM firewall отбрасываются.
+RTP ограничен по источнику и частоте.
+
+### Сохранение настроек после перезапуска
+
+На VM209 конфигурация Asterisk хранится в каталоге релиза под
+`/opt/voice-go/releases/<release>/runtime/asterisk/` и монтируется в контейнер.
+Контейнер Asterisk использует Docker restart policy `unless-stopped`;
+`docker.service` и `voice-firewall.service` включены в автозапуск. Firewall
+запускается вместе с Docker и восстанавливает правила для SIP/RTP.
+
+Порт 5061 и отдельный TLS/5063 transport номера `1234` закреплены генератором
+PJSIP runtime-конфига; VM Compose публикует TCP/5063, а firewall разрешает его
+только от SIP edge и WireGuard peer. Эти настройки хранятся в каталоге релиза
+и восстанавливаются при перезагрузке VM. Для публичной регистрации правила
+nftables на edge установлены; `voice-sip-edge.service` enabled/active и
+восстановил порт 5062 после reboot 2026-10-16. Asterisk пока не видит контакт
+AOR `1234`, поэтому регистрация с самого Yealink ещё не подтверждена.
+Endpoint `1234` настроен исходить через этот listener, но Asterisk не ограничивает
+по нему входящую регистрацию только этим номером: другая действующая SIP-учётка
+тоже может зарегистрироваться на TCP/5063. Сам listener слабее TLS 1.2+ на 5061.
+Разбор инцидента и ограничения проверки — в
+[`YEALINK_1234_REGISTRATION_FIX.md`](YEALINK_1234_REGISTRATION_FIX.md).
+
+На edge `voice-sip-edge.service` запускается после WireGuard. При установке
+сначала проверяется TLS до VM, затем unit включается и перезапускается; boot
+`2026-10-16 10:49:51 UTC` подтвердил `enabled/active` и восстановление правил.
+Ручные команды: `sudo /usr/local/sbin/voice-sip-edge enable` и
+`sudo /usr/local/sbin/voice-sip-edge status`. Boot-time `apply` не зависит от
+готовности Asterisk VM; подробности — в homelab log
+`VOICE_SIP_5062_COMPATIBILITY_LOG_2026-10-16.md`.
 
 ### Сохранение настроек после перезапуска
 

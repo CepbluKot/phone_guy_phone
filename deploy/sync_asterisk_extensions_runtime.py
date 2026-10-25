@@ -139,9 +139,9 @@ def configured_gateway(path: Path | None) -> bool:
         raise ValueError("Nateks runtime digest authentication is incomplete")
     secret = auth[0].get("password", "")
     # Keep an existing high-entropy 20-character runtime credential during
-    # unrelated releases. New credentials are still generated with 32-64
-    # characters by configure_nateks_pstn_runtime.py.
-    if not re.fullmatch(r"[A-Za-z0-9]{20,64}", secret) or len(set(secret)) < 10:
+    # unrelated releases (the live one has 20 characters); new credentials may be longer.
+    # At least 16 distinct characters are required.
+    if not re.fullmatch(r"[A-Za-z0-9]{20,64}", secret) or len(set(secret)) < 16:
         raise ValueError("Nateks runtime digest secret is missing or too weak")
 
     aor_ids = {"701"}

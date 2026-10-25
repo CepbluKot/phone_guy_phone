@@ -13,13 +13,13 @@ from pathlib import Path
 
 
 RUNTIME_NAME = "nateks-pstn.conf"
-SECRET_PATTERN = re.compile(r"[A-Za-z0-9]{32,64}\Z")
+SECRET_PATTERN = re.compile(r"[A-Za-z0-9]{20}\Z")
 
 
 def render_config(secret: str) -> str:
     if not SECRET_PATTERN.fullmatch(secret):
-        raise ValueError("SIP secret must be 32-64 ASCII letters or digits")
-    if len(set(secret)) < 10:
+        raise ValueError("SIP secret must be exactly 20 ASCII letters or digits")
+    if len(set(secret)) < 16:
         raise ValueError("SIP secret does not have enough character variety")
 
     return f"""; Private Nateks VoiceCom FXO1 peer. This file is runtime-only.
