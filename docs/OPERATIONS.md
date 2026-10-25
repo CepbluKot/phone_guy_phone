@@ -430,3 +430,20 @@ SSH-ключ `/root/.ssh/voice-cert-reader`, регистрация его пу�
 через `deploy/install-vps-export.sh` на VPS и проверенный known_hosts.
 Скрипт доставки предполагает выполненную первичную настройку; текущая VM
 настроена. В случае замены VPS сначала независимо проверьте новый host key.
+
+## Обновление Go-стека из Zot (без сборки на VM)
+
+По умолчанию `deploy/update-goweb.sh` собирает образы на VM209. Чтобы взять готовые образы, собранные CI (или `scripts/buildkit-build.sh`
+в репозитории `deploy`), и не расходовать диск и память VM на сборку:
+
+```sh
+DEPLOY_GOWEB_ZOT=1 DEPLOY_GOWEB_ZOT_TAG=<тег CI> ./deploy/update-goweb.sh
+```
+
+Скрипт делает `docker pull` образов `images.lan.awesomeio.ru:5002/phone-guy/voice-web:<тег>` и `.../asterisk-pbx:<тег>` и помечает их
+`voice-go:update-<stamp>` и `voice-conference-asterisk:update-<stamp>`: compose-файлы, проверки здоровья, откат
+(`rollback-goweb-update.sh`) и очистка работают так же, как при сборке на VM. Тег образа должен соответствовать коммитам, которые
+выкатываются (CI тегирует образы короткими SHA коммитов). Все прежние проверки (здоровье Go/Asterisk/RVC, 0 активных звонков,
+владелец runtime) выполняются без изменений. После выката по-прежнему обязательна живая приёмка звонка
+(`docs/BROWSER_CALL_ACCEPTANCE.md`).
+

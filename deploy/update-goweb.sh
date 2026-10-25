@@ -6,6 +6,18 @@ repo=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
 stamp=${DEPLOY_GOWEB_STAMP:-$(date -u +%Y%m%dT%H%M%SZ)}
 [[ "$stamp" =~ ^[0-9]{8}T[0-9]{6}Z$ ]] || { echo "Invalid update stamp" >&2; exit 2; }
 
+# Optional: take the images from the homelab Zot registry (built by CI) instead of building them on the VM.
+#   DEPLOY_GOWEB_ZOT=1 DEPLOY_GOWEB_ZOT_TAG=<ci-tag> ./deploy/update-goweb.sh
+# pulls images.lan.awesomeio.ru:5002/phone-guy/{voice-web,asterisk-pbx}:<tag> and tags them voice-go:update-<stamp> and
+# voice-conference-asterisk:update-<stamp>, so compose files, rollback and cleanup see the same names as with an on-VM build.
+zot_go_image=""; zot_asterisk_image=""
+if [[ "${DEPLOY_GOWEB_ZOT:-0}" = 1 ]]; then
+  zot_tag=${DEPLOY_GOWEB_ZOT_TAG:-}
+  [[ "$zot_tag" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]] || { echo "Set DEPLOY_GOWEB_ZOT_TAG to the CI image tag" >&2; exit 2; }
+  zot_go_image="images.lan.awesomeio.ru:5002/phone-guy/voice-web:$zot_tag"
+  zot_asterisk_image="images.lan.awesomeio.ru:5002/phone-guy/asterisk-pbx:$zot_tag"
+fi
+
 if [[ "${DEPLOY_GOWEB_SKIP_CHECKS:-0}" != 1 ]]; then
   go test ./...
   go vet ./...
@@ -22,9 +34,9 @@ ssh -o BatchMode=yes -o ConnectTimeout=8 "$target" "mkdir -m 0700 '$stage' && mk
 rsync -a --delete Dockerfile.goweb go.mod go.sum cmd internal admin-ui web "$target:$stage/"
 rsync -a --delete conference/asterisk "$target:$stage/conference/"
 rsync -a --delete deploy/compose.goweb.yaml deploy/compose.conference.yaml deploy/Caddyfile.goweb deploy/rollback-goweb-production.sh deploy/update_pjsip_wss_transport.py deploy/sync_asterisk_pstn_runtime.py deploy/sync_asterisk_extensions_runtime.py deploy/configure_nateks_pstn_runtime.py deploy/activate-nateks-pstn.sh deploy/configure-public-phone-auth.py deploy/phonebook.initial.json deploy/phonebook.example.json deploy/webphone-directory.initial.json deploy/webphone-directory.example.json "$target:$stage/deploy/"
-ssh -o BatchMode=yes -o ConnectTimeout=8 "$target" sudo bash -s -- "$stamp" "$stage" <<'REMOTE'
+ssh -o BatchMode=yes -o ConnectTimeout=8 "$target" sudo bash -s -- "$stamp" "$stage" "$zot_go_image" "$zot_asterisk_image" <<'REMOTE'
 set -euo pipefail
-stamp=$1; stage=$2
+stamp=$1; stage=$2; zot_go_image=${3:-}; zot_asterisk_image=${4:-}
 voice=/opt/voice-changer; root=/opt/voice-go; release="$root/releases/$stamp"; backup="$root/updates/$stamp"
 owner=$(cat "$voice/.go-runtime-owner")
 [[ "$owner" =~ ^[0-9]{8}T[0-9]{6}Z$ && ! -e "$release" && ! -e "$backup" ]] || { echo "Update owner or release state invalid" >&2; exit 1; }
@@ -100,8 +112,16 @@ rollback() {
 }
 trap rollback EXIT
 
-docker build -f "$release/Dockerfile.goweb" -t "voice-go:update-$stamp" "$release"
-docker build -f "$release/conference/asterisk/Dockerfile" -t "voice-conference-asterisk:update-$stamp" "$release/conference/asterisk"
+if [[ -n "$zot_go_image" ]]; then
+  docker pull "$zot_go_image"
+  docker pull "$zot_asterisk_image"
+  docker tag "$zot_go_image" "voice-go:update-$stamp"
+  docker tag "$zot_asterisk_image" "voice-conference-asterisk:update-$stamp"
+  echo "Images from Zot: $(docker image inspect --format '{{index .RepoDigests 0}}' "$zot_go_image") $(docker image inspect --format '{{index .RepoDigests 0}}' "$zot_asterisk_image")"
+else
+  docker build -f "$release/Dockerfile.goweb" -t "voice-go:update-$stamp" "$release"
+  docker build -f "$release/conference/asterisk/Dockerfile" -t "voice-conference-asterisk:update-$stamp" "$release/conference/asterisk"
+fi
 docker compose -p voice-go -f "$release/deploy/compose.goweb.yaml" --env-file "$release/.env" config --quiet
 docker compose -p voice-conference -f "$release/deploy/compose.conference.yaml" --env-file "$release/.env" config --quiet
 caddy validate --config "$release/deploy/Caddyfile.goweb"
