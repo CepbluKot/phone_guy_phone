@@ -1,5 +1,20 @@
 # Browser-to-browser call acceptance
 
+## 2026-10-25 update from Zot, g722 fix — browser gate passed (both directions)
+
+| Field | Result |
+| --- | --- |
+| Release | Go `voice-go:update-20261025T073606Z` and Asterisk `voice-conference-asterisk:update-20261025T073606Z`, images pulled from the homelab Zot (`phone-guy/voice-web`, `phone-guy/asterisk-pbx`, tag `latest`) by `deploy/update-goweb.sh` with `DEPLOY_GOWEB_ZOT=1`. Source: `0a8f1ea` (the sources that were already running on VM209, merged into git) built by GitLab CI. |
+| Deployment smoke | **Passed** — all script health gates, `healthz` 200 on the public and private hosts, RVC `ready`, transports `5060/5061/5062/5063/wss` unchanged, 0 active channels. Two earlier attempts the same day rolled back automatically (code in git did not match the running code; see `AUDIT_2026-10-24.md` item 12). |
+| First browser attempt | **Failed on answer (found a defect that predates this release)** — browser endpoints are registered with `allow=g722,alaw` by the already-running Go code, but Asterisk loaded only `codec_alaw`; Asterisk logged `Unable to find a codec translation path: (g722) -> (alaw)` and dropped the call right after the callee answered. Runtime config files were byte-identical to the previous release, so browser calls were broken since the Go-only release of 2026-10-11. |
+| Fix | `load => codec_g722.so` added to the runtime `modules.conf` on VM209 (and `module load codec_g722.so` applied live), to `conference/asterisk/modules.conf`, the image `--enable codec_g722` and `healthcheck.sh`; a test ties the endpoint codec list to the module allowlist. |
+| A-to-B call | **Passed** — extension 345 (tab A) called 3454 (tab B): the incoming modal appeared after ~4.3 s, answering showed **Идёт разговор** on both pages, caller-side hangup returned both pages to **Нет активного вызова**. |
+| B-to-A call | **Passed** — 3454 called 345, same result; the hangup came from the callee-side tab B. |
+| RTP and RVC | **Passed at transport level** — channel stats during the first call: browser leg g722 977 rx / 1031 tx packets and the call-main leg alaw 1045 rx / 1014 tx packets, 0 lost, jitter 0.003–0.019 s; `RVC /healthz` `active:true` during the calls and `ready` afterwards. |
+| Teardown | **Passed** — after each hangup both pages idle, Asterisk 0 active channels and 0 active calls (4 calls processed), RVC idle, Go `healthz` ok, test registrations disconnected, tabs closed. Physical phones 1234, 1988, 2015 and the Nateks gateway were registered (not in use) and were not called. |
+| Caveats | Both sessions were two tabs of the same Chrome profile (not two independent profiles). Audible speech quality was not judged by a person. RVC logged `ValueError: array of sample points is empty` in `upstream/infer/vc/pipeline.py: get_f0` on windows without voiced pitch (silence); the service kept running. `voice-control: ari_resource_not_owned` appears around teardown, as in earlier runs. The first failed attempt's ring timed out because the callee tab was in the background (hidden tabs do not repaint), not because of the application. |
+| Final result | Update from Zot deployed and **browser-to-browser call gate passed in both directions** after the g722 fix. Persistent fix is in git (`6829a95`) and the VM runtime; the next release also rebuilds the image with the g722 module enabled and the stricter healthcheck. |
+
 ## 2026-10-11 external-media recovery — deployed, phone call confirmed, browser gate pending
 
 | Field | Result |
