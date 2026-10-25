@@ -12,6 +12,7 @@ for required_module in \
     chan_pjsip \
     chan_websocket \
     codec_alaw \
+    codec_g722 \
     codec_resample \
     func_channel \
     format_wav \

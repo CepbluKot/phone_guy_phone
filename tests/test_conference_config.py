@@ -42,6 +42,7 @@ def test_module_allowlist_is_exact_and_contains_release_dependencies():
         "chan_pjsip",
         "chan_websocket",
         "codec_alaw",
+        "codec_g722",
         "codec_resample",
         "format_wav",
         "func_channel",
@@ -284,3 +285,13 @@ def test_healthcheck_requires_every_allowlisted_module():
     checked = set(re.findall(r"^    ([a-z0-9_]+) \\$", healthcheck, re.MULTILINE))
     checked.add(re.search(r"^    ([a-z0-9_]+)$", healthcheck, re.MULTILINE).group(1))
     assert checked == modules
+
+
+def test_g722_codec_is_loaded_because_browser_endpoints_offer_it():
+    # internal/webphone/session.go registers browser endpoints with allow=g722,alaw; without codec_g722
+    # Asterisk cannot translate between g722 and alaw and drops the call as soon as it is answered.
+    modules = read("modules.conf")
+    webphone = Path("internal/webphone/session.go").read_text()
+    assert '"allow": "g722,alaw"' in webphone
+    assert "load => codec_g722.so" in modules
+    assert "load => codec_alaw.so" in modules

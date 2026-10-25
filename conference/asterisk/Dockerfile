@@ -49,6 +49,7 @@ RUN ./configure \
         --enable chan_pjsip \
         --enable chan_websocket \
         --enable codec_alaw \
+        --enable codec_g722 \
         --enable codec_resample \
         --enable format_wav \
         --enable func_channel \
