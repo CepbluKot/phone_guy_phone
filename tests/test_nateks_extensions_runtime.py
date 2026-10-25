@@ -232,3 +232,22 @@ def test_sync_replaces_only_the_managed_nateks_context(tmp_path):
     assert rendered.count("[nateks-inbound]") == 1
     assert "Dial(PJSIP/2015,30,b(nateks-inbound-predial^s^1))" in rendered
     assert "Set(CHANNEL(callgroup)=63)" in rendered
+
+
+def test_sync_keeps_an_existing_20_character_digest_secret_but_rejects_19(tmp_path):
+    original = "0123456789abcdef0123456789abcdef"
+    for secret, accepted in (("aB3dE5gH7jK9mN1pQ2rS", True), ("aB3dE5gH7jK9mN1pQ2r", False)):
+        runtime = tmp_path / f"extensions-{len(secret)}.conf"
+        runtime.write_text("[phoneguy-sip]\nexten => _X.,1,Hangup()\n")
+        pstn = tmp_path / f"nateks-pstn-{len(secret)}.conf"
+        make_active_pstn_config(pstn)
+        pstn.write_text(pstn.read_text().replace(original, secret))
+        if accepted:
+            sync_runtime(runtime, ROOT / "conference/asterisk/extensions.conf", pstn)
+        else:
+            try:
+                sync_runtime(runtime, ROOT / "conference/asterisk/extensions.conf", pstn)
+            except ValueError as error:
+                assert "secret is missing or too weak" in str(error)
+            else:
+                raise AssertionError("19-character Nateks digest secret was accepted")
