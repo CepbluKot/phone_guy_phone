@@ -49,4 +49,4 @@ if __name__ == "__main__":
         render(group_id=grp.getgrnam("turnserver").gr_gid)
     except (OSError, UnicodeError, ValueError):
         print("TURN config rendering failed", file=sys.stderr)
-        raise SystemExit(1)
+        raise SystemExit(1) from None

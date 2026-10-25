@@ -34,7 +34,7 @@ def test_zot_mode_rejects_a_missing_or_unsafe_tag_before_touching_the_vm():
             env={"PATH": "/usr/bin:/bin", "DEPLOY_GOWEB_ZOT": "1", "DEPLOY_GOWEB_ZOT_TAG": tag, "DEPLOY_GOWEB_SKIP_CHECKS": "1"},
             text=True,
             capture_output=True,
-            timeout=30,
+            timeout=30, check=False,
         )
         assert result.returncode == 2, (tag, result.stdout, result.stderr)
         assert "DEPLOY_GOWEB_ZOT_TAG" in result.stderr

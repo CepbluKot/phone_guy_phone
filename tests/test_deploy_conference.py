@@ -40,7 +40,7 @@ def test_rejects_any_target_except_vm209_before_remote_commands(tmp_path):
     env, log = fake_commands(tmp_path)
     env["DEPLOY_CONFERENCE_TARGET"] = "ubuntu@192.168.20.71"
 
-    result = subprocess.run([SCRIPT], cwd=ROOT, env=env, text=True, capture_output=True)
+    result = subprocess.run([SCRIPT], cwd=ROOT, env=env, text=True, capture_output=True, check=False)
 
     assert result.returncode == 2
     assert "approved VM209" in result.stderr
@@ -50,7 +50,7 @@ def test_rejects_any_target_except_vm209_before_remote_commands(tmp_path):
 def test_rollout_uploads_only_conference_and_http_sources_without_mutating_venv_or_network(tmp_path):
     env, log = fake_commands(tmp_path)
 
-    result = subprocess.run([SCRIPT], cwd=ROOT, env=env, text=True, capture_output=True)
+    result = subprocess.run([SCRIPT], cwd=ROOT, env=env, text=True, capture_output=True, check=False)
 
     assert result.returncode == 0, result.stderr
     commands = log.read_text()
@@ -66,7 +66,7 @@ def test_rollout_uploads_only_conference_and_http_sources_without_mutating_venv_
 def test_failed_health_gate_runs_scoped_rollback_and_never_reports_success(tmp_path):
     env, log = fake_commands(tmp_path, healthy=False)
 
-    result = subprocess.run([SCRIPT], cwd=ROOT, env=env, text=True, capture_output=True)
+    result = subprocess.run([SCRIPT], cwd=ROOT, env=env, text=True, capture_output=True, check=False)
 
     assert result.returncode != 0
     commands = log.read_text()
@@ -93,7 +93,7 @@ def test_missing_rollback_snapshot_is_a_nonzero_failure_not_a_success_message(tm
 
     result = subprocess.run(
         [SCRIPT, "--remote-rollback", STAMP], cwd=ROOT, env=env,
-        text=True, capture_output=True,
+        text=True, capture_output=True, check=False,
     )
 
     assert result.returncode != 0
@@ -157,7 +157,7 @@ res_ari_model.so               Asterisk RESTful API module             0        
 
     result = subprocess.run(
         [SCRIPT, "--verify-ari-events-module"], cwd=ROOT, input=module_output,
-        text=True, capture_output=True,
+        text=True, capture_output=True, check=False,
     )
 
     assert result.returncode == 0, result.stderr
@@ -172,7 +172,7 @@ res_ari_events.so              Asterisk RESTful API module             0        
 
     result = subprocess.run(
         [SCRIPT, "--verify-ari-events-module"], cwd=ROOT, input=module_output,
-        text=True, capture_output=True,
+        text=True, capture_output=True, check=False,
     )
 
     assert result.returncode != 0

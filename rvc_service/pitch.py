@@ -38,9 +38,10 @@ def _yin_frame_f0(x: np.ndarray) -> float:
     tau_est = -1
     for tau in range(tau_min, tau_max + 1):
         if cmnd[tau] < THRESHOLD:
-            while tau + 1 <= tau_max and cmnd[tau + 1] < cmnd[tau]:
-                tau += 1
-            tau_est = tau
+            best = tau
+            while best + 1 <= tau_max and cmnd[best + 1] < cmnd[best]:
+                best += 1
+            tau_est = best
             break
     if tau_est == -1:
         tau_est = tau_min + int(np.argmin(cmnd[tau_min:tau_max + 1]))

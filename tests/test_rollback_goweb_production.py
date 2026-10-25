@@ -103,7 +103,7 @@ def fake_commands(tmp_path):
 def run_rollback(tmp_path, *, env_overrides=None):
     env, log = fake_commands(tmp_path)
     env.update(env_overrides or {})
-    result = subprocess.run(["bash", str(ROLLBACK), STAMP], env=env, text=True, capture_output=True)
+    result = subprocess.run(["bash", str(ROLLBACK), STAMP], env=env, text=True, capture_output=True, check=False)
     return result, log
 
 
@@ -113,7 +113,7 @@ def test_production_rollback_restores_snapshot_and_never_starts_legacy_http(tmp_
         destination.write_text("candidate state\n")
     env, log = fake_commands(tmp_path)
 
-    result = subprocess.run(["bash", str(ROLLBACK), STAMP], env=env, text=True, capture_output=True)
+    result = subprocess.run(["bash", str(ROLLBACK), STAMP], env=env, text=True, capture_output=True, check=False)
 
     assert result.returncode == 0, result.stderr
     assert "ROLLBACK_COMPLETE" in result.stdout

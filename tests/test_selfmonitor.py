@@ -172,7 +172,7 @@ def test_stasis_start_builds_snoop_and_two_bridges_in_order():
         assert len(session.injection.sent) == expected_frames
 
         await model.blocks.put(ConnectionError("rvc_down"))
-        with pytest.raises(BaseException):
+        with pytest.raises(ConnectionError):
             await asyncio.wait_for(pump, 2)
         assert model.closed
         assert ari.bridges == set()
@@ -194,14 +194,14 @@ def test_second_caller_gets_busy_while_echo_is_active():
         assert "channels/chan-2/hangup" in hangups
 
         await service.handle_destroyed("chan-1")
-        with pytest.raises(BaseException):
+        with pytest.raises(asyncio.CancelledError):
             await asyncio.wait_for(first_call, 2)
         # After teardown the next caller is accepted again.
         second_call = asyncio.create_task(service.handle_stasis_start("chan-3", "2014"))
         await asyncio.sleep(0.05)
         assert any(b == "selfmonitor-echo-chan-3" for b in ari.bridges)
         await service.handle_destroyed("chan-3")
-        with pytest.raises(BaseException):
+        with pytest.raises(asyncio.CancelledError):
             await asyncio.wait_for(second_call, 2)
 
     asyncio.run(scenario())

@@ -40,7 +40,7 @@ def test_selfmonitor_deploy_rejects_non_vm209_target_before_ssh(tmp_path):
         ["bash", SELFMONITOR_SCRIPT],
         env=os.environ | {"TARGET": "ubuntu@192.168.20.71", "PATH": f"{tmp_path}:{os.environ['PATH']}"},
         text=True,
-        capture_output=True,
+        capture_output=True, check=False,
     )
 
     assert result.returncode == 2

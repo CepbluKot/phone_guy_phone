@@ -33,7 +33,7 @@ def run_bootstrap(tmp_path, password_file, *, target=None):
         cwd=ROOT,
         env=env,
         text=True,
-        capture_output=True,
+        capture_output=True, check=False,
     )
     return result, log, received
 
@@ -73,7 +73,7 @@ def test_bootstrap_refuses_insecure_password_file_before_ssh(tmp_path):
         cwd=ROOT,
         env=env,
         text=True,
-        capture_output=True,
+        capture_output=True, check=False,
     )
 
     assert result.returncode == 2
@@ -94,7 +94,7 @@ def test_bootstrap_rejects_nonproduction_target_before_ssh(tmp_path):
         cwd=ROOT,
         env=env,
         text=True,
-        capture_output=True,
+        capture_output=True, check=False,
     )
 
     assert result.returncode == 2

@@ -40,7 +40,7 @@ def run_rollback(tmp_path, root, docker, **overrides):
         ["bash", str(ROLLBACK), STAMP],
         env=env,
         text=True,
-        capture_output=True,
+        capture_output=True, check=False,
     )
 
 

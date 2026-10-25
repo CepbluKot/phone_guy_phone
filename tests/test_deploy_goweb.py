@@ -29,7 +29,7 @@ def test_production_target_guard_runs_before_any_remote_command(tmp_path):
     env, log, _ = fake_ssh(tmp_path)
     env["DEPLOY_GOWEB_TARGET"] = "ubuntu@192.168.20.71"
 
-    result = subprocess.run([str(SCRIPT)], cwd=ROOT, env=env, text=True, capture_output=True)
+    result = subprocess.run([str(SCRIPT)], cwd=ROOT, env=env, text=True, capture_output=True, check=False)
 
     assert result.returncode == 2
     assert "must be ubuntu@192.168.20.70" in result.stderr
@@ -39,7 +39,7 @@ def test_production_target_guard_runs_before_any_remote_command(tmp_path):
 def test_manual_rollback_sends_exact_stamp_and_reviewed_helper_to_vm209(tmp_path):
     env, log, stdin_file = fake_ssh(tmp_path)
 
-    result = subprocess.run([str(SCRIPT), "rollback", STAMP], cwd=ROOT, env=env, text=True, capture_output=True)
+    result = subprocess.run([str(SCRIPT), "rollback", STAMP], cwd=ROOT, env=env, text=True, capture_output=True, check=False)
 
     assert result.returncode == 0, result.stderr
     assert "ubuntu@192.168.20.70 sudo bash -s -- " + STAMP in log.read_text()

@@ -41,7 +41,7 @@ def fake_commands(tmp_path, curl_succeeds):
 def test_rollout_stages_only_scoped_inputs_and_avoids_network_mutation(tmp_path):
     env, log = fake_commands(tmp_path, curl_succeeds=True)
 
-    result = subprocess.run([SCRIPT], cwd=ROOT, env=env, text=True, capture_output=True)
+    result = subprocess.run([SCRIPT], cwd=ROOT, env=env, text=True, capture_output=True, check=False)
 
     assert result.returncode == 0, result.stderr
     commands = log.read_text()
@@ -59,7 +59,7 @@ def test_rollout_stages_only_scoped_inputs_and_avoids_network_mutation(tmp_path)
 def test_failed_health_gate_executes_scoped_rollback(tmp_path):
     env, log = fake_commands(tmp_path, curl_succeeds=False)
 
-    result = subprocess.run([SCRIPT], cwd=ROOT, env=env, text=True, capture_output=True)
+    result = subprocess.run([SCRIPT], cwd=ROOT, env=env, text=True, capture_output=True, check=False)
 
     assert result.returncode != 0
     commands = log.read_text()
@@ -73,7 +73,7 @@ def test_rejects_an_unsafe_release_stamp_before_remote_commands(tmp_path):
     env, log = fake_commands(tmp_path, curl_succeeds=True)
     env["DEPLOY_RVC_STAMP"] = "../../wrong"
 
-    result = subprocess.run([SCRIPT], cwd=ROOT, env=env, text=True, capture_output=True)
+    result = subprocess.run([SCRIPT], cwd=ROOT, env=env, text=True, capture_output=True, check=False)
 
     assert result.returncode == 2
     assert "release stamp" in result.stderr
@@ -84,7 +84,7 @@ def test_rejects_a_syntactically_valid_unapproved_target_before_remote_commands(
     env, log = fake_commands(tmp_path, curl_succeeds=True)
     env["DEPLOY_RVC_TARGET"] = "ubuntu@192.168.20.71"
 
-    result = subprocess.run([SCRIPT], cwd=ROOT, env=env, text=True, capture_output=True)
+    result = subprocess.run([SCRIPT], cwd=ROOT, env=env, text=True, capture_output=True, check=False)
 
     assert result.returncode == 2
     assert "approved VM209" in result.stderr
@@ -103,7 +103,7 @@ def test_existing_read_only_venv_is_verified_without_writes(tmp_path):
     try:
         result = subprocess.run(
             [SCRIPT, "--verify-venv", str(lock), sys.executable],
-            cwd=ROOT, text=True, capture_output=True,
+            cwd=ROOT, text=True, capture_output=True, check=False,
         )
     finally:
         tmp_path.chmod(0o755)
@@ -194,7 +194,7 @@ def test_remote_rollback_body_restores_exact_trees_and_prior_states(tmp_path):
 
     result = subprocess.run(
         [SCRIPT, "--remote-rollback", STAMP], cwd=ROOT, env=env,
-        text=True, capture_output=True,
+        text=True, capture_output=True, check=False,
     )
 
     assert result.returncode == 0, result.stderr
@@ -218,7 +218,7 @@ def test_remote_rollback_body_reports_any_restore_or_validation_fault(tmp_path, 
 
     result = subprocess.run(
         [SCRIPT, "--remote-rollback", STAMP], cwd=ROOT, env=env,
-        text=True, capture_output=True,
+        text=True, capture_output=True, check=False,
     )
 
     assert result.returncode != 0
@@ -233,7 +233,7 @@ def test_manual_stamp_rollback_reports_ssh_failure_distinctly(tmp_path):
 
     result = subprocess.run(
         [SCRIPT, "rollback", STAMP], cwd=ROOT, env=env,
-        text=True, capture_output=True,
+        text=True, capture_output=True, check=False,
     )
 
     assert result.returncode != 0
