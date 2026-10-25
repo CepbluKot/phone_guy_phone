@@ -37,11 +37,11 @@ def test_public_transport_is_tls_with_expected_certificate_and_nat_addresses():
         "external_signaling_address=94.102.89.13",
         "external_signaling_port=5061",
         "external_media_address=94.102.89.13",
-        "local_net=192.168.20.0/24",
         "local_net=172.19.0.0/16",
     ):
         assert setting in tls
     assert "local_net=10.19.87.0/24" not in tls
+    assert "local_net=192.168.20.0/24" not in tls
 
 
 def test_static_endpoints_require_sdes_without_optimistic_fallback():
@@ -132,6 +132,7 @@ def test_vm_firewall_scopes_udp_sip_tls_and_rtp_to_trusted_private_sources():
     assert "--dport 8080 -j VOICE_INGRESS" in firewall
     assert "iptables -N VOICE_SIP_INGRESS" in firewall
     assert "--dport 5061" in firewall
+    assert "iptables -A VOICE_SIP_INGRESS -p tcp --dport 5061 -s 192.168.20.12 -j ACCEPT" in firewall
     sip_udp_allow_sources = re.findall(
         r"iptables -A VOICE_SIP_INGRESS -p udp --dport 5060 -s (\S+) -j ACCEPT",
         firewall,

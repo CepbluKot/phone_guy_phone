@@ -13,6 +13,7 @@ iptables -C DOCKER-USER -i eth0 -p tcp --dport 8080 -j VOICE_INGRESS 2>/dev/null
 # trusted home gateway. The gateway currently SNATs forwarded VPS traffic to
 # 192.168.20.12 before it reaches this host. RTP remains available to trusted
 # LAN/VPN clients and the VPS relay.
+# Direct LAN access to SIP TLS stays limited to the home router (it forwards from its LAN address) and the WireGuard VPS.
 iptables -N VOICE_SIP_INGRESS 2>/dev/null || true
 iptables -F VOICE_SIP_INGRESS
 iptables -A VOICE_SIP_INGRESS -p udp --dport 5060 -s 192.168.20.0/24 -j ACCEPT

@@ -47,11 +47,11 @@ def transport_section(text: str, name: str = "transport-wss") -> str:
             "external_signaling_port=5061",
             "external_media_address=94.102.89.13",
             "symmetric_transport=yes",
-            "local_net=192.168.20.0/24",
             "local_net=172.19.0.0/16",
         )
-        if "local_net=10.19.87.0/24" in block.splitlines():
-            raise ValueError("Internet TLS transport must not treat WireGuard as local")
+        forbidden_local_nets = {"local_net=10.19.87.0/24", "local_net=192.168.20.0/24"}
+        if forbidden_local_nets.intersection(block.splitlines()):
+            raise ValueError("Internet TLS transport must not treat SIP edge ingress as local")
     elif name == EXTENSION_1234_LEGACY_TRANSPORT:
         required = (
             "type=transport",

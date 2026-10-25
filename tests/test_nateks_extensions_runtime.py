@@ -143,6 +143,20 @@ def test_sync_rejects_a_partially_configured_nateks_peer(tmp_path):
         raise AssertionError("incomplete Nateks peer activated outbound routing")
 
 
+def test_sync_preserves_existing_twenty_character_nateks_secret(tmp_path):
+    runtime = tmp_path / "extensions.conf"
+    runtime.write_text("[phoneguy-sip]\nexten => _X.,1,Hangup()\n")
+    pstn = tmp_path / "nateks-pstn.conf"
+    make_active_pstn_config(pstn)
+    pstn.write_text(pstn.read_text().replace("0123456789abcdef0123456789abcdef", "0123456789abcdefghij"))
+
+    sync_runtime(runtime, ROOT / "conference/asterisk/extensions.conf", pstn)
+
+    rendered = runtime.read_text()
+    assert "_7XXXXXXXXXX" in rendered
+    assert "_8XXXXXXXXXX" in rendered
+
+
 def test_sync_rejects_a_weak_nateks_digest_secret(tmp_path):
     runtime = tmp_path / "extensions.conf"
     runtime.write_text("[phoneguy-sip]\nexten => _X.,1,Hangup()\n")
