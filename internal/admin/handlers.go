@@ -45,14 +45,6 @@ func NewHandler(store voiceconfig.RouteStore, password, origins string, logger *
 	return newHandler(store, password, origins, logger, authDisabled, nil, nil, nil, nil)
 }
 
-func NewHandlerWithMetrics(store voiceconfig.RouteStore, password, origins string, logger *log.Logger, authDisabled bool, metrics func() telemetry.TelemetrySnapshot, phoneStores ...*phonebook.Store) http.Handler {
-	var phones *phonebook.Store
-	if len(phoneStores) > 0 {
-		phones = phoneStores[0]
-	}
-	return newHandler(store, password, origins, logger, []bool{authDisabled}, metrics, phones, nil, nil)
-}
-
 // NewHandlerWithBrowserProfiles enables profile updates for currently active
 // softphones while keeping their settings separate from physical extensions.
 func NewHandlerWithBrowserProfiles(store voiceconfig.RouteStore, password, origins string, logger *log.Logger, authDisabled bool, metrics func() telemetry.TelemetrySnapshot, activeBrowser func(string) bool, phoneStores ...*phonebook.Store) http.Handler {

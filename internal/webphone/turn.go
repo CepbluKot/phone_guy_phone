@@ -73,18 +73,3 @@ func (i *TURNRESTCredentialIssuer) Issue() ([]ICEServer, error) {
 	credential := base64.StdEncoding.EncodeToString(mac.Sum(nil))
 	return []ICEServer{{URLs: []string{i.url}, Username: username, Credential: credential}}, nil
 }
-
-func TURNRESTCredentialValid(secret, username, credential string, now time.Time) bool {
-	parts := strings.Split(username, ":")
-	if len(parts) != 2 || parts[1] != "voice-phone" || len(secret) < 32 || credential == "" {
-		return false
-	}
-	var expiry int64
-	if _, err := fmt.Sscan(parts[0], &expiry); err != nil || expiry <= now.Unix() || expiry > now.Add(2*time.Hour+time.Minute).Unix() {
-		return false
-	}
-	mac := hmac.New(sha1.New, []byte(secret))
-	_, _ = mac.Write([]byte(username))
-	want := base64.StdEncoding.EncodeToString(mac.Sum(nil))
-	return hmac.Equal([]byte(want), []byte(credential))
-}

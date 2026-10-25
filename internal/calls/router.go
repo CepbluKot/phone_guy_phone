@@ -277,13 +277,6 @@ func (router *Router) ResolvePlaybackService(ctx context.Context, event ari.Even
 	return service, nil
 }
 
-func (router *Router) AcquireProcessingLease(ctx context.Context) (ProcessingLease, error) {
-	if router == nil {
-		return nil, ErrUnknownEndpoint
-	}
-	return router.gate.Acquire(ctx)
-}
-
 // Stasis arguments are written by the trusted dialplan as source=<PJSIP ID>
 // and peer=<PJSIP ID|conference>. Caller-ID is deliberately not used as an
 // authorization identity because it is caller-controlled.
