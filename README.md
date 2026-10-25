@@ -101,3 +101,23 @@ npm run build
 | [Маршрутизация голоса](docs/SIP_VOICE_ROUTING.md) | Как номеру телефона назначается обычный голос или Phone Guy |
 | [Публичный доступ](docs/PUBLIC_PHONE_ACCESS_PLAN.md) | Как устроен внешний доступ и какие у него ограничения |
 | [Заметки для разработчика](docs/HANDOFF.md) | Технические подробности для продолжения работы над проектом |
+
+## Репозитории GitLab (с 2026-10-24)
+
+Монорепо разделено на проекты группы `gitlab.com/phone-guy` (история сохранена, пути внутри проектов прежние):
+
+| Старый путь | Репозиторий |
+| --- | --- |
+| `cmd/`, `internal/`, `go.mod`, `Dockerfile.goweb` | `voice-web` |
+| `rvc_service/` | `rvc-service` |
+| `selfmonitor/` (+ `conference/{__init__,media,rvc}.py`) | `selfmonitor` |
+| `admin-ui/`, `web/`, `web-rt/`, Node-тесты | `frontend` |
+| `conference/asterisk/` | `asterisk-pbx` |
+| `deploy/`, `infra/`, `tests/` (интеграционные), CI-шаблоны | `deploy` |
+| `docs/`, `README`, `START_HERE`, `AGENTS.md` | `docs` |
+| `experiments/` | `experiments` |
+| `app/`, `conference/*.py`, корневые `Dockerfile`/`compose.yaml` | `legacy-voice-app` |
+
+Скрипты деплоя (`deploy/*.sh`) рассчитаны на раскладку монорепо. Рабочий способ запускать их из раздельных репозиториев: собрать эту раскладку
+командой `bash scripts/assemble-monorepo.sh /tmp/monorepo` (репозиторий `deploy`; её же использует CI-задача `monorepo-compat-tests`) и выполнять
+скрипты из собранного каталога. Образы собирает CI и публикует в Zot; выкат из Zot — см. `docs/OPERATIONS.md`.
