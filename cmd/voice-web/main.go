@@ -72,7 +72,7 @@ func run() error {
 	if routesPath == "" {
 		routesPath = "/etc/voice-changer/voice-routing.json"
 	}
-	configuredExtensions := []string{"1983", "1987", "1988", "2014"}
+	configuredExtensions := []string{"1234", "1987", "1988", "2014", "2015", "2016"}
 	routes, err := voiceconfig.Open(routesPath, configuredExtensions)
 	if err != nil {
 		return errors.New("route configuration unavailable")
@@ -406,7 +406,7 @@ func setupVoiceControl(routes *voiceconfig.Store, adminOrigins string, metrics *
 		_ = client.Close(context.Background())
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
-	router, err := calls.NewRouter(routes, []string{"1983", "1987", "1988", "2014"})
+	router, err := calls.NewRouter(routes, []string{"1234", "1987", "1988", "2014", "2015", "2016"})
 	if err != nil {
 		_ = client.Close(context.Background())
 		_ = mirrorClient.Close(context.Background())

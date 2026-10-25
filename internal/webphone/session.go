@@ -11,7 +11,7 @@ import (
 
 const (
 	HeartbeatInterval = 10 * time.Second
-	LeaseTimeout      = 30 * time.Second
+	LeaseTimeout      = 10 * time.Minute
 	browserSIPDomain  = "vm-voice-1.lan.awesomeio.ru"
 	publicSIPDomain   = "phone.awesomeio.ru"
 )
@@ -134,7 +134,7 @@ func (s *Sessions) claim(ctx context.Context, nickname, extension string, create
 	}{
 		{"auth", authID, map[string]string{"type": "auth", "auth_type": "userpass", "username": endpoint, "password": password}},
 		{"aor", aorID, map[string]string{"type": "aor", "max_contacts": "1", "remove_existing": "yes"}},
-		{"endpoint", endpoint, map[string]string{"type": "endpoint", "context": "phoneguy-sip", "disallow": "all", "allow": "alaw", "auth": authID, "aors": aorID, "transport": "transport-wss", "from_domain": sipDomain, "media_encryption": "dtls", "dtls_auto_generate_cert": "yes", "ice_support": "yes", "use_avpf": "yes", "rtcp_mux": "yes", "direct_media": "no", "force_rport": "yes", "rewrite_contact": "yes", "rtp_symmetric": "yes", "media_use_received_transport": "yes"}},
+		{"endpoint", endpoint, map[string]string{"type": "endpoint", "context": "phoneguy-sip", "disallow": "all", "allow": "g722,alaw", "auth": authID, "aors": aorID, "transport": "transport-wss", "from_domain": sipDomain, "media_encryption": "dtls", "dtls_auto_generate_cert": "yes", "ice_support": "yes", "use_avpf": "yes", "rtcp_mux": "yes", "direct_media": "no", "force_rport": "yes", "rewrite_contact": "yes", "rtp_symmetric": "yes", "media_use_received_transport": "yes"}},
 	}
 	for _, object := range objects {
 		if err := s.ari.PutDynamicPJSIP(ctx, object.kind, object.id, object.fields); err != nil {

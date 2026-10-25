@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "revision": 1,
   "people": [
-    { "nickname": "Alice", "extension": "1983" },
+    { "nickname": "Alice", "extension": "2016" },
     { "nickname": "Bob", "extension": "1988" }
   ]
 }

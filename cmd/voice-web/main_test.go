@@ -201,7 +201,7 @@ func TestServerUsesConfiguredListenAddress(t *testing.T) {
 	address := reservation.Addr().String()
 	_ = reservation.Close()
 	configPath := filepath.Join(t.TempDir(), "routes.json")
-	config := `{"schemaVersion":1,"revision":1,"extensions":{"1983":"original","1987":"original","1988":"original","2014":"original"}}`
+	config := `{"schemaVersion":1,"revision":1,"extensions":{"1234":"original","1987":"original","1988":"original","2014":"original","2015":"original","2016":"original"}}`
 	if err := os.WriteFile(configPath, []byte(config), 0o600); err != nil {
 		t.Fatal(err)
 	}

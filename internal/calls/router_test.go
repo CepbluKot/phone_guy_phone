@@ -17,7 +17,7 @@ func (store snapshotStore) Update(string, voiceconfig.Profile, uint64) (voicecon
 }
 
 func TestResolveEndpointsFromARIStasisIdentity(t *testing.T) {
-	allowed := map[string]struct{}{"4101": {}, "4103": {}, "4102": {}, "4104": {}, "1983": {}}
+	allowed := map[string]struct{}{"4101": {}, "4103": {}, "4102": {}, "4104": {}, "2016": {}}
 	tests := []struct {
 		name       string
 		channel    string
@@ -31,7 +31,7 @@ func TestResolveEndpointsFromARIStasisIdentity(t *testing.T) {
 		{name: "direct from configured phone", channel: "PJSIP/4101-00001", caller: "spoofable", args: []string{"source=4101", "peer=4102"}, wantSource: "4101", wantPeer: "4102"},
 		{name: "direct to configured phone", channel: "PJSIP/4102-00002", caller: "4101", args: []string{"source=4101", "peer=4102"}, wantSource: "4101", wantPeer: "4102"},
 		{name: "conference entry uses explicit caller identity", channel: "PJSIP/4103-00003", caller: "4103", args: []string{"source=4103", "peer=conference"}, wantSource: "4103", wantPeer: "conference"},
-		{name: "1900 callback flow is explicit", channel: "PJSIP/4101-00008", caller: "spoofable", args: []string{"source=4101", "peer=1983", "mode=callback-1900"}, wantSource: "4101", wantPeer: "1983", wantFlow: "callback-1900"},
+		{name: "1900 callback flow is explicit", channel: "PJSIP/4101-00008", caller: "spoofable", args: []string{"source=4101", "peer=2016", "mode=callback-1900"}, wantSource: "4101", wantPeer: "2016", wantFlow: "callback-1900"},
 		{name: "callback cannot change destination", channel: "PJSIP/4101-00009", caller: "4101", args: []string{"source=4101", "peer=4102", "mode=callback-1900"}, wantErr: ErrUnknownEndpoint},
 		{name: "unknown call mode rejected", channel: "PJSIP/4101-00010", caller: "4101", args: []string{"source=4101", "peer=4102", "mode=anything"}, wantErr: ErrUnknownEndpoint},
 		{name: "unmapped endpoint rejected", channel: "PJSIP/9999-00004", caller: "9999", args: []string{"source=9999", "peer=4102"}, wantErr: ErrUnknownEndpoint},
@@ -122,33 +122,33 @@ func TestBrowserProfileAppliesOnlyToBrowserEndpoint(t *testing.T) {
 
 func TestRouterRejectsConfiguredVirtualPlaceholdersAsCallTargets(t *testing.T) {
 	store := snapshotStore{snapshot: voiceconfig.RouteSnapshot{Revision: 1, Extensions: map[string]voiceconfig.Profile{
-		"1983": voiceconfig.ProfileOriginal,
+		"2016": voiceconfig.ProfileOriginal,
 		"1987": voiceconfig.ProfileOriginal,
 		"1988": voiceconfig.ProfileOriginal,
 		"2014": voiceconfig.ProfileOriginal,
 	}}}
-	router, err := NewRouter(store, []string{"1983", "1987", "1988", "2014"})
+	router, err := NewRouter(store, []string{"2016", "1987", "1988", "2014"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	router.SetPhysicalEndpointLookup(func() []string { return []string{"1983", "1988"} })
-	unassignedSource := ari.Event{Type: "StasisStart", Args: []string{"source=1987", "peer=1983"}}
+	router.SetPhysicalEndpointLookup(func() []string { return []string{"2016", "1988"} })
+	unassignedSource := ari.Event{Type: "StasisStart", Args: []string{"source=1987", "peer=2016"}}
 	unassignedSource.Channel.ID = "placeholder-channel"
 	unassignedSource.Channel.Name = "PJSIP/1987-0001"
 	if _, err := router.Resolve(context.Background(), unassignedSource); !errors.Is(err, ErrUnknownEndpoint) {
 		t.Fatalf("unassigned placeholder was allowed to originate a call: %v", err)
 	}
 	for _, target := range []string{"1987", "2014"} {
-		event := ari.Event{Type: "StasisStart", Args: []string{"source=1983", "peer=" + target}}
+		event := ari.Event{Type: "StasisStart", Args: []string{"source=2016", "peer=" + target}}
 		event.Channel.ID = "phone-channel"
-		event.Channel.Name = "PJSIP/1983-0001"
+		event.Channel.Name = "PJSIP/2016-0001"
 		if _, err := router.Resolve(context.Background(), event); !errors.Is(err, ErrUnknownEndpoint) {
 			t.Errorf("virtual placeholder %s was callable: %v", target, err)
 		}
 	}
-	event := ari.Event{Type: "StasisStart", Args: []string{"source=1983", "peer=1988"}}
+	event := ari.Event{Type: "StasisStart", Args: []string{"source=2016", "peer=1988"}}
 	event.Channel.ID = "phone-channel"
-	event.Channel.Name = "PJSIP/1983-0002"
+	event.Channel.Name = "PJSIP/2016-0002"
 	if _, err := router.Resolve(context.Background(), event); err != nil {
 		t.Fatalf("assigned physical phone target rejected: %v", err)
 	}

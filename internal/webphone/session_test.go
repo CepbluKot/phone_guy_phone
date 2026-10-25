@@ -102,6 +102,9 @@ func TestClaimReturnsTemporaryCredentialOnceAndDirectoryStaysSecretFree(t *testi
 	if got := a.endpointFields["from_domain"]; got != "vm-voice-1.lan.awesomeio.ru" {
 		t.Fatalf("browser endpoint From domain=%q; incoming SIP.js parser needs a routable DNS domain", got)
 	}
+	if got := a.endpointFields["allow"]; got != "g722,alaw" {
+		t.Fatalf("browser endpoint codecs=%q; expected wideband with telephone fallback", got)
+	}
 	entries := d.List(nil)
 	encoded, _ := json.Marshal(entries)
 	if string(encoded) == "" || contains(string(encoded), secret.Password) || contains(string(encoded), secret.Username) {

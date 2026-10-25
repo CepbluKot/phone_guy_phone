@@ -308,7 +308,7 @@ func resolveEndpointsWithBrowsers(event ari.Event, allowed map[string]struct{}, 
 	if (len(values) != 2 && len(values) != 3) || source == "" || peer == "" {
 		return endpoints{}, ErrUnknownEndpoint
 	}
-	if flow != "" && (flow != "callback-1900" || peer != "1983" || len(values) != 3) {
+	if flow != "" && (flow != "callback-1900" || peer != "2016" || len(values) != 3) {
 		return endpoints{}, ErrUnknownEndpoint
 	}
 	rawSource := source

@@ -13,7 +13,7 @@
     {
       "mac": "00:15:65:89:b3:85",
       "label": "Yealink model unverified",
-      "extension": "1983",
+      "extension": "2016",
       "lastSeenIp": "192.168.20.134",
       "lastSeenAt": "2026-09-25",
       "observation": "PJSIP contact and neighbor table; exact model unverified"

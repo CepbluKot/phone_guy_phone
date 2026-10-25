@@ -41,6 +41,7 @@ selfmonitor_was_active=
 selfmonitor_was_enabled=
 http_container_was_running=
 phonebook_was_present=
+webphone_was_present=legacy
 while IFS= read -r line || [ -n "$line" ]; do
   case "$line" in
     stamp=*) manifest_stamp=${line#stamp=} ;;
@@ -49,6 +50,7 @@ while IFS= read -r line || [ -n "$line" ]; do
     selfmonitor_was_enabled=*) selfmonitor_was_enabled=${line#selfmonitor_was_enabled=} ;;
     http_container_was_running=*) http_container_was_running=${line#http_container_was_running=} ;;
     phonebook_was_present=*) phonebook_was_present=${line#phonebook_was_present=} ;;
+    webphone_was_present=*) webphone_was_present=${line#webphone_was_present=} ;;
     *) echo "ROLLBACK_FAILED invalid production manifest" >&2; exit 1 ;;
   esac
 done < "$manifest"
@@ -56,7 +58,8 @@ if [[ "$manifest_stamp" != "$stamp" || ! "$conference_release" =~ ^[0-9]{8}T[0-9
     || "$selfmonitor_was_active" != active \
     || "$selfmonitor_was_enabled" != enabled \
     || "$http_container_was_running" != stopped \
-    || ( "$phonebook_was_present" != true && "$phonebook_was_present" != false ) ]]; then
+    || ( "$phonebook_was_present" != true && "$phonebook_was_present" != false ) \
+    || ( "$webphone_was_present" != true && "$webphone_was_present" != false && "$webphone_was_present" != legacy ) ]]; then
   echo "ROLLBACK_FAILED production snapshot does not match expected stopped-HTTP baseline" >&2
   exit 1
 fi
@@ -89,6 +92,11 @@ if { [ "$phonebook_was_present" = true ] && { [ ! -f "$backup/phonebook.json" ] 
   echo "ROLLBACK_FAILED phonebook snapshot does not match manifest" >&2
   exit 1
 fi
+if { [ "$webphone_was_present" = true ] && { [ ! -f "$backup/webphone-directory.json" ] || [ ! -s "$backup/webphone-directory-sha256" ]; }; } \
+    || { [ "$webphone_was_present" = false ] && [ ! -f "$backup/webphone-directory-absent" ]; }; then
+  echo "ROLLBACK_FAILED browser directory snapshot does not match manifest" >&2
+  exit 1
+fi
 
 echo "ROLLBACK_BEGIN stamp=$stamp"
 docker compose -p voice-go -f "$go_release/deploy/compose.goweb.yaml" --env-file "$go_release/.env" down --remove-orphans || failed=1
@@ -111,6 +119,11 @@ if [ "$phonebook_was_present" = true ]; then
 else
   rm -f -- "$(path /etc/voice-changer/phonebook.json)" || failed=1
 fi
+if [ "$webphone_was_present" = true ]; then
+  cp -a "$backup/webphone-directory.json" "$(path /etc/voice-changer/webphone-directory.json)" || failed=1
+elif [ "$webphone_was_present" = false ]; then
+  rm -f -- "$(path /etc/voice-changer/webphone-directory.json)" || failed=1
+fi
 
 if ! caddy validate --config "$caddy_live" || ! systemctl reload caddy; then
   echo "rollback: restored Caddy config failed validation or reload" >&2
@@ -127,6 +140,12 @@ if [ "$phonebook_was_present" = true ] \
     && { ! cmp -s "$backup/phonebook.json" "$(path /etc/voice-changer/phonebook.json)" \
       || ! printf '%s  %s\n' "$(cat "$backup/phonebook-sha256")" "$(path /etc/voice-changer/phonebook.json)" | sha256sum -c - >/dev/null; }; then
   echo "rollback: restored phonebook does not match the snapshot" >&2
+  failed=1
+fi
+if [ "$webphone_was_present" = true ] \
+    && { ! cmp -s "$backup/webphone-directory.json" "$(path /etc/voice-changer/webphone-directory.json)" \
+      || ! printf '%s  %s\n' "$(cat "$backup/webphone-directory-sha256")" "$(path /etc/voice-changer/webphone-directory.json)" | sha256sum -c - >/dev/null; }; then
+  echo "rollback: restored browser directory does not match the snapshot" >&2
   failed=1
 fi
 if ! printf '%s  %s\n' "$(cat "$backup/route-config-sha256")" "$(path /etc/voice-changer/voice-routing.json)" | sha256sum -c - >/dev/null \

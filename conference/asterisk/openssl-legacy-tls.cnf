@@ -1,0 +1,13 @@
+# OpenSSL applies this compatibility level only inside the Asterisk container.
+# PJSIP separately limits the public SIP transport to the configured cipher IDs.
+openssl_conf = openssl_init
+
+[openssl_init]
+ssl_conf = ssl_sect
+
+[ssl_sect]
+system_default = system_default_sect
+
+[system_default_sect]
+CipherString = DEFAULT:@SECLEVEL=0
+Options = UnsafeLegacyRenegotiation

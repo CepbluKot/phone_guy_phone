@@ -220,9 +220,9 @@ func TestControllerIgnoresInternalWebSocketMediaChannelStarts(t *testing.T) {
 func Test1900CallbackAdmitsFixedDestinationAndRingsBeforeAnswer(t *testing.T) {
 	store := snapshotStore{snapshot: voiceconfig.RouteSnapshot{Revision: 8, Extensions: map[string]voiceconfig.Profile{
 		"4101": voiceconfig.ProfileOriginal,
-		"1983": voiceconfig.ProfileOriginal,
+		"2016": voiceconfig.ProfileOriginal,
 	}}}
-	router, err := NewRouter(store, []string{"4101", "1983"})
+	router, err := NewRouter(store, []string{"4101", "2016"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +231,7 @@ func Test1900CallbackAdmitsFixedDestinationAndRingsBeforeAnswer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	event := ari.Event{Type: "StasisStart", App: "voice-control", Args: []string{"source=4101", "peer=1983", "mode=callback-1900"}}
+	event := ari.Event{Type: "StasisStart", App: "voice-control", Args: []string{"source=4101", "peer=2016", "mode=callback-1900"}}
 	event.Channel.ID = "callback-caller"
 	event.Channel.Name = "PJSIP/4101-00001"
 	if err := controller.HandleEvent(context.Background(), event); err != nil {
@@ -247,7 +247,7 @@ func Test1900CallbackAdmitsFixedDestinationAndRingsBeforeAnswer(t *testing.T) {
 	if actions := client.logSnapshot(); !reflect.DeepEqual(actions, []string{
 		"claim:callback-caller",
 		"bridge:" + call.main.ID(),
-		"originate:1983:" + call.peerID + ":call=" + call.id + ",role=peer,attempt=1:4101:30",
+		"originate:2016:" + call.peerID + ":call=" + call.id + ",role=peer,attempt=1:4101:30",
 		"ring:callback-caller",
 	}) {
 		t.Fatalf("callback setup actions=%v", actions)
@@ -338,8 +338,8 @@ func TestParallelRingIncludesActiveBrowserAndSelectsOneWinner(t *testing.T) {
 }
 
 func TestBrowserOnlyExtensionDoesNotOriginateMissingPhysicalEndpoint(t *testing.T) {
-	store := snapshotStore{snapshot: voiceconfig.RouteSnapshot{Revision: 2, Extensions: map[string]voiceconfig.Profile{"1983": voiceconfig.ProfileOriginal}}}
-	router, err := NewRouter(store, []string{"1983", "1988"})
+	store := snapshotStore{snapshot: voiceconfig.RouteSnapshot{Revision: 2, Extensions: map[string]voiceconfig.Profile{"2016": voiceconfig.ProfileOriginal}}}
+	router, err := NewRouter(store, []string{"2016", "1988"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -351,9 +351,9 @@ func TestBrowserOnlyExtensionDoesNotOriginateMissingPhysicalEndpoint(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	start := ari.Event{Type: "StasisStart", App: "voice-control", Args: []string{"source=1983", "peer=3454"}}
+	start := ari.Event{Type: "StasisStart", App: "voice-control", Args: []string{"source=2016", "peer=3454"}}
 	start.Channel.ID = "caller-browser-only"
-	start.Channel.Name = "PJSIP/1983-00001"
+	start.Channel.Name = "PJSIP/2016-00001"
 	if err := controller.HandleEvent(context.Background(), start); err != nil {
 		t.Fatal(err)
 	}
@@ -388,9 +388,9 @@ func firstCall(t *testing.T, controller *Controller) *managedCall {
 func Test1900CallbackPlaysBothLegacyAnnouncementsAndRetriesOnce(t *testing.T) {
 	store := snapshotStore{snapshot: voiceconfig.RouteSnapshot{Revision: 8, Extensions: map[string]voiceconfig.Profile{
 		"4101": voiceconfig.ProfileOriginal,
-		"1983": voiceconfig.ProfileOriginal,
+		"2016": voiceconfig.ProfileOriginal,
 	}}}
-	router, err := NewRouter(store, []string{"4101", "1983"})
+	router, err := NewRouter(store, []string{"4101", "2016"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -399,14 +399,14 @@ func Test1900CallbackPlaysBothLegacyAnnouncementsAndRetriesOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	start := ari.Event{Type: "StasisStart", App: "voice-control", Args: []string{"source=4101", "peer=1983", "mode=callback-1900"}}
+	start := ari.Event{Type: "StasisStart", App: "voice-control", Args: []string{"source=4101", "peer=2016", "mode=callback-1900"}}
 	start.Channel.ID = "callback-caller"
 	start.Channel.Name = "PJSIP/4101-00011"
 	if err := controller.HandleEvent(context.Background(), start); err != nil {
 		t.Fatal(err)
 	}
 	call := callbackCall(t, controller)
-	firstPeer := callbackPeerEvent(call, 1, "PJSIP/1983-00012")
+	firstPeer := callbackPeerEvent(call, 1, "PJSIP/2016-00012")
 	if err := controller.HandleEvent(context.Background(), firstPeer); err != nil {
 		t.Fatal(err)
 	}
@@ -431,10 +431,10 @@ func Test1900CallbackPlaysBothLegacyAnnouncementsAndRetriesOnce(t *testing.T) {
 	if len(controller.calls) != 1 || call.attempt != 2 || call.peerID == "" {
 		t.Fatalf("callback did not advance to its second dial: attempt=%d peer=%q", call.attempt, call.peerID)
 	}
-	if actions := client.logSnapshot(); !contains(actions, "originate:1983:"+call.peerID+":call="+call.id+",role=peer,attempt=2:4101:40") {
+	if actions := client.logSnapshot(); !contains(actions, "originate:2016:"+call.peerID+":call="+call.id+",role=peer,attempt=2:4101:40") {
 		t.Fatalf("second callback dial missing: %v", actions)
 	}
-	secondPeer := callbackPeerEvent(call, 2, "PJSIP/1983-00013")
+	secondPeer := callbackPeerEvent(call, 2, "PJSIP/2016-00013")
 	if err := controller.HandleEvent(context.Background(), secondPeer); err != nil {
 		t.Fatal(err)
 	}
@@ -460,9 +460,9 @@ func Test1900CallbackPlaysBothLegacyAnnouncementsAndRetriesOnce(t *testing.T) {
 func Test1900CallbackRetriesWhenFirstOutboundNeverAnswers(t *testing.T) {
 	store := snapshotStore{snapshot: voiceconfig.RouteSnapshot{Revision: 8, Extensions: map[string]voiceconfig.Profile{
 		"4101": voiceconfig.ProfileOriginal,
-		"1983": voiceconfig.ProfileOriginal,
+		"2016": voiceconfig.ProfileOriginal,
 	}}}
-	router, err := NewRouter(store, []string{"4101", "1983"})
+	router, err := NewRouter(store, []string{"4101", "2016"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -471,7 +471,7 @@ func Test1900CallbackRetriesWhenFirstOutboundNeverAnswers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	start := ari.Event{Type: "StasisStart", App: "voice-control", Args: []string{"source=4101", "peer=1983", "mode=callback-1900"}}
+	start := ari.Event{Type: "StasisStart", App: "voice-control", Args: []string{"source=4101", "peer=2016", "mode=callback-1900"}}
 	start.Channel.ID = "callback-caller"
 	start.Channel.Name = "PJSIP/4101-00021"
 	if err := controller.HandleEvent(context.Background(), start); err != nil {
@@ -490,7 +490,7 @@ func Test1900CallbackRetriesWhenFirstOutboundNeverAnswers(t *testing.T) {
 	if actions := client.logSnapshot(); contains(actions, "play:"+firstPeerID+":phoneguy-bot/fnaf1-night1-original") {
 		t.Fatalf("first announcement played despite no answer: %v", actions)
 	}
-	if actions := client.logSnapshot(); !contains(actions, "delete:"+firstPeerID) || !contains(actions, "originate:1983:"+call.peerID+":call="+call.id+",role=peer,attempt=2:4101:40") {
+	if actions := client.logSnapshot(); !contains(actions, "delete:"+firstPeerID) || !contains(actions, "originate:2016:"+call.peerID+":call="+call.id+",role=peer,attempt=2:4101:40") {
 		t.Fatalf("retry did not clean up and redial with the legacy second timeout: %v", actions)
 	}
 	if err := controller.Close(context.Background()); err != nil {
@@ -501,9 +501,9 @@ func Test1900CallbackRetriesWhenFirstOutboundNeverAnswers(t *testing.T) {
 func Test1900CallbackClosesCallWhenRetryCleanupFails(t *testing.T) {
 	store := snapshotStore{snapshot: voiceconfig.RouteSnapshot{Revision: 8, Extensions: map[string]voiceconfig.Profile{
 		"4101": voiceconfig.ProfileOriginal,
-		"1983": voiceconfig.ProfileOriginal,
+		"2016": voiceconfig.ProfileOriginal,
 	}}}
-	router, err := NewRouter(store, []string{"4101", "1983"})
+	router, err := NewRouter(store, []string{"4101", "2016"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -512,7 +512,7 @@ func Test1900CallbackClosesCallWhenRetryCleanupFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	start := ari.Event{Type: "StasisStart", App: "voice-control", Args: []string{"source=4101", "peer=1983", "mode=callback-1900"}}
+	start := ari.Event{Type: "StasisStart", App: "voice-control", Args: []string{"source=4101", "peer=2016", "mode=callback-1900"}}
 	start.Channel.ID = "callback-caller"
 	start.Channel.Name = "PJSIP/4101-00031"
 	if err := controller.HandleEvent(context.Background(), start); err != nil {
