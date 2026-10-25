@@ -179,7 +179,9 @@ def test_public_sip_edge_is_exact_and_rate_limited():
         assert forbidden not in rules
 
 
-def test_public_edge_install_has_a_backup_and_explicit_enable_gate():
+def test_public_edge_install_has_a_backup_and_enables_the_service_only_after_validation():
+    # Owner decision 2026-10-25: the installer enables and restarts the service itself, but only after the backup,
+    # the nft syntax check and the voice-sip-edge validate step have passed.
     installer = (ROOT / "deploy/install-sip-edge.sh").read_text()
     manager = (ROOT / "deploy/sip-edge/voice-sip-edge").read_text()
     unit = (ROOT / "deploy/voice-sip-edge.service").read_text()
